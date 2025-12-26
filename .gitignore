@@ -1,11 +1,4 @@
-
-benchmark/.sublime2Terminal.jl
-.vscode/settings.json
-*.jl~
-*.jl#
-benchmark/.tune.*
-*.mem
-File.sublime-build
-Project.sublime-workspace
-Source
+*.jl.cov
+*.jl.*.cov
+*.jl.mem
 Manifest.toml
