@@ -1,0 +1,8 @@
+[deps]
+Documenter = "e30172f5-a6a5-5a46-863b-614d45cd2de4"
+FixedEffects = "c8885935-8500-56a7-9867-7708b20db0eb"
+Regress = "0ccf13ad-a1f2-44b4-972b-15ef40764d74"
+
+[sources]
+FixedEffects = {rev = "master", url = "https://github.com/gragusa/FixedEffects.jl"}
+Regress = {path = ".."}

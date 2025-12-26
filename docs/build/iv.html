@@ -1,0 +1,159 @@
+<!DOCTYPE html>
+<html lang="en"><head><meta charset="UTF-8"/><meta name="viewport" content="width=device-width, initial-scale=1.0"/><title>IV Estimation · Regress.jl</title><meta name="title" content="IV Estimation · Regress.jl"/><meta property="og:title" content="IV Estimation · Regress.jl"/><meta property="twitter:title" content="IV Estimation · Regress.jl"/><meta name="description" content="Documentation for Regress.jl."/><meta property="og:description" content="Documentation for Regress.jl."/><meta property="twitter:description" content="Documentation for Regress.jl."/><meta property="og:url" content="https://gragusa.github.io/Regress.jl/iv.html"/><meta property="twitter:url" content="https://gragusa.github.io/Regress.jl/iv.html"/><link rel="canonical" href="https://gragusa.github.io/Regress.jl/iv.html"/><script data-outdated-warner src="assets/warner.js"></script><link href="https://cdnjs.cloudflare.com/ajax/libs/lato-font/3.0.0/css/lato-font.min.css" rel="stylesheet" type="text/css"/><link href="https://cdnjs.cloudflare.com/ajax/libs/juliamono/0.050/juliamono.min.css" rel="stylesheet" type="text/css"/><link href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.4.2/css/fontawesome.min.css" rel="stylesheet" type="text/css"/><link href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.4.2/css/solid.min.css" rel="stylesheet" type="text/css"/><link href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.4.2/css/brands.min.css" rel="stylesheet" type="text/css"/><link href="https://cdnjs.cloudflare.com/ajax/libs/KaTeX/0.16.8/katex.min.css" rel="stylesheet" type="text/css"/><script>documenterBaseURL="."</script><script src="https://cdnjs.cloudflare.com/ajax/libs/require.js/2.3.6/require.min.js" data-main="assets/documenter.js"></script><script src="search_index.js"></script><script src="siteinfo.js"></script><script src="../versions.js"></script><link class="docs-theme-link" rel="stylesheet" type="text/css" href="assets/themes/catppuccin-mocha.css" data-theme-name="catppuccin-mocha"/><link class="docs-theme-link" rel="stylesheet" type="text/css" href="assets/themes/catppuccin-macchiato.css" data-theme-name="catppuccin-macchiato"/><link class="docs-theme-link" rel="stylesheet" type="text/css" href="assets/themes/catppuccin-frappe.css" data-theme-name="catppuccin-frappe"/><link class="docs-theme-link" rel="stylesheet" type="text/css" href="assets/themes/catppuccin-latte.css" data-theme-name="catppuccin-latte"/><link class="docs-theme-link" rel="stylesheet" type="text/css" href="assets/themes/documenter-dark.css" data-theme-name="documenter-dark" data-theme-primary-dark/><link class="docs-theme-link" rel="stylesheet" type="text/css" href="assets/themes/documenter-light.css" data-theme-name="documenter-light" data-theme-primary/><script src="assets/themeswap.js"></script></head><body><div id="documenter"><nav class="docs-sidebar"><div class="docs-package-name"><span class="docs-autofit"><a href="index.html">Regress.jl</a></span></div><button class="docs-search-query input is-rounded is-small is-clickable my-2 mx-auto py-1 px-2" id="documenter-search-query">Search docs (Ctrl + /)</button><ul class="docs-menu"><li><a class="tocitem" href="index.html">Home</a></li><li><a class="tocitem" href="getting_started.html">Getting Started</a></li><li><span class="tocitem">User Guide</span><ul><li><a class="tocitem" href="ols.html">OLS Estimation</a></li><li class="is-active"><a class="tocitem" href="iv.html">IV Estimation</a><ul class="internal"><li><a class="tocitem" href="#Two-Stage-Least-Squares"><span>Two-Stage Least Squares</span></a></li><li><a class="tocitem" href="#First-Stage-Diagnostics"><span>First-Stage Diagnostics</span></a></li><li><a class="tocitem" href="#Updating-Variance-Estimators"><span>Updating Variance Estimators</span></a></li><li><a class="tocitem" href="#Example"><span>Example</span></a></li><li><a class="tocitem" href="#Available-Estimators"><span>Available Estimators</span></a></li><li><a class="tocitem" href="#K-Class-Estimators:-LIML,-Fuller,-KClass"><span>K-Class Estimators: LIML, Fuller, KClass</span></a></li><li><a class="tocitem" href="#Example:-LIML-with-Fixed-Effects-and-Many-Instruments"><span>Example: LIML with Fixed Effects and Many Instruments</span></a></li><li><a class="tocitem" href="#Combining-with-Fixed-Effects"><span>Combining with Fixed Effects</span></a></li></ul></li><li><a class="tocitem" href="fixed_effects.html">Fixed Effects</a></li><li><a class="tocitem" href="variance.html">Variance Estimation</a></li></ul></li><li><a class="tocitem" href="api.html">API Reference</a></li></ul><div class="docs-version-selector field has-addons"><div class="control"><span class="docs-label button is-static is-size-7">Version</span></div><div class="docs-selector control is-expanded"><div class="select is-fullwidth is-size-7"><select id="documenter-version-selector"></select></div></div></div></nav><div class="docs-main"><header class="docs-navbar"><a class="docs-sidebar-button docs-navbar-link fa-solid fa-bars is-hidden-desktop" id="documenter-sidebar-button" href="#"></a><nav class="breadcrumb"><ul class="is-hidden-mobile"><li><a class="is-disabled">User Guide</a></li><li class="is-active"><a href="iv.html">IV Estimation</a></li></ul><ul class="is-hidden-tablet"><li class="is-active"><a href="iv.html">IV Estimation</a></li></ul></nav><div class="docs-right"><a class="docs-navbar-link" href="https://github.com/gragusa/MetricsLinearModels.jl" title="View the repository on GitHub"><span class="docs-icon fa-brands"></span><span class="docs-label is-hidden-touch">GitHub</span></a><a class="docs-navbar-link" href="https://github.com/gragusa/MetricsLinearModels.jl/blob/master/docs/src/iv.md" title="Edit source on GitHub"><span class="docs-icon fa-solid"></span></a><a class="docs-settings-button docs-navbar-link fa-solid fa-gear" id="documenter-settings-button" href="#" title="Settings"></a><a class="docs-article-toggle-button fa-solid fa-chevron-up" id="documenter-article-toggle-button" href="javascript:;" title="Collapse all docstrings"></a></div></header><article class="content" id="documenter-page"><h1 id="IV-Estimation"><a class="docs-heading-anchor" href="#IV-Estimation">IV Estimation</a><a id="IV-Estimation-1"></a><a class="docs-heading-anchor-permalink" href="#IV-Estimation" title="Permalink"></a></h1><h2 id="Two-Stage-Least-Squares"><a class="docs-heading-anchor" href="#Two-Stage-Least-Squares">Two-Stage Least Squares</a><a id="Two-Stage-Least-Squares-1"></a><a class="docs-heading-anchor-permalink" href="#Two-Stage-Least-Squares" title="Permalink"></a></h2><p>The <code>iv()</code> function estimates instrumental variables models:</p><pre><code class="language-julia hljs">model = iv(TSLS(), df, @formula(y ~ x + (endo ~ z1 + z2)))</code></pre><h3 id="Formula-Syntax"><a class="docs-heading-anchor" href="#Formula-Syntax">Formula Syntax</a><a id="Formula-Syntax-1"></a><a class="docs-heading-anchor-permalink" href="#Formula-Syntax" title="Permalink"></a></h3><p>Use parentheses to specify the endogenous variable and its instruments:</p><pre><code class="language-julia hljs"># Single endogenous variable
+@formula(y ~ x + (endo ~ z1 + z2))
+
+# Multiple endogenous variables
+@formula(y ~ x + (endo1 + endo2 ~ z1 + z2 + z3))
+
+# With fixed effects
+@formula(y ~ x + (endo ~ z) + fe(firm))</code></pre><h3 id="Return-Type"><a class="docs-heading-anchor" href="#Return-Type">Return Type</a><a id="Return-Type-1"></a><a class="docs-heading-anchor-permalink" href="#Return-Type" title="Permalink"></a></h3><p>Returns an <code>IVEstimator{T, V}</code> where:</p><ul><li><code>T</code> is the numeric type (Float64 or Float32)</li><li><code>V</code> is the variance estimator type</li></ul><h2 id="First-Stage-Diagnostics"><a class="docs-heading-anchor" href="#First-Stage-Diagnostics">First-Stage Diagnostics</a><a id="First-Stage-Diagnostics-1"></a><a class="docs-heading-anchor-permalink" href="#First-Stage-Diagnostics" title="Permalink"></a></h2><p>Regress.jl automatically computes first-stage diagnostics for weak instrument detection.</p><h3 id="Joint-F-Statistic"><a class="docs-heading-anchor" href="#Joint-F-Statistic">Joint F-Statistic</a><a id="Joint-F-Statistic-1"></a><a class="docs-heading-anchor-permalink" href="#Joint-F-Statistic" title="Permalink"></a></h3><p>The Kleibergen-Paap rk Wald F-statistic tests all first-stage coefficients jointly:</p><pre><code class="language-julia hljs">model = iv(TSLS(), df, @formula(y ~ x + (endo ~ z1 + z2)))
+
+model.F_kp    # Joint first-stage F-statistic
+model.p_kp    # p-value</code></pre><h3 id="Per-Endogenous-F-Statistics"><a class="docs-heading-anchor" href="#Per-Endogenous-F-Statistics">Per-Endogenous F-Statistics</a><a id="Per-Endogenous-F-Statistics-1"></a><a class="docs-heading-anchor-permalink" href="#Per-Endogenous-F-Statistics" title="Permalink"></a></h3><p>For models with multiple endogenous variables, individual first-stage F-statistics are computed:</p><pre><code class="language-julia hljs">model.F_kp_per_endo   # Vector of F-statistics
+model.p_kp_per_endo   # Vector of p-values</code></pre><p>The output displays a table with weak instrument warnings (F &lt; 10):</p><pre><code class="nohighlight hljs">First-Stage F-Statistics (per endogenous variable):
+------------------------------------------------------------
+Endogenous                         F-stat      P-value  Weak?
+------------------------------------------------------------
+Price                             23.4567       0.0000
+NDI                                8.1234       0.0012   Yes
+------------------------------------------------------------
+Note: F &lt; 10 may indicate weak instruments (Stock-Yogo)</code></pre><h3 id="first_stage()-Function"><a class="docs-heading-anchor" href="#first_stage()-Function"><code>first_stage()</code> Function</a><a id="first_stage()-Function-1"></a><a class="docs-heading-anchor-permalink" href="#first_stage()-Function" title="Permalink"></a></h3><p>Extract first-stage diagnostics as a structured object:</p><pre><code class="language-julia hljs">fs = first_stage(model)
+
+fs.F_joint        # Joint F-statistic
+fs.p_joint        # p-value
+fs.F_per_endo     # Per-endogenous F-stats
+fs.p_per_endo     # Per-endogenous p-values
+fs.vcov_type      # Variance estimator name
+fs.n_instruments  # Number of excluded instruments
+fs.n_endogenous   # Number of endogenous variables</code></pre><p>Pretty print the diagnostics:</p><pre><code class="language-julia hljs">show(fs)</code></pre><h2 id="Updating-Variance-Estimators"><a class="docs-heading-anchor" href="#Updating-Variance-Estimators">Updating Variance Estimators</a><a id="Updating-Variance-Estimators-1"></a><a class="docs-heading-anchor-permalink" href="#Updating-Variance-Estimators" title="Permalink"></a></h2><p>The <code>+ vcov(...)</code> syntax works with IV models and recomputes all diagnostics:</p><pre><code class="language-julia hljs">model = iv(TSLS(), df, @formula(y ~ x + (endo ~ z1 + z2)))
+
+# Update to HC3 - recomputes first-stage F-stats
+model_hc3 = model + vcov(HC3())
+
+model_hc3.F_kp           # First-stage F with HC3
+model_hc3.F_kp_per_endo  # Per-endogenous F-stats with HC3</code></pre><h2 id="Example"><a class="docs-heading-anchor" href="#Example">Example</a><a id="Example-1"></a><a class="docs-heading-anchor-permalink" href="#Example" title="Permalink"></a></h2><pre><code class="language-julia hljs">using Regress, DataFrames
+
+# Simulate IV data
+n = 1000
+z1 = randn(n)
+z2 = randn(n)
+x = randn(n)
+endo = 0.5 * z1 + 0.5 * z2 + 0.3 * randn(n)  # Endogenous
+y = 1.0 + 2.0 * x + 3.0 * endo + randn(n)
+
+df = DataFrame(y = y, x = x, endo = endo, z1 = z1, z2 = z2)
+
+# TSLS estimation
+model = iv(TSLS(), df, @formula(y ~ x + (endo ~ z1 + z2)))
+
+# View results
+coeftable(model)
+
+# First-stage diagnostics
+fs = first_stage(model)
+println(&quot;First-stage F: &quot;, fs.F_joint)
+
+# Robust standard errors
+model_hc3 = model + vcov(HC3())
+coeftable(model_hc3)
+
+# First-stage with robust vcov
+fs_hc3 = first_stage(model_hc3)</code></pre><h2 id="Available-Estimators"><a class="docs-heading-anchor" href="#Available-Estimators">Available Estimators</a><a id="Available-Estimators-1"></a><a class="docs-heading-anchor-permalink" href="#Available-Estimators" title="Permalink"></a></h2><table><tr><th style="text-align: right">Estimator</th><th style="text-align: right">Description</th></tr><tr><td style="text-align: right"><code>TSLS()</code></td><td style="text-align: right">Two-Stage Least Squares</td></tr><tr><td style="text-align: right"><code>LIML()</code></td><td style="text-align: right">Limited Information Maximum Likelihood</td></tr><tr><td style="text-align: right"><code>Fuller(a)</code></td><td style="text-align: right">Fuller bias-corrected estimator (default a=1)</td></tr><tr><td style="text-align: right"><code>KClass(κ)</code></td><td style="text-align: right">Generic K-class estimator with user-specified κ</td></tr></table><h2 id="K-Class-Estimators:-LIML,-Fuller,-KClass"><a class="docs-heading-anchor" href="#K-Class-Estimators:-LIML,-Fuller,-KClass">K-Class Estimators: LIML, Fuller, KClass</a><a id="K-Class-Estimators:-LIML,-Fuller,-KClass-1"></a><a class="docs-heading-anchor-permalink" href="#K-Class-Estimators:-LIML,-Fuller,-KClass" title="Permalink"></a></h2><p>K-class estimators are a family of IV estimators indexed by a parameter κ:</p><ul><li>κ = 0: OLS (ignores endogeneity)</li><li>κ = 1: TSLS</li><li>κ = κ_LIML: Limited Information Maximum Likelihood</li></ul><h3 id="LIML"><a class="docs-heading-anchor" href="#LIML">LIML</a><a id="LIML-1"></a><a class="docs-heading-anchor-permalink" href="#LIML" title="Permalink"></a></h3><p>LIML is asymptotically more efficient than TSLS and more robust to weak instruments:</p><pre><code class="language-julia hljs">model = iv(LIML(), df, @formula(y ~ x + (endo ~ z1 + z2)))
+
+# Access the computed kappa
+model.postestimation.kappa  # Should be ≥ 1</code></pre><h3 id="Fuller"><a class="docs-heading-anchor" href="#Fuller">Fuller</a><a id="Fuller-1"></a><a class="docs-heading-anchor-permalink" href="#Fuller" title="Permalink"></a></h3><p>Fuller&#39;s modification reduces small-sample bias by subtracting a correction:</p><pre><code class="language-julia hljs"># Default a=1 (minimizes bias)
+model = iv(Fuller(), df, @formula(y ~ x + (endo ~ z1 + z2)))
+
+# Custom a parameter
+model = iv(Fuller(4.0), df, @formula(y ~ x + (endo ~ z1 + z2)))</code></pre><p>Fuller(1) is approximately unbiased. Fuller(4) minimizes MSE in some scenarios.</p><h3 id="KClass"><a class="docs-heading-anchor" href="#KClass">KClass</a><a id="KClass-1"></a><a class="docs-heading-anchor-permalink" href="#KClass" title="Permalink"></a></h3><p>For direct control over κ:</p><pre><code class="language-julia hljs"># Equivalent to TSLS
+model = iv(KClass(1.0), df, @formula(y ~ x + (endo ~ z1 + z2)))</code></pre><h3 id="Variance-Covariance-for-K-Class"><a class="docs-heading-anchor" href="#Variance-Covariance-for-K-Class">Variance-Covariance for K-Class</a><a id="Variance-Covariance-for-K-Class-1"></a><a class="docs-heading-anchor-permalink" href="#Variance-Covariance-for-K-Class" title="Permalink"></a></h3><p>All robust variance estimators work with K-class:</p><pre><code class="language-julia hljs"># Default (HC1)
+vcov(model)
+
+# Heteroskedasticity-robust
+vcov(HC3(), model)
+
+# Cluster-robust (requires save_cluster during fit)
+model = iv(LIML(), df, @formula(y ~ (endo ~ z1 + z2)), save_cluster=:firm)
+vcov(CR1(:firm), model)
+
+# Using + operator
+model_robust = model + vcov(HC3())
+model_clustered = model + vcov(CR1(:firm))</code></pre><h2 id="Example:-LIML-with-Fixed-Effects-and-Many-Instruments"><a class="docs-heading-anchor" href="#Example:-LIML-with-Fixed-Effects-and-Many-Instruments">Example: LIML with Fixed Effects and Many Instruments</a><a id="Example:-LIML-with-Fixed-Effects-and-Many-Instruments-1"></a><a class="docs-heading-anchor-permalink" href="#Example:-LIML-with-Fixed-Effects-and-Many-Instruments" title="Permalink"></a></h2><p>A complete example with one endogenous variable, multiple instruments, and fixed effects:</p><pre><code class="language-julia hljs">using Regress, DataFrames, StableRNGs
+
+# Simulate panel data with endogeneity
+rng = StableRNG(123)
+n = 1000
+n_firms = 100
+
+# Firm fixed effects
+firm_id = repeat(1:n_firms, inner=n ÷ n_firms)
+firm_effect = randn(rng, n_firms)[firm_id]
+
+# Multiple instruments (e.g., Bartik-style shifters)
+z1 = randn(rng, n)  # Instrument 1
+z2 = randn(rng, n)  # Instrument 2
+z3 = randn(rng, n)  # Instrument 3
+z4 = randn(rng, n)  # Instrument 4
+
+# Exogenous controls
+x1 = randn(rng, n)
+x2 = randn(rng, n)
+
+# Endogenous variable (correlated with error)
+e = randn(rng, n)
+u = 0.5 .* e .+ randn(rng, n)
+endo = 0.3 .* z1 .+ 0.25 .* z2 .+ 0.2 .* z3 .+ 0.15 .* z4 .+ u
+
+# Outcome
+y = 2.0 .* endo .+ 1.0 .* x1 .+ 0.5 .* x2 .+ firm_effect .+ e
+
+df = DataFrame(
+    y = y, endo = endo, x1 = x1, x2 = x2,
+    z1 = z1, z2 = z2, z3 = z3, z4 = z4,
+    firm_id = firm_id
+)
+
+# LIML with fixed effects and 4 instruments
+model_liml = iv(LIML(), df,
+    @formula(y ~ x1 + x2 + (endo ~ z1 + z2 + z3 + z4) + fe(firm_id)))
+
+# View coefficients
+coeftable(model_liml)
+
+# Check LIML kappa (should be close to 1 with strong instruments)
+println(&quot;LIML κ = &quot;, model_liml.postestimation.kappa)
+
+# Compare with TSLS
+model_tsls = iv(TSLS(), df,
+    @formula(y ~ x1 + x2 + (endo ~ z1 + z2 + z3 + z4) + fe(firm_id)))
+
+# Coefficients should be similar but not identical
+println(&quot;LIML coef: &quot;, coef(model_liml))
+println(&quot;TSLS coef: &quot;, coef(model_tsls))
+
+# Fuller for reduced bias
+model_fuller = iv(Fuller(), df,
+    @formula(y ~ x1 + x2 + (endo ~ z1 + z2 + z3 + z4) + fe(firm_id)))
+
+# With cluster-robust standard errors
+model_liml_cluster = iv(LIML(), df,
+    @formula(y ~ x1 + x2 + (endo ~ z1 + z2 + z3 + z4) + fe(firm_id)),
+    save_cluster = :firm_id)
+
+model_clustered = model_liml_cluster + vcov(CR1(:firm_id))
+coeftable(model_clustered)</code></pre><h3 id="Comparing-Estimators"><a class="docs-heading-anchor" href="#Comparing-Estimators">Comparing Estimators</a><a id="Comparing-Estimators-1"></a><a class="docs-heading-anchor-permalink" href="#Comparing-Estimators" title="Permalink"></a></h3><pre><code class="language-julia hljs"># All three estimators on the same data
+df = DataFrame(y=y, x=x, endo=endo, z1=z1, z2=z2, z3=z3)
+
+m_tsls = iv(TSLS(), df, @formula(y ~ x + (endo ~ z1 + z2 + z3)))
+m_liml = iv(LIML(), df, @formula(y ~ x + (endo ~ z1 + z2 + z3)))
+m_fuller = iv(Fuller(), df, @formula(y ~ x + (endo ~ z1 + z2 + z3)))
+
+# Compare point estimates
+println(&quot;TSLS:   &quot;, coef(m_tsls))
+println(&quot;LIML:   &quot;, coef(m_liml))
+println(&quot;Fuller: &quot;, coef(m_fuller))
+
+# LIML and Fuller should be very close with strong instruments
+# Fuller&#39;s kappa is slightly smaller than LIML&#39;s
+println(&quot;LIML κ:   &quot;, m_liml.postestimation.kappa)
+println(&quot;Fuller κ: &quot;, m_fuller.postestimation.kappa)  # κ_LIML - 1/(n-L-p)</code></pre><h3 id="When-to-Use-Each-Estimator"><a class="docs-heading-anchor" href="#When-to-Use-Each-Estimator">When to Use Each Estimator</a><a id="When-to-Use-Each-Estimator-1"></a><a class="docs-heading-anchor-permalink" href="#When-to-Use-Each-Estimator" title="Permalink"></a></h3><table><tr><th style="text-align: right">Scenario</th><th style="text-align: right">Recommended Estimator</th></tr><tr><td style="text-align: right">Strong instruments (F &gt; 10)</td><td style="text-align: right">TSLS or LIML (similar results)</td></tr><tr><td style="text-align: right">Moderate instruments (F ∈ [5, 10])</td><td style="text-align: right">LIML or Fuller(1)</td></tr><tr><td style="text-align: right">Many instruments</td><td style="text-align: right">LIML (more robust)</td></tr><tr><td style="text-align: right">Finite-sample bias concerns</td><td style="text-align: right">Fuller(1) or Fuller(4)</td></tr><tr><td style="text-align: right">Exact-identification</td><td style="text-align: right">TSLS = LIML (identical)</td></tr></table><h2 id="Combining-with-Fixed-Effects"><a class="docs-heading-anchor" href="#Combining-with-Fixed-Effects">Combining with Fixed Effects</a><a id="Combining-with-Fixed-Effects-1"></a><a class="docs-heading-anchor-permalink" href="#Combining-with-Fixed-Effects" title="Permalink"></a></h2><p>IV estimation works seamlessly with fixed effects:</p><pre><code class="language-julia hljs">model = iv(TSLS(), df, @formula(y ~ x + (endo ~ z) + fe(firm) + fe(year)))</code></pre><p>Fixed effects are partialed out from all variables (y, x, endo, z) before IV estimation.</p></article><nav class="docs-footer"><a class="docs-footer-prevpage" href="ols.html">« OLS Estimation</a><a class="docs-footer-nextpage" href="fixed_effects.html">Fixed Effects »</a><div class="flexbox-break"></div><p class="footer-message">Powered by <a href="https://github.com/JuliaDocs/Documenter.jl">Documenter.jl</a> and the <a href="https://julialang.org/">Julia Programming Language</a>.</p></nav></div><div class="modal" id="documenter-settings"><div class="modal-background"></div><div class="modal-card"><header class="modal-card-head"><p class="modal-card-title">Settings</p><button class="delete"></button></header><section class="modal-card-body"><p><label class="label">Theme</label><div class="select"><select id="documenter-themepicker"><option value="auto">Automatic (OS)</option><option value="documenter-light">documenter-light</option><option value="documenter-dark">documenter-dark</option><option value="catppuccin-latte">catppuccin-latte</option><option value="catppuccin-frappe">catppuccin-frappe</option><option value="catppuccin-macchiato">catppuccin-macchiato</option><option value="catppuccin-mocha">catppuccin-mocha</option></select></div></p><hr/><p>This document was generated with <a href="https://github.com/JuliaDocs/Documenter.jl">Documenter.jl</a> version 1.16.1 on <span class="colophon-date" title="Wednesday 24 December 2025 23:55">Wednesday 24 December 2025</span>. Using Julia version 1.12.2.</p></section><footer class="modal-card-foot"></footer></div></div></div></body></html>
