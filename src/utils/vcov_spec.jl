@@ -52,7 +52,7 @@ model_cr = ols(df, @formula(y ~ x), save_cluster = :firm)
 model_cr1 = model_cr + vcov(CR1(:firm))
 ```
 
-See also: [`ModelWithVcov`](@ref)
+See also: [`OLSEstimator`](@ref), [`IVEstimator`](@ref)
 """
 StatsBase.vcov(v::CovarianceMatrices.AbstractAsymptoticVarianceEstimator) = VcovSpec(v)
 

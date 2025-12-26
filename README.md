@@ -71,8 +71,8 @@ model_hc3.F              # Robust Wald F-statistic
 model_hc3.p              # p-value of F-statistic
 ```
 
-The `+` operator returns a `ModelWithVcov` wrapper that contains:
-- The original model
+The `+` operator returns a new model of the same type (`OLSEstimator` or `IVEstimator`) with the updated variance estimator. The returned model has:
+- The same underlying data and coefficients
 - Precomputed vcov matrix, standard errors, t-statistics, and p-values
 - Robust Wald F-statistic for joint significance
 
@@ -192,7 +192,6 @@ Instruments: 2 excluded, 1 endogenous
 |------|-------------|
 | `OLSEstimator` | Fitted OLS model |
 | `IVEstimator` | Fitted IV model |
-| `ModelWithVcov` | Model wrapper with precomputed vcov statistics |
 | `FirstStageResult` | First-stage diagnostics container |
 | `TSLS` | Two-Stage Least Squares estimator |
 | `LIML` | Limited Information Maximum Likelihood estimator |
