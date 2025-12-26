@@ -48,11 +48,11 @@ For k endogenous variables, solves the (k+1) × (k+1) eigenvalue problem:
 - kappa = min(eigenvalues of M1 * v = kappa * M2 * v)
 """
 function _liml_kappa(
-    y::AbstractVector{T},
-    Xendo::AbstractVecOrMat{T},
-    Z::AbstractMatrix{T},
-    Xexo::AbstractMatrix{T}
-) where T
+        y::AbstractVector{T},
+        Xendo::AbstractVecOrMat{T},
+        Z::AbstractMatrix{T},
+        Xexo::AbstractMatrix{T}
+) where {T}
     # Handle single endogenous as matrix
     Xendo_mat = Xendo isa AbstractVector ? reshape(Xendo, :, 1) : Xendo
 
@@ -111,12 +111,12 @@ where:
 - `Adj::Matrix{T}`: W - k*W_res - for vcov meat (K-class adjustment matrix)
 """
 function _kclass_fit(
-    y::AbstractVector{T},
-    Xendo::AbstractVecOrMat{T},
-    Z::AbstractMatrix{T},
-    Xexo::AbstractMatrix{T},
-    kappa::T
-) where T
+        y::AbstractVector{T},
+        Xendo::AbstractVecOrMat{T},
+        Z::AbstractMatrix{T},
+        Xexo::AbstractMatrix{T},
+        kappa::T
+) where {T}
     # Handle single endogenous as matrix
     Xendo_mat = Xendo isa AbstractVector ? reshape(Xendo, :, 1) : Xendo
 

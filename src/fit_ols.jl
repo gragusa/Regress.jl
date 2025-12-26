@@ -283,7 +283,8 @@ function fit_ols(df,
 
     # Compute robust F-statistic (Wald test) using vcov
     has_int = data_prep.has_intercept
-    F_stat_robust, p_val_robust = compute_robust_fstat(
+    F_stat_robust,
+    p_val_robust = compute_robust_fstat(
         coef_vec, vcov_matrix, has_int, dof_residual
     )
 

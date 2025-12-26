@@ -838,17 +838,15 @@ function _estimator_name(m::IVEstimator)
 end
 
 function top(m::IVEstimator)
-    out = [
-            "Estimator" _estimator_name(m);
-            "Number of obs" sprint(show, nobs(m), context = :compact => true);
-            "Converged" m.converged;
-            "dof (model)" sprint(show, dof(m), context = :compact => true);
-            "dof (residuals)" sprint(show, dof_residual(m), context = :compact => true);
-            "R²" @sprintf("%.3f",r2(m));
-            "R² adjusted" @sprintf("%.3f",adjr2(m));
-            "F-statistic" sprint(show, m.F, context = :compact => true);
-            "P-value" @sprintf("%.3f",m.p);
-            ]
+    out = ["Estimator" _estimator_name(m);
+           "Number of obs" sprint(show, nobs(m), context = :compact => true);
+           "Converged" m.converged;
+           "dof (model)" sprint(show, dof(m), context = :compact => true);
+           "dof (residuals)" sprint(show, dof_residual(m), context = :compact => true);
+           "R²" @sprintf("%.3f", r2(m));
+           "R² adjusted" @sprintf("%.3f", adjr2(m));
+           "F-statistic" sprint(show, m.F, context = :compact => true);
+           "P-value" @sprintf("%.3f", m.p);]
 
     # Show kappa for K-class estimators
     if !isnothing(m.postestimation) && !isnothing(m.postestimation.kappa)
@@ -857,10 +855,8 @@ function top(m::IVEstimator)
 
     # Always show first-stage diagnostics for IV models (joint Kleibergen-Paap)
     out = vcat(out,
-        [
-            "F (1st stage, joint)" sprint(show, m.F_kp, context = :compact => true);
-            "P (1st stage, joint)" @sprintf("%.3f",m.p_kp);
-        ])
+        ["F (1st stage, joint)" sprint(show, m.F_kp, context = :compact => true);
+         "P (1st stage, joint)" @sprintf("%.3f", m.p_kp);])
     if has_fe(m)
         out = vcat(out,
             ["R² within" @sprintf("%.3f", m.r2_within);
@@ -992,22 +988,26 @@ end
 Resolve CR estimator with symbols to CR estimator with actual cluster vectors.
 For non-CR or CR with actual data, returns vcov_type unchanged.
 """
-function _resolve_cr_vcov(vcov_type::CovarianceMatrices.CR0{T}, m::IVEstimator) where T<:Tuple{Vararg{Symbol}}
+function _resolve_cr_vcov(vcov_type::CovarianceMatrices.CR0{T},
+        m::IVEstimator) where {T <: Tuple{Vararg{Symbol}}}
     cluster_vecs = _lookup_cluster_vecs_iv(vcov_type.g, m)
     return CovarianceMatrices.CR0(cluster_vecs)
 end
 
-function _resolve_cr_vcov(vcov_type::CovarianceMatrices.CR1{T}, m::IVEstimator) where T<:Tuple{Vararg{Symbol}}
+function _resolve_cr_vcov(vcov_type::CovarianceMatrices.CR1{T},
+        m::IVEstimator) where {T <: Tuple{Vararg{Symbol}}}
     cluster_vecs = _lookup_cluster_vecs_iv(vcov_type.g, m)
     return CovarianceMatrices.CR1(cluster_vecs)
 end
 
-function _resolve_cr_vcov(vcov_type::CovarianceMatrices.CR2{T}, m::IVEstimator) where T<:Tuple{Vararg{Symbol}}
+function _resolve_cr_vcov(vcov_type::CovarianceMatrices.CR2{T},
+        m::IVEstimator) where {T <: Tuple{Vararg{Symbol}}}
     cluster_vecs = _lookup_cluster_vecs_iv(vcov_type.g, m)
     return CovarianceMatrices.CR2(cluster_vecs)
 end
 
-function _resolve_cr_vcov(vcov_type::CovarianceMatrices.CR3{T}, m::IVEstimator) where T<:Tuple{Vararg{Symbol}}
+function _resolve_cr_vcov(vcov_type::CovarianceMatrices.CR3{T},
+        m::IVEstimator) where {T <: Tuple{Vararg{Symbol}}}
     cluster_vecs = _lookup_cluster_vecs_iv(vcov_type.g, m)
     return CovarianceMatrices.CR3(cluster_vecs)
 end
@@ -1024,7 +1024,7 @@ Requires model to have stored first-stage data.
 # Returns
 - `(F_kp, p_kp)`: First-stage F-statistic and p-value with the new vcov
 """
-function recompute_first_stage_fstat(m::IVEstimator{T}, vcov_type) where T
+function recompute_first_stage_fstat(m::IVEstimator{T}, vcov_type) where {T}
     pe = m.postestimation
     isnothing(pe) && return T(NaN), T(NaN)
     isnothing(pe.first_stage_data) && return T(NaN), T(NaN)
@@ -1049,7 +1049,7 @@ Recompute per-endogenous F-statistics using a different vcov estimator.
 # Returns
 - `(F_stats, p_values)`: Vectors of F-statistics and p-values per endogenous variable
 """
-function recompute_per_endogenous_fstats(m::IVEstimator{T}, vcov_type) where T
+function recompute_per_endogenous_fstats(m::IVEstimator{T}, vcov_type) where {T}
     pe = m.postestimation
     isnothing(pe) && return T[], T[]
     isnothing(pe.first_stage_data) && return T[], T[]
@@ -1170,7 +1170,8 @@ fs.F_per_endo        # Per-endogenous F-stats
 See also: [`FirstStageResult`](@ref)
 """
 function first_stage(m::IVEstimator{T, V}) where {T, V}
-    isnothing(m.postestimation) && error("Model does not have post-estimation data stored. Fit with save=true.")
+    isnothing(m.postestimation) &&
+        error("Model does not have post-estimation data stored. Fit with save=true.")
     isnothing(m.postestimation.first_stage_data) && error("First-stage data not available.")
 
     fsd = m.postestimation.first_stage_data
@@ -1196,7 +1197,7 @@ end
 ##
 ##############################################################################
 
-function Base.show(io::IO, fs::FirstStageResult{T}) where T
+function Base.show(io::IO, fs::FirstStageResult{T}) where {T}
     # Header
     println(io, "First-Stage Diagnostics ($(fs.vcov_type))")
     println(io, repeat('=', 60))
@@ -1214,7 +1215,7 @@ function Base.show(io::IO, fs::FirstStageResult{T}) where T
     for (j, name) in enumerate(fs.endogenous_names)
         display_name = length(name) > 28 ? name[1:25] * "..." : name
         @printf(io, "%-30s %14.4f %14.4f\n",
-                display_name, fs.F_per_endo[j], fs.p_per_endo[j])
+            display_name, fs.F_per_endo[j], fs.p_per_endo[j])
     end
 
     println(io, repeat('-', 60))

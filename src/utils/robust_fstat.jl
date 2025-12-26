@@ -29,11 +29,11 @@ number of restrictions (coefficients being tested).
 - Returns (NaN, NaN) if no coefficients can be tested or if vcov is singular
 """
 function compute_robust_fstat(
-    coef::Vector{T},
-    vcov_matrix::AbstractMatrix{T},
-    has_intercept::Bool,
-    dof_residual::Int
-) where T <: AbstractFloat
+        coef::Vector{T},
+        vcov_matrix::AbstractMatrix{T},
+        has_intercept::Bool,
+        dof_residual::Int
+) where {T <: AbstractFloat}
     k = length(coef)
 
     # Identify coefficients to test (all non-intercept, non-NaN)
@@ -78,7 +78,7 @@ Compute robust F-statistic for a fitted regression model.
 
 Extracts coefficients, intercept status, and degrees of freedom from the model.
 """
-function compute_robust_fstat(m::StatsAPI.RegressionModel, vcov_matrix::AbstractMatrix{T}) where T
+function compute_robust_fstat(m::StatsAPI.RegressionModel, vcov_matrix::AbstractMatrix{T}) where {T}
     cc = coef(m)
     has_int = hasintercept(formula(m))
     dof_res = dof_residual(m)

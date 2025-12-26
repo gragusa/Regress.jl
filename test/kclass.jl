@@ -12,14 +12,14 @@ using StatsBase: coef, vcov
 using CovarianceMatrices: HC1, HC3, CR1
 
 # Helper to create test data
-function create_test_data(n=500; rng=StableRNG(42))
+function create_test_data(n = 500; rng = StableRNG(42))
     z1 = randn(rng, n)
     z2 = randn(rng, n)
     e = randn(rng, n)
     u = 0.5 .* e .+ randn(rng, n)
     x = 0.5 .* z1 .+ 0.3 .* z2 .+ u
     y = 2.0 .* x .+ 1.0 .+ e
-    DataFrame(y=y, x=x, z1=z1, z2=z2)
+    DataFrame(y = y, x = x, z1 = z1, z2 = z2)
 end
 
 @testset "LIML basic functionality" begin
@@ -86,16 +86,16 @@ end
     n = 500
     z1 = randn(rng, n)
     z2 = randn(rng, n)
-    cluster = repeat(1:50, inner=10)
+    cluster = repeat(1:50, inner = 10)
     e = randn(rng, n)
     u = 0.5 .* e .+ randn(rng, n)
     x = 0.5 .* z1 .+ 0.3 .* z2 .+ u
     y = 2.0 .* x .+ 1.0 .+ e
 
-    df = DataFrame(y=y, x=x, z1=z1, z2=z2, cluster=cluster)
+    df = DataFrame(y = y, x = x, z1 = z1, z2 = z2, cluster = cluster)
 
     # Fit with saved cluster variable
-    m = iv(LIML(), df, @formula(y ~ (x ~ z1 + z2)), save_cluster=:cluster)
+    m = iv(LIML(), df, @formula(y ~ (x ~ z1 + z2)), save_cluster = :cluster)
 
     # Test cluster-robust vcov using symbol
     V_cr = vcov(CR1(:cluster), m)
@@ -120,7 +120,7 @@ end
     x2 = 0.3 .* z2 .+ 0.4 .* z3 .+ u2
     y = 1.5 .* x1 .+ 0.5 .* x2 .+ 1.0 .+ e
 
-    df = DataFrame(y=y, x1=x1, x2=x2, z1=z1, z2=z2, z3=z3)
+    df = DataFrame(y = y, x1 = x1, x2 = x2, z1 = z1, z2 = z2, z3 = z3)
 
     # Test LIML with 2 endogenous variables
     m = iv(LIML(), df, @formula(y ~ (x1 + x2 ~ z1 + z2 + z3)))
@@ -135,14 +135,14 @@ end
     n = 500
     z1 = randn(rng, n)
     z2 = randn(rng, n)
-    fe_id = repeat(1:50, inner=10)
+    fe_id = repeat(1:50, inner = 10)
     fe_effect = randn(rng, 50)[fe_id]
     e = randn(rng, n)
     u = 0.5 .* e .+ randn(rng, n)
     x = 0.5 .* z1 .+ 0.3 .* z2 .+ u
     y = 2.0 .* x .+ fe_effect .+ e
 
-    df = DataFrame(y=y, x=x, z1=z1, z2=z2, fe_id=fe_id)
+    df = DataFrame(y = y, x = x, z1 = z1, z2 = z2, fe_id = fe_id)
 
     # Test LIML with fixed effects
     m = iv(LIML(), df, @formula(y ~ (x ~ z1 + z2) + fe(fe_id)))
