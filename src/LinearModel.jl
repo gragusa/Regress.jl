@@ -657,23 +657,23 @@ function Base.show(io::IO, ::MIME"text/html", m::OLSEstimator)
     colnms = ct.colnms
 
     # Start table
-    html_table_start(io; class="regress-table regress-ols", caption=string(typeof(m)))
+    html_table_start(io; class = "regress-table regress-ols", caption = string(typeof(m)))
 
     # Summary statistics section
     ctop = top(m)
-    html_thead_start(io; class="regress-summary")
+    html_thead_start(io; class = "regress-summary")
     for i in 1:size(ctop, 1)
-        html_row(io, [ctop[i, 1], ctop[i, 2]]; class="regress-summary-row")
+        html_row(io, [ctop[i, 1], ctop[i, 2]]; class = "regress-summary-row")
     end
     html_thead_end(io)
 
     # Coefficient table header
-    html_thead_start(io; class="regress-coef-header")
-    html_row(io, vcat([""], colnms); is_header=true)
+    html_thead_start(io; class = "regress-coef-header")
+    html_row(io, vcat([""], colnms); is_header = true)
     html_thead_end(io)
 
     # Coefficient table body
-    html_tbody_start(io; class="regress-coef-body")
+    html_tbody_start(io; class = "regress-coef-body")
     for i in 1:length(rownms)
         row_data = [rownms[i]]
         for j in 1:length(cols)

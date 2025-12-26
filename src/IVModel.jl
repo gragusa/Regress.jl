@@ -971,23 +971,23 @@ function Base.show(io::IO, ::MIME"text/html", m::IVEstimator)
     colnms = ct.colnms
 
     # Start table
-    html_table_start(io; class="regress-table regress-iv", caption=string(typeof(m)))
+    html_table_start(io; class = "regress-table regress-iv", caption = string(typeof(m)))
 
     # Summary statistics section
     ctop = top(m)
-    html_thead_start(io; class="regress-summary")
+    html_thead_start(io; class = "regress-summary")
     for i in 1:size(ctop, 1)
-        html_row(io, [ctop[i, 1], ctop[i, 2]]; class="regress-summary-row")
+        html_row(io, [ctop[i, 1], ctop[i, 2]]; class = "regress-summary-row")
     end
     html_thead_end(io)
 
     # Coefficient table header
-    html_thead_start(io; class="regress-coef-header")
-    html_row(io, vcat([""], colnms); is_header=true)
+    html_thead_start(io; class = "regress-coef-header")
+    html_row(io, vcat([""], colnms); is_header = true)
     html_thead_end(io)
 
     # Coefficient table body
-    html_tbody_start(io; class="regress-coef-body")
+    html_tbody_start(io; class = "regress-coef-body")
     for i in 1:length(rownms)
         row_data = [rownms[i]]
         for j in 1:length(cols)
@@ -1002,12 +1002,14 @@ function Base.show(io::IO, ::MIME"text/html", m::IVEstimator)
     html_tbody_end(io)
 
     # First-stage diagnostics section (if available)
-    if !isempty(m.F_kp_per_endo) && !isnothing(m.postestimation) && !isnothing(m.postestimation.first_stage_data)
+    if !isempty(m.F_kp_per_endo) && !isnothing(m.postestimation) &&
+       !isnothing(m.postestimation.first_stage_data)
         fsd = m.postestimation.first_stage_data
         endo_names = fsd.endogenous_names
 
-        html_tfoot_start(io; class="regress-first-stage")
-        html_row(io, ["First-Stage F-Statistics", "", "", "", "", "", ""]; class="regress-first-stage-header")
+        html_tfoot_start(io; class = "regress-first-stage")
+        html_row(io, ["First-Stage F-Statistics", "", "", "", "", "", ""];
+            class = "regress-first-stage-header")
         for (j, name) in enumerate(endo_names)
             F_j = m.F_kp_per_endo[j]
             p_j = m.p_kp_per_endo[j]
@@ -1257,7 +1259,7 @@ end
 
 function Base.show(io::IO, fs::FirstStageResult{T}) where {T}
     # Calculate dynamic width based on longest endogenous name
-    max_name_len = maximum(length, fs.endogenous_names; init=10)
+    max_name_len = maximum(length, fs.endogenous_names; init = 10)
     totwidth = max(60, max_name_len + 35)
 
     # Header
@@ -1286,31 +1288,33 @@ function Base.show(io::IO, fs::FirstStageResult{T}) where {T}
 end
 
 function Base.show(io::IO, ::MIME"text/html", fs::FirstStageResult{T}) where {T}
-    html_table_start(io; class="regress-table regress-first-stage",
-                     caption="First-Stage Diagnostics ($(fs.vcov_type))")
+    html_table_start(io; class = "regress-table regress-first-stage",
+        caption = "First-Stage Diagnostics ($(fs.vcov_type))")
 
     # Joint test section
-    html_thead_start(io; class="regress-joint-test")
-    html_row(io, ["Joint Test (Kleibergen-Paap)", "", ""]; is_header=true)
+    html_thead_start(io; class = "regress-joint-test")
+    html_row(io, ["Joint Test (Kleibergen-Paap)", "", ""]; is_header = true)
     html_thead_end(io)
-    html_tbody_start(io; class="regress-joint-body")
+    html_tbody_start(io; class = "regress-joint-body")
     html_row(io, ["F-statistic", format_number(fs.F_joint), ""])
     html_row(io, ["P-value", format_pvalue(fs.p_joint), ""])
     html_tbody_end(io)
 
     # Per-endogenous section
-    html_thead_start(io; class="regress-per-endo-header")
-    html_row(io, ["Endogenous", "F-stat", "P-value"]; is_header=true)
+    html_thead_start(io; class = "regress-per-endo-header")
+    html_row(io, ["Endogenous", "F-stat", "P-value"]; is_header = true)
     html_thead_end(io)
-    html_tbody_start(io; class="regress-per-endo-body")
+    html_tbody_start(io; class = "regress-per-endo-body")
     for (j, name) in enumerate(fs.endogenous_names)
-        html_row(io, [name, format_number(fs.F_per_endo[j]), format_pvalue(fs.p_per_endo[j])])
+        html_row(io, [
+            name, format_number(fs.F_per_endo[j]), format_pvalue(fs.p_per_endo[j])])
     end
     html_tbody_end(io)
 
     # Footer
-    html_tfoot_start(io; class="regress-footer")
-    html_row(io, ["Instruments: $(fs.n_instruments) excluded, $(fs.n_endogenous) endogenous", "", ""])
+    html_tfoot_start(io; class = "regress-footer")
+    html_row(io, [
+        "Instruments: $(fs.n_instruments) excluded, $(fs.n_endogenous) endogenous", "", ""])
     html_tfoot_end(io)
 
     html_table_end(io)
