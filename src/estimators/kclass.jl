@@ -22,23 +22,23 @@ the K-class coefficient formula instead of two-stage least squares.
 - `IVEstimator{T, V}`: Fitted model with parametric vcov type
 """
 function fit_kclass_estimator(
-    estimator::AbstractIVEstimator,
-    df,
-    formula::FormulaTerm;
-    contrasts::Dict = Dict{Symbol, Any}(),
-    weights::Union{Symbol, Nothing} = nothing,
-    save::Union{Bool, Symbol} = :residuals,
-    save_cluster::Union{Symbol, Vector{Symbol}, Nothing} = nothing,
-    dof_add::Integer = 0,
-    method::Symbol = :cpu,
-    nthreads::Integer = method == :cpu ? Threads.nthreads() : 256,
-    double_precision::Bool = method == :cpu,
-    tol::Real = 1e-6,
-    maxiter::Integer = 10000,
-    drop_singletons::Bool = true,
-    progress_bar::Bool = true,
-    subset::Union{Nothing, AbstractVector} = nothing,
-    first_stage::Bool = true
+        estimator::AbstractIVEstimator,
+        df,
+        formula::FormulaTerm;
+        contrasts::Dict = Dict{Symbol, Any}(),
+        weights::Union{Symbol, Nothing} = nothing,
+        save::Union{Bool, Symbol} = :residuals,
+        save_cluster::Union{Symbol, Vector{Symbol}, Nothing} = nothing,
+        dof_add::Integer = 0,
+        method::Symbol = :cpu,
+        nthreads::Integer = method == :cpu ? Threads.nthreads() : 256,
+        double_precision::Bool = method == :cpu,
+        tol::Real = 1e-6,
+        maxiter::Integer = 10000,
+        drop_singletons::Bool = true,
+        progress_bar::Bool = true,
+        subset::Union{Nothing, AbstractVector} = nothing,
+        first_stage::Bool = true
 )
     # Validate save keyword
     save, save_residuals = validate_save_keyword(save)
@@ -112,9 +112,12 @@ function fit_kclass_estimator(
     # Validate finite values
     all(isfinite, wts) || throw("Weights are not finite")
     all(isfinite, y) || throw("Some observations for the dependent variable are infinite")
-    all(isfinite, Xexo) || throw("Some observations for the exogenous variables are infinite")
-    all(isfinite, Xendo) || throw("Some observations for the endogenous variables are infinite")
-    all(isfinite, Z) || throw("Some observations for the instrumental variables are infinite")
+    all(isfinite, Xexo) ||
+        throw("Some observations for the exogenous variables are infinite")
+    all(isfinite, Xendo) ||
+        throw("Some observations for the endogenous variables are infinite")
+    all(isfinite, Z) ||
+        throw("Some observations for the instrumental variables are infinite")
 
     ##############################################################################
     ## Partial Out Fixed Effects
@@ -127,7 +130,11 @@ function fit_kclass_estimator(
         cols = vcat(eachcol(y), eachcol(Xexo), eachcol(Xendo), eachcol(Z))
         colnames = vcat(response_name, coefnames_exo, coefnames_endo, coefnames_iv)
 
-        feM, iterations, converged, tss_partial, oldy_temp, oldX_temp = partial_out_fixed_effects!(
+        feM, iterations,
+        converged,
+        tss_partial,
+        oldy_temp,
+        oldX_temp = partial_out_fixed_effects!(
             cols, colnames, subfes, wts, method, nthreads,
             tol, maxiter, progress_bar, data_prep.save_fes,
             data_prep.has_intercept, data_prep.has_fe_intercept, T)
@@ -317,7 +324,8 @@ function fit_kclass_estimator(
         newZXendo = vcat(XexoXendo, ZXendo)
 
         newZnewZ_aug = build_block_symmetric(
-            [XexoXexo.data, XexoZ, XexoXendo, ZZ.data, ZXendo, zeros(T, k_endo_final, k_endo_final)],
+            [XexoXexo.data, XexoZ, XexoXendo, ZZ.data,
+                ZXendo, zeros(T, k_endo_final, k_endo_final)],
             [k_exo_final, k_z_final, k_endo_final]
         )
         Pi = ls_solve!(newZnewZ_aug, k_exo_final + k_z_final)
@@ -336,7 +344,8 @@ function fit_kclass_estimator(
 
         dof_fes_local = sum(nunique(fe) for fe in subfes; init = 0)
 
-        F_kp, p_kp = compute_first_stage_fstat(
+        F_kp,
+        p_kp = compute_first_stage_fstat(
             Xendo_res, Z_res, Pip,
             CovarianceMatrices.HR1(),
             data_prep.nobs,
@@ -345,7 +354,8 @@ function fit_kclass_estimator(
         )
 
         # Pass original data for robust Wald F computation (matches R's approach)
-        F_kp_per_endo, p_kp_per_endo = compute_per_endogenous_fstats(
+        F_kp_per_endo,
+        p_kp_per_endo = compute_per_endogenous_fstats(
             Xendo_res, Z_res, Pip,
             CovarianceMatrices.HR1(),
             data_prep.nobs,
@@ -477,7 +487,8 @@ function fit_kclass_estimator(
     augmentdf = DataFrame()
     if data_prep.save_fes && oldy !== nothing
         coef_nonnan = coef[basis_coef]
-        newfes, b, c = solve_coefficients!(oldy - oldX * coef_nonnan, feM;
+        newfes, b,
+        c = solve_coefficients!(oldy - oldX * coef_nonnan, feM;
             tol = tol, maxiter = maxiter)
         for fekey in data_prep.fekeys
             augmentdf[!, fekey] = df[!, fekey]
@@ -488,7 +499,8 @@ function fit_kclass_estimator(
         end
     end
 
-    esample_final = data_prep.esample == Colon() ? trues(data_prep.nrows) : data_prep.esample
+    esample_final = data_prep.esample == Colon() ? trues(data_prep.nrows) :
+                    data_prep.esample
 
     ##############################################################################
     ## Compute Default Vcov (HC1) and Related Statistics
@@ -517,7 +529,8 @@ function fit_kclass_estimator(
 
     # Compute robust F-statistic (Wald test)
     has_int = hasintercept(data_prep.formula_origin)
-    F_stat_robust, p_val_robust = compute_robust_fstat(coef_full, vcov_matrix, has_int, dof_residual)
+    F_stat_robust,
+    p_val_robust = compute_robust_fstat(coef_full, vcov_matrix, has_int, dof_residual)
 
     # Default vcov estimator (HC1)
     default_vcov = CovarianceMatrices.HC1()

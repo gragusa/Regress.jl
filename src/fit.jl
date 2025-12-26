@@ -165,15 +165,16 @@ coef(model)  # One coefficient will be 0
 See also: [`ols(df, formula)`](@ref), [`OLSMatrixEstimator`](@ref)
 """
 function ols(X::AbstractMatrix{<:Real}, y::AbstractVector{<:Real};
-             factorization::Symbol = :auto,
-             collinearity::Symbol = :qr,
-             tol::Real = 1e-8,
-             weights::Union{Nothing, AbstractVector} = nothing,
-             has_intercept::Bool = true)
+        factorization::Symbol = :auto,
+        collinearity::Symbol = :qr,
+        tol::Real = 1e-8,
+        weights::Union{Nothing, AbstractVector} = nothing,
+        has_intercept::Bool = true)
 
     # Validate inputs
     n, k = size(X)
-    length(y) == n || throw(DimensionMismatch("X has $n rows but y has $(length(y)) elements"))
+    length(y) == n ||
+        throw(DimensionMismatch("X has $n rows but y has $(length(y)) elements"))
 
     # Validate keywords
     factorization in (:auto, :chol, :qr) ||
@@ -220,8 +221,9 @@ function ols(X::AbstractMatrix{<:Real}, y::AbstractVector{<:Real};
     end
 
     # Fit using unified solver
-    pp, basis_coef, _ = fit_ols_core!(rr, X_mat, factorization;
-                                       tol=tol, save_matrices=true, collinearity=collinearity)
+    pp, basis_coef,
+    _ = fit_ols_core!(rr, X_mat, factorization;
+        tol = tol, save_matrices = true, collinearity = collinearity)
 
     # Compute RSS efficiently
     rss = compute_rss(rr.y, rr.mu)

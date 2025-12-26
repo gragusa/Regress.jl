@@ -328,7 +328,8 @@ function fit_tsls(df,
         dof_fes_local = sum(nunique(fe) for fe in subfes; init = 0)
 
         # Compute joint first-stage F-statistic using Kleibergen-Paap rank test
-        F_kp, p_kp = compute_first_stage_fstat(
+        F_kp,
+        p_kp = compute_first_stage_fstat(
             Xendo_res, Z_res, Pip,
             CovarianceMatrices.HR1(),
             data_prep.nobs,
@@ -338,7 +339,8 @@ function fit_tsls(df,
 
         # Compute per-endogenous first-stage F-statistics
         # Pass original data for robust Wald F computation (matches R's approach)
-        F_kp_per_endo, p_kp_per_endo = compute_per_endogenous_fstats(
+        F_kp_per_endo,
+        p_kp_per_endo = compute_per_endogenous_fstats(
             Xendo_res, Z_res, Pip,
             CovarianceMatrices.HR1(),
             data_prep.nobs,
@@ -494,7 +496,8 @@ function fit_tsls(df,
 
     # Compute robust F-statistic (Wald test) using vcov
     has_int = hasintercept(data_prep.formula_origin)
-    F_stat_robust, p_val_robust = compute_robust_fstat(
+    F_stat_robust,
+    p_val_robust = compute_robust_fstat(
         coef_full, vcov_matrix, has_int, dof_residual
     )
 

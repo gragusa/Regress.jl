@@ -11,19 +11,19 @@ makedocs(
             "OLS Estimation" => "ols.md",
             "IV Estimation" => "iv.md",
             "Fixed Effects" => "fixed_effects.md",
-            "Variance Estimation" => "variance.md",
+            "Variance Estimation" => "variance.md"
         ],
-        "API Reference" => "api.md",
+        "API Reference" => "api.md"
     ],
     format = Documenter.HTML(
         prettyurls = get(ENV, "CI", nothing) == "true",
-        canonical = "https://gragusa.github.io/Regress.jl",
+        canonical = "https://gragusa.github.io/Regress.jl"
     ),
-    warnonly = [:missing_docs],
+    warnonly = [:missing_docs]
 )
 
 deploydocs(
     repo = "github.com/gragusa/Regress.jl.git",
     devbranch = "master",
-    push_preview = true,
+    push_preview = true
 )

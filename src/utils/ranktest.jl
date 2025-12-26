@@ -272,16 +272,16 @@ For each endogenous variable j:
 - `(F_stats, p_values)`: Vectors of F-statistics and p-values, one per endogenous variable
 """
 function compute_per_endogenous_fstats(
-    Xendo_res::Matrix{T},
-    Z_res::Matrix{T},
-    Pi::Matrix{T},
-    vcov_type,
-    nobs::Int,
-    dof_small::Int,
-    dof_fes::Int;
-    Xendo_orig::Union{Matrix{T}, Nothing} = nothing,
-    newZ::Union{Matrix{T}, Nothing} = nothing
-) where T <: AbstractFloat
+        Xendo_res::Matrix{T},
+        Z_res::Matrix{T},
+        Pi::Matrix{T},
+        vcov_type,
+        nobs::Int,
+        dof_small::Int,
+        dof_fes::Int;
+        Xendo_orig::Union{Matrix{T}, Nothing} = nothing,
+        newZ::Union{Matrix{T}, Nothing} = nothing
+) where {T <: AbstractFloat}
     k = size(Xendo_res, 2)  # Number of endogenous variables
     l = size(Z_res, 2)      # Number of excluded instruments
 
@@ -295,13 +295,15 @@ function compute_per_endogenous_fstats(
     for j in 1:k
         if use_original
             # Use original data for robust Wald F (matches R's approach)
-            F_j, p_j = _compute_robust_first_stage_fstat_original(
+            F_j,
+            p_j = _compute_robust_first_stage_fstat_original(
                 newZ, Xendo_orig[:, j], l, vcov_type, nobs, dof_small, dof_fes
             )
         else
             # Use residualized data (classical F-test or when original not available)
             residuals_j = Xendo_res[:, j] .- Z_res * Pi[:, j]
-            F_j, p_j = _compute_single_first_stage_fstat(
+            F_j,
+            p_j = _compute_single_first_stage_fstat(
                 Z_res, Pi[:, j], residuals_j, vcov_type, nobs, dof_small, dof_fes
             )
         end
@@ -333,14 +335,14 @@ Tests H0: pi = 0 (all excluded instrument coefficients are zero).
 - `(F, p)`: F-statistic and p-value
 """
 function _compute_single_first_stage_fstat(
-    Z::Matrix{T},
-    pi::Vector{T},
-    residuals::Vector{T},
-    vcov_type,
-    nobs::Int,
-    dof_small::Int,
-    dof_fes::Int
-) where T <: AbstractFloat
+        Z::Matrix{T},
+        pi::Vector{T},
+        residuals::Vector{T},
+        vcov_type,
+        nobs::Int,
+        dof_small::Int,
+        dof_fes::Int
+) where {T <: AbstractFloat}
     l = length(pi)  # Number of excluded instruments
 
     l == 0 && return T(NaN), T(NaN)
@@ -413,14 +415,14 @@ then compute robust Wald test on the instrument coefficients.
 - `(F, p)`: F-statistic and p-value
 """
 function _compute_robust_first_stage_fstat_original(
-    newZ::Matrix{T},
-    Xendo_j::Vector{T},
-    n_instruments::Int,
-    vcov_type,
-    nobs::Int,
-    dof_small::Int,
-    dof_fes::Int
-) where T <: AbstractFloat
+        newZ::Matrix{T},
+        Xendo_j::Vector{T},
+        n_instruments::Int,
+        vcov_type,
+        nobs::Int,
+        dof_small::Int,
+        dof_fes::Int
+) where {T <: AbstractFloat}
     n, k_total = size(newZ)  # k_total = k_exo + l
     l = n_instruments
     k_exo = k_total - l

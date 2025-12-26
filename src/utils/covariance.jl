@@ -28,14 +28,14 @@ requiring a fully constructed model object.
 - `Symmetric{T, Matrix{T}}`: HC1 variance-covariance matrix
 """
 function compute_hc1_vcov_direct(
-    X::Matrix{T},
-    residuals::Vector{T},
-    invXX::AbstractMatrix{T},
-    basis_coef::BitVector,
-    n::Int,
-    dof_model::Int,
-    dof_fes::Int,
-    dof_residual::Int
+        X::Matrix{T},
+        residuals::Vector{T},
+        invXX::AbstractMatrix{T},
+        basis_coef::BitVector,
+        n::Int,
+        dof_model::Int,
+        dof_fes::Int,
+        dof_residual::Int
 ) where {T <: AbstractFloat}
     # Compute moment matrix: M = X .* residuals
     M = X .* residuals
@@ -96,14 +96,14 @@ requiring a fully constructed model object.
 - `Symmetric{T, Matrix{T}}`: HC1 variance-covariance matrix
 """
 function compute_hc1_vcov_direct_iv(
-    Xhat::Matrix{T},
-    residuals::Vector{T},
-    invXX::AbstractMatrix{T},
-    basis_coef::BitVector,
-    n::Int,
-    dof_model::Int,
-    dof_fes::Int,
-    dof_residual::Int
+        Xhat::Matrix{T},
+        residuals::Vector{T},
+        invXX::AbstractMatrix{T},
+        basis_coef::BitVector,
+        n::Int,
+        dof_model::Int,
+        dof_fes::Int,
+        dof_residual::Int
 ) where {T <: AbstractFloat}
     # NOTE: For IV models, Xhat is already reduced (collinear columns removed)
     # So aVar will also be reduced-size: (sum(basis_coef) x sum(basis_coef))
@@ -731,7 +731,8 @@ end
 # Residual adjustment functions for OLSMatrixEstimator
 @noinline residualadjustment(k::CM.HR0, r::OLSMatrixEstimator) = 1.0
 @noinline residualadjustment(k::CM.HR1, r::OLSMatrixEstimator) = √nobs(r) / √dof_residual(r)
-@noinline residualadjustment(k::CM.HR2, r::OLSMatrixEstimator) = 1.0 ./ (1 .- leverage(r)) .^ 0.5
+@noinline residualadjustment(k::CM.HR2, r::OLSMatrixEstimator) = 1.0 ./
+                                                                 (1 .- leverage(r)) .^ 0.5
 @noinline residualadjustment(k::CM.HR3, r::OLSMatrixEstimator) = 1.0 ./ (1 .- leverage(r))
 
 @noinline function residualadjustment(k::CM.HR4, r::OLSMatrixEstimator)
