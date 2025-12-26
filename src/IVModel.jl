@@ -887,16 +887,17 @@ function Base.show(io::IO, m::IVEstimator)
     nmswidths = pushfirst!(length.(colnms), 0)
     A = [nmswidths[i] > sum(A[i]) ? (A[i][1]+nmswidths[i]-sum(A[i]), A[i][2]) : A[i]
          for i in 1:length(A)]
-    totwidth = sum(sum.(A)) + 2 * (length(A) - 1)
+    totwidth = compute_table_width(A, colnms)
 
     ctitle = string(typeof(m))
-    halfwidth = div(totwidth - length(ctitle), 2)
+    halfwidth = max(0, div(totwidth - length(ctitle), 2))
     print(io, " " ^ halfwidth * ctitle * " " ^ halfwidth)
     ctop = top(m)
     for i in 1:size(ctop, 1)
         ctop[i, 1] = ctop[i, 1] * ":"
     end
-    println(io, '\n', repeat('=', totwidth))
+    println(io)
+    println_horizontal_line(io, totwidth)
     halfwidth = div(totwidth, 2) - 1
     interwidth = 2 + mod(totwidth, 2)
     for i in 1:(div(size(ctop, 1) - 1, 2) + 1)
@@ -910,17 +911,19 @@ function Base.show(io::IO, m::IVEstimator)
         println(io)
     end
 
-    println(io, repeat('=', totwidth))
+    println_horizontal_line(io, totwidth)
     print(io, repeat(' ', sum(A[1])))
     for j in 1:length(colnms)
         print(io, "  ", lpad(colnms[j], sum(A[j + 1])))
     end
-    println(io, '\n', repeat('─', totwidth))
+    println(io)
+    println_horizontal_line(io, totwidth)
     for i in 1:size(mat, 1)
         Base.print_matrix_row(io, mat, A, i, 1:size(mat, 2), "  ")
         i != size(mat, 1) && println(io)
     end
-    println(io, '\n', repeat('=', totwidth))
+    println(io)
+    println_horizontal_line(io, totwidth)
 
     # Display per-endogenous first-stage F-statistics if available
     _show_per_endogenous_fstats(io, m, totwidth)
@@ -944,9 +947,9 @@ function _show_per_endogenous_fstats(io::IO, m::IVEstimator, totwidth::Int)
 
     # Print header
     println(io, "\nFirst-Stage F-Statistics (per endogenous variable):")
-    println(io, repeat('-', totwidth))
+    println_horizontal_line(io, totwidth)
     @printf(io, "%-30s %14s %14s\n", "Endogenous", "F-stat", "P-value")
-    println(io, repeat('-', totwidth))
+    println_horizontal_line(io, totwidth)
 
     # Print each endogenous variable
     for (j, name) in enumerate(endo_names)
@@ -958,7 +961,62 @@ function _show_per_endogenous_fstats(io::IO, m::IVEstimator, totwidth::Int)
         @printf(io, "%-30s %14.4f %14.4f\n", display_name, F_j, p_j)
     end
 
-    println(io, repeat('-', totwidth))
+    println_horizontal_line(io, totwidth)
+end
+
+function Base.show(io::IO, ::MIME"text/html", m::IVEstimator)
+    ct = coeftable(m)
+    cols = ct.cols
+    rownms = ct.rownms
+    colnms = ct.colnms
+
+    # Start table
+    html_table_start(io; class="regress-table regress-iv", caption=string(typeof(m)))
+
+    # Summary statistics section
+    ctop = top(m)
+    html_thead_start(io; class="regress-summary")
+    for i in 1:size(ctop, 1)
+        html_row(io, [ctop[i, 1], ctop[i, 2]]; class="regress-summary-row")
+    end
+    html_thead_end(io)
+
+    # Coefficient table header
+    html_thead_start(io; class="regress-coef-header")
+    html_row(io, vcat([""], colnms); is_header=true)
+    html_thead_end(io)
+
+    # Coefficient table body
+    html_tbody_start(io; class="regress-coef-body")
+    for i in 1:length(rownms)
+        row_data = [rownms[i]]
+        for j in 1:length(cols)
+            if j == ct.pvalcol
+                push!(row_data, format_pvalue(cols[j][i]))
+            else
+                push!(row_data, format_number(cols[j][i]))
+            end
+        end
+        html_row(io, row_data)
+    end
+    html_tbody_end(io)
+
+    # First-stage diagnostics section (if available)
+    if !isempty(m.F_kp_per_endo) && !isnothing(m.postestimation) && !isnothing(m.postestimation.first_stage_data)
+        fsd = m.postestimation.first_stage_data
+        endo_names = fsd.endogenous_names
+
+        html_tfoot_start(io; class="regress-first-stage")
+        html_row(io, ["First-Stage F-Statistics", "", "", "", "", "", ""]; class="regress-first-stage-header")
+        for (j, name) in enumerate(endo_names)
+            F_j = m.F_kp_per_endo[j]
+            p_j = m.p_kp_per_endo[j]
+            html_row(io, [name, format_number(F_j), format_pvalue(p_j), "", "", "", ""])
+        end
+        html_tfoot_end(io)
+    end
+
+    html_table_end(io)
 end
 
 ##############################################################################
@@ -1198,9 +1256,13 @@ end
 ##############################################################################
 
 function Base.show(io::IO, fs::FirstStageResult{T}) where {T}
+    # Calculate dynamic width based on longest endogenous name
+    max_name_len = maximum(length, fs.endogenous_names; init=10)
+    totwidth = max(60, max_name_len + 35)
+
     # Header
     println(io, "First-Stage Diagnostics ($(fs.vcov_type))")
-    println(io, repeat('=', 60))
+    println_horizontal_line(io, totwidth)
 
     # Joint test
     println(io, "Joint Test (Kleibergen-Paap):")
@@ -1208,9 +1270,9 @@ function Base.show(io::IO, fs::FirstStageResult{T}) where {T}
 
     # Per-endogenous table
     println(io, "\nPer-Endogenous F-Statistics:")
-    println(io, repeat('-', 60))
+    println_horizontal_line(io, totwidth)
     @printf(io, "%-30s %14s %14s\n", "Endogenous", "F-stat", "P-value")
-    println(io, repeat('-', 60))
+    println_horizontal_line(io, totwidth)
 
     for (j, name) in enumerate(fs.endogenous_names)
         display_name = length(name) > 28 ? name[1:25] * "..." : name
@@ -1218,7 +1280,38 @@ function Base.show(io::IO, fs::FirstStageResult{T}) where {T}
             display_name, fs.F_per_endo[j], fs.p_per_endo[j])
     end
 
-    println(io, repeat('-', 60))
+    println_horizontal_line(io, totwidth)
     println(io, "\nInstruments: $(fs.n_instruments) excluded, $(fs.n_endogenous) endogenous")
-    print(io, repeat('=', 60))
+    print_horizontal_line(io, totwidth)
+end
+
+function Base.show(io::IO, ::MIME"text/html", fs::FirstStageResult{T}) where {T}
+    html_table_start(io; class="regress-table regress-first-stage",
+                     caption="First-Stage Diagnostics ($(fs.vcov_type))")
+
+    # Joint test section
+    html_thead_start(io; class="regress-joint-test")
+    html_row(io, ["Joint Test (Kleibergen-Paap)", "", ""]; is_header=true)
+    html_thead_end(io)
+    html_tbody_start(io; class="regress-joint-body")
+    html_row(io, ["F-statistic", format_number(fs.F_joint), ""])
+    html_row(io, ["P-value", format_pvalue(fs.p_joint), ""])
+    html_tbody_end(io)
+
+    # Per-endogenous section
+    html_thead_start(io; class="regress-per-endo-header")
+    html_row(io, ["Endogenous", "F-stat", "P-value"]; is_header=true)
+    html_thead_end(io)
+    html_tbody_start(io; class="regress-per-endo-body")
+    for (j, name) in enumerate(fs.endogenous_names)
+        html_row(io, [name, format_number(fs.F_per_endo[j]), format_pvalue(fs.p_per_endo[j])])
+    end
+    html_tbody_end(io)
+
+    # Footer
+    html_tfoot_start(io; class="regress-footer")
+    html_row(io, ["Instruments: $(fs.n_instruments) excluded, $(fs.n_endogenous) endogenous", "", ""])
+    html_tfoot_end(io)
+
+    html_table_end(io)
 end
