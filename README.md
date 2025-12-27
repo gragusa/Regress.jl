@@ -2,7 +2,7 @@
 
 High-performance linear models with fixed effects and instrumental variables.
 
-Regress.jl is inspired by and grateful to [FixedEffectModels.jl](https://github.com/FixedEffects/FixedEffectModels.jl). While sharing similar goals, `Regress.jl` takes a different architectural approach with tight [CovarianceMatrices.jl](https://github.com/gragusa/CovarianceMatrices.jl) integration and an extended family of IV estimators.
+Regress.jl is inspired by and grateful to [FixedEffectModels.jl](https://github.com/FixedEffects/FixedEffectModels.jl). While sharing similar goals, `Regress.jl` takes a different architectural approach, with tight integration with [CovarianceMatrices.jl](https://github.com/gragusa/CovarianceMatrices.jl) and an extended family of IV estimators.
 
 ## Key Features
 
@@ -61,7 +61,7 @@ The returned model has:
 - Precomputed vcov matrix, standard errors, t-statistics, and p-values
 - Robust Wald F-statistic for joint significance
 
-All the estimator defined in `CovarianceMatrices.jl` are supported.
+All the estimators defined in `CovarianceMatrices.jl` are supported.
 
 ## IV Estimators
 
@@ -88,7 +88,7 @@ The `+ vcov()` syntax also works with IV models and automatically recomputes fir
 ```julia
 model = iv(TSLS(), df, @formula(y ~ x + (endo ~ z1 + z2)))
 
-# Update to HC3 - recomputes ALL statistics including first-stage F
+# Update to HC3 - recomputes ALL statistics, including first-stage F
 model_hc3 = model + vcov(HC3())
 model_hc3.F_kp           # Joint first-stage F with HC3
 model_hc3.F_kp_per_endo  # Per-endogenous F-stats with HC3
@@ -144,14 +144,14 @@ fs.p_joint           # p-value of joint test
 fs.F_per_endo        # Per-endogenous F-statistics
 fs.p_per_endo        # Per-endogenous p-values
 
-# With different variance estimator
+# With a different variance estimator
 model_hc3 = model + vcov(HC3())
 fs_hc3 = first_stage(model_hc3)
 ```
 
 ## Large-Scale IV Estimation
 
-Regress.jl efficiently handles IV estimation with many instruments. This example uses the Angrist-Krueger (1991) returns to schooling data with quarter-of-birth instruments.
+`Regress.jl` efficiently handles IV estimation with many instruments. This example uses the Angrist-Krueger (1991) returns-to-schooling data with quarter-of-birth instruments.
 
 ### Example: Returns to Schooling with Many Instruments
 
@@ -166,13 +166,11 @@ data.qob = categorical(data.qob)  # Quarter of birth
 
 # Large model: 180 excluded instruments
 # Education is endogenous, instrumented by yob×qob and sob×qob interactions
-@time model = iv(TSLS(), data,
-    @formula(lwage ~ (educ ~ yob&qob + sob&qob) + fe(yob) + fe(sob)))
+model = iv(TSLS(), data,
+  @formula(lwage ~ (educ ~ fe(yob)&fe(qob) + fe(sob)&fe(qob)) + fe(yob) + fe(sob)))
 ```
 
-Output:
 ```
-  3.96 seconds (163.91 k allocations: 5.974 GiB)
                                 TSLS
 ────────────────────────────────────────────────────────────────────
 Number of obs:             329509  Converged:                   true
@@ -185,10 +183,8 @@ F (1st stage, joint):     2.38722  P (1st stage, joint):       0.000
 ────────────────────────────────────────────────────────────────────
 educ  0.0928181  0.00966506  9.60347    <1e-21  0.0738748   0.111761
 ────────────────────────────────────────────────────────────────────
-Note: 180 excluded instruments, 1 endogenous
-```
 
-The model estimates a 9.3% return to education using quarter of birth as an instrument (individuals born earlier in the year start school younger due to compulsory schooling laws).
+```
 
 ### Robust Inference with Many Instruments
 
