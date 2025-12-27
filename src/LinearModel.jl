@@ -612,7 +612,8 @@ function Base.show(io::IO, m::OLSEstimator)
          for i in 1:length(A)]
     totwidth = compute_table_width(A, colnms)
 
-    ctitle = string(typeof(m))
+    # Title: just "OLS"
+    ctitle = "OLS"
     halfwidth = max(0, div(totwidth - length(ctitle), 2))
     print(io, " " ^ halfwidth * ctitle * " " ^ halfwidth)
     ctop = top(m)
@@ -647,6 +648,10 @@ function Base.show(io::IO, m::OLSEstimator)
     end
     println(io)
     println_horizontal_line(io, totwidth)
+
+    # Note: variance-covariance type
+    vcov_name = vcov_type_name(m.vcov_estimator)
+    println(io, "Note: Std. errors computed using $vcov_name variance estimator")
     nothing
 end
 
@@ -656,8 +661,8 @@ function Base.show(io::IO, ::MIME"text/html", m::OLSEstimator)
     rownms = ct.rownms
     colnms = ct.colnms
 
-    # Start table
-    html_table_start(io; class = "regress-table regress-ols", caption = string(typeof(m)))
+    # Start table with "OLS" as caption
+    html_table_start(io; class="regress-table regress-ols", caption="OLS")
 
     # Summary statistics section
     ctop = top(m)
@@ -686,6 +691,12 @@ function Base.show(io::IO, ::MIME"text/html", m::OLSEstimator)
         html_row(io, row_data)
     end
     html_tbody_end(io)
+
+    # Footer with vcov type note
+    vcov_name = vcov_type_name(m.vcov_estimator)
+    html_tfoot_start(io; class="regress-footer")
+    html_row(io, ["Note: Std. errors computed using $vcov_name variance estimator", "", "", "", "", "", ""])
+    html_tfoot_end(io)
 
     html_table_end(io)
 end

@@ -316,3 +316,167 @@ model = iv(TSLS(), df, @formula(y ~ x + (endo ~ z) + fe(firm) + fe(year)))
 ```
 
 Fixed effects are partialed out from all variables (y, x, endo, z) before IV estimation.
+
+## Large-Scale IV Estimation: Angrist-Krueger Returns to Schooling
+
+This tutorial demonstrates Regress.jl's capability to efficiently estimate IV models with many instruments using the classic Angrist and Krueger (1991) returns to schooling dataset.
+
+### Background
+
+Angrist and Krueger's seminal paper uses quarter of birth as an instrument for education. The identification strategy exploits compulsory schooling laws: individuals born earlier in the year can legally drop out of school at a younger age, leading to less education on average. Since quarter of birth is (arguably) unrelated to ability, it provides valid instruments for education.
+
+The "large model" specification interacts quarter of birth with year of birth and state of birth, generating approximately 180 excluded instruments.
+
+### Data
+
+The JIVE dataset contains approximately 330,000 observations from the 1980 Census:
+
+| Variable | Description |
+|----------|-------------|
+| `lwage` | Log weekly wage |
+| `educ` | Years of education |
+| `yob` | Year of birth (categorical) |
+| `sob` | State of birth (categorical) |
+| `qob` | Quarter of birth (1-4) |
+
+### Loading and Preparing Data
+
+```julia
+using Regress, CSV, DataFrames, CategoricalArrays
+
+# Load data
+data = CSV.read("path/to/JIVE.txt", DataFrame)
+
+# Convert to categorical for proper dummy variable creation
+data.sob = categorical(data.sob)  # 51 states
+data.yob = categorical(data.yob)  # ~10 birth years
+data.qob = categorical(data.qob)  # 4 quarters
+
+println("Observations: ", nrow(data))  # ~329,509
+```
+
+### The Large Model Specification
+
+The large model includes:
+- **Outcome**: `lwage` (log weekly wage)
+- **Endogenous variable**: `educ` (years of education)
+- **Excluded instruments**: `yob×qob` and `sob×qob` interactions (~180 instruments)
+- **Fixed effects**: Year of birth and state of birth
+
+```julia
+# Estimate large model with many instruments
+@time model = iv(TSLS(), data,
+    @formula(lwage ~ (educ ~ yob&qob + sob&qob) + fe(yob) + fe(sob)))
+```
+
+Output:
+```
+  3.96 seconds (163.91 k allocations: 5.974 GiB)
+                                TSLS
+────────────────────────────────────────────────────────────────────
+Number of obs:             329509  Converged:                   true
+dof (model):                    1  dof (residuals):           329446
+R²:                         0.114  R² adjusted:                0.114
+F-statistic:              92.2266  P-value:                    0.000
+F (1st stage, joint):     2.38722  P (1st stage, joint):       0.000
+────────────────────────────────────────────────────────────────────
+       Estimate  Std. Error   t-stat  Pr(>|t|)  Lower 95%  Upper 95%
+────────────────────────────────────────────────────────────────────
+educ  0.0928181  0.00966506  9.60347    <1e-21  0.0738748   0.111761
+────────────────────────────────────────────────────────────────────
+Note: 180 excluded instruments, 1 endogenous
+```
+
+### Interpretation
+
+The coefficient on education is **0.093**, implying a 9.3% increase in weekly wages for each additional year of schooling. This is consistent with the original Angrist-Krueger findings.
+
+### Performance Notes
+
+Regress.jl efficiently handles this large-scale problem:
+- **329,509 observations**
+- **180 excluded instruments**
+- **~62 fixed effects** (year of birth + state of birth)
+- **~4 seconds** estimation time (after Julia compilation)
+
+The fixed effects are partialed out using the iterative demeaning algorithm from FixedEffects.jl, which scales well to high-dimensional problems.
+
+### Robust Inference
+
+With many instruments, robust standard errors are recommended:
+
+```julia
+# HC3 robust standard errors
+model_hc3 = model + vcov(HC3())
+coeftable(model_hc3)
+
+# Extract first-stage diagnostics with robust vcov
+fs = first_stage(model_hc3)
+println("First-stage F (HC3): ", fs.F_joint)
+```
+
+### Weak Instruments Caveat
+
+Note that the first-stage F-statistic (2.39) is below the Stock-Yogo critical value of 10, suggesting potential weak instrument bias. This is a known issue with the many-instruments Angrist-Krueger specification. In practice, you might consider:
+
+1. **LIML estimator**: More robust to weak instruments than TSLS
+
+```julia
+model_liml = iv(LIML(), data,
+    @formula(lwage ~ (educ ~ yob&qob + sob&qob) + fe(yob) + fe(sob)))
+```
+
+2. **Fuller estimator**: Reduces finite-sample bias
+
+```julia
+model_fuller = iv(Fuller(1.0), data,
+    @formula(lwage ~ (educ ~ yob&qob + sob&qob) + fe(yob) + fe(sob)))
+```
+
+3. **Fewer instruments**: Use only `yob×qob` (the "small model")
+
+```julia
+model_small = iv(TSLS(), data,
+    @formula(lwage ~ (educ ~ yob&qob) + fe(yob) + fe(sob)))
+```
+
+### Complete Example
+
+```julia
+using Regress, CSV, DataFrames, CategoricalArrays
+
+# Load and prepare data
+data = CSV.read("path/to/JIVE.txt", DataFrame)
+data.sob = categorical(data.sob)
+data.yob = categorical(data.yob)
+data.qob = categorical(data.qob)
+
+# Large model (many instruments)
+println("=== Large Model (180 instruments) ===")
+@time model_large = iv(TSLS(), data,
+    @formula(lwage ~ (educ ~ yob&qob + sob&qob) + fe(yob) + fe(sob)))
+println(model_large)
+
+# Small model (fewer instruments)
+println("\n=== Small Model (40 instruments) ===")
+@time model_small = iv(TSLS(), data,
+    @formula(lwage ~ (educ ~ yob&qob) + fe(yob) + fe(sob)))
+println(model_small)
+
+# Compare with LIML (more robust to weak instruments)
+println("\n=== LIML (Large Model) ===")
+model_liml = iv(LIML(), data,
+    @formula(lwage ~ (educ ~ yob&qob + sob&qob) + fe(yob) + fe(sob)))
+println("LIML κ = ", model_liml.postestimation.kappa)
+println("LIML coef on educ: ", coef(model_liml)[1])
+
+# Robust standard errors
+model_robust = model_large + vcov(HC3())
+println("\n=== Robust Standard Errors (HC3) ===")
+coeftable(model_robust)
+```
+
+### References
+
+- Angrist, J. D., & Krueger, A. B. (1991). Does Compulsory School Attendance Affect Schooling and Earnings? *The Quarterly Journal of Economics*, 106(4), 979-1014.
+- Stock, J. H., & Yogo, M. (2005). Testing for Weak Instruments in Linear IV Regression. In *Identification and Inference for Econometric Models: Essays in Honor of Thomas Rothenberg*.
