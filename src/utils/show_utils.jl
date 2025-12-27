@@ -27,7 +27,7 @@ supports_color(io::IO) = get(io, :color, false)::Bool
 Print a horizontal line of specified width, with optional green coloring
 if the IO context supports color.
 """
-function print_horizontal_line(io::IO, width::Int; char::Char=BOX_HORIZONTAL)
+function print_horizontal_line(io::IO, width::Int; char::Char = BOX_HORIZONTAL)
     if supports_color(io)
         print(io, ANSI_GREEN, repeat(char, width), ANSI_RESET)
     else
@@ -40,8 +40,8 @@ end
 
 Print a horizontal line followed by newline.
 """
-function println_horizontal_line(io::IO, width::Int; char::Char=BOX_HORIZONTAL)
-    print_horizontal_line(io, width; char=char)
+function println_horizontal_line(io::IO, width::Int; char::Char = BOX_HORIZONTAL)
+    print_horizontal_line(io, width; char = char)
     println(io)
 end
 
@@ -100,7 +100,7 @@ end
 
 Write opening HTML table tag with class and optional caption.
 """
-function html_table_start(io::IO; class::String="regress-table", caption::String="")
+function html_table_start(io::IO; class::String = "regress-table", caption::String = "")
     println(io, """<table class="$(class)">""")
     if !isempty(caption)
         println(io, "  <caption>$(html_escape(caption))</caption>")
@@ -119,7 +119,7 @@ html_table_end(io::IO) = println(io, "</table>")
 
 Write opening thead tag with optional class.
 """
-function html_thead_start(io::IO; class::String="")
+function html_thead_start(io::IO; class::String = "")
     class_attr = isempty(class) ? "" : """ class="$(class)" """
     println(io, "  <thead$(class_attr)>")
 end
@@ -136,7 +136,7 @@ html_thead_end(io::IO) = println(io, "  </thead>")
 
 Write opening tbody tag with optional class.
 """
-function html_tbody_start(io::IO; class::String="")
+function html_tbody_start(io::IO; class::String = "")
     class_attr = isempty(class) ? "" : """ class="$(class)" """
     println(io, "  <tbody$(class_attr)>")
 end
@@ -153,7 +153,7 @@ html_tbody_end(io::IO) = println(io, "  </tbody>")
 
 Write opening tfoot tag with optional class.
 """
-function html_tfoot_start(io::IO; class::String="")
+function html_tfoot_start(io::IO; class::String = "")
     class_attr = isempty(class) ? "" : """ class="$(class)" """
     println(io, "  <tfoot$(class_attr)>")
 end
@@ -176,7 +176,7 @@ Write an HTML table row with cells.
 - `class`: Optional CSS class for the row
 - `is_header`: If true, use `<th>` tags instead of `<td>`
 """
-function html_row(io::IO, cells::Vector; class::String="", is_header::Bool=false)
+function html_row(io::IO, cells::Vector; class::String = "", is_header::Bool = false)
     tag = is_header ? "th" : "td"
     row_attr = isempty(class) ? "" : """ class="$(class)" """
     print(io, "    <tr$(row_attr)>")
@@ -204,7 +204,7 @@ end
 
 Format a number with specified decimal digits for HTML display.
 """
-function format_number(x::Real; digits::Int=4)
+function format_number(x::Real; digits::Int = 4)
     return @sprintf("%.*f", digits, x)
 end
 

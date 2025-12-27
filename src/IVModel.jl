@@ -975,7 +975,7 @@ function Base.show(io::IO, ::MIME"text/html", m::IVEstimator)
     colnms = ct.colnms
 
     # Start table with estimator name as caption
-    html_table_start(io; class="regress-table regress-iv", caption=_estimator_name(m))
+    html_table_start(io; class = "regress-table regress-iv", caption = _estimator_name(m))
 
     # Summary statistics section
     ctop = top(m)
@@ -1032,7 +1032,7 @@ function Base.show(io::IO, ::MIME"text/html", m::IVEstimator)
         instr_str = n_instruments == 1 ? "instrument" : "instruments"
         note *= "; $n_instruments excluded $instr_str, $n_endogenous endogenous"
     end
-    html_tfoot_start(io; class="regress-footer")
+    html_tfoot_start(io; class = "regress-footer")
     html_row(io, [note, "", "", "", "", "", ""])
     html_tfoot_end(io)
 

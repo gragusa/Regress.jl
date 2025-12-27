@@ -662,7 +662,7 @@ function Base.show(io::IO, ::MIME"text/html", m::OLSEstimator)
     colnms = ct.colnms
 
     # Start table with "OLS" as caption
-    html_table_start(io; class="regress-table regress-ols", caption="OLS")
+    html_table_start(io; class = "regress-table regress-ols", caption = "OLS")
 
     # Summary statistics section
     ctop = top(m)
@@ -694,8 +694,9 @@ function Base.show(io::IO, ::MIME"text/html", m::OLSEstimator)
 
     # Footer with vcov type note
     vcov_name = vcov_type_name(m.vcov_estimator)
-    html_tfoot_start(io; class="regress-footer")
-    html_row(io, ["Note: Std. errors computed using $vcov_name variance estimator", "", "", "", "", "", ""])
+    html_tfoot_start(io; class = "regress-footer")
+    html_row(io, ["Note: Std. errors computed using $vcov_name variance estimator",
+        "", "", "", "", "", ""])
     html_tfoot_end(io)
 
     html_table_end(io)

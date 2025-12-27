@@ -21,8 +21,8 @@ using StatsAPI: coef, stderror, vcov, confint, nobs, dof_residual, r2
     rng = StableRNG(42)
 
     # Categorical variables for FE instruments
-    group1 = repeat(1:50, inner=n÷50)   # 50 groups
-    group2 = repeat(1:10, outer=n÷10)   # 10 groups
+    group1 = repeat(1:50, inner = n÷50)   # 50 groups
+    group2 = repeat(1:10, outer = n÷10)   # 10 groups
     quarter = mod1.(1:n, 4)              # 4 quarters
 
     # Continuous variables
@@ -90,11 +90,15 @@ using StatsAPI: coef, stderror, vcov, confint, nobs, dof_residual, r2
     @testset "Multiple FE interactions" begin
         # Standard approach with two interaction terms
         model_std = iv(TSLS(), df,
-            @formula(y ~ x1 + (endo ~ group1&quarter + group2&quarter) + fe(group1) + fe(group2)))
+            @formula(y ~
+                     x1 + (endo ~ group1&quarter + group2&quarter) + fe(group1) +
+                     fe(group2)))
 
         # FE-based approach
         model_fe = iv(TSLS(), df,
-            @formula(y ~ x1 + (endo ~ fe(group1)&fe(quarter) + fe(group2)&fe(quarter)) + fe(group1) + fe(group2)))
+            @formula(y ~
+                     x1 + (endo ~ fe(group1)&fe(quarter) + fe(group2)&fe(quarter)) +
+                     fe(group1) + fe(group2)))
 
         # Coefficients should match
         @test coef(model_std) ≈ coef(model_fe) rtol=1e-4
@@ -140,11 +144,15 @@ using StatsAPI: coef, stderror, vcov, confint, nobs, dof_residual, r2
 
         # Standard approach
         t_std = @elapsed model_std = iv(TSLS(), df,
-            @formula(y ~ x1 + (endo ~ group1&quarter + group2&quarter) + fe(group1) + fe(group2)))
+            @formula(y ~
+                     x1 + (endo ~ group1&quarter + group2&quarter) + fe(group1) +
+                     fe(group2)))
 
         # FE-based approach (should be faster for large categorical instruments)
         t_fe = @elapsed model_fe = iv(TSLS(), df,
-            @formula(y ~ x1 + (endo ~ fe(group1)&fe(quarter) + fe(group2)&fe(quarter)) + fe(group1) + fe(group2)))
+            @formula(y ~
+                     x1 + (endo ~ fe(group1)&fe(quarter) + fe(group2)&fe(quarter)) +
+                     fe(group1) + fe(group2)))
 
         # Both should produce valid results
         @test all(isfinite.(coef(model_std)))
@@ -185,5 +193,4 @@ using StatsAPI: coef, stderror, vcov, confint, nobs, dof_residual, r2
         @test model_std.F ≈ model_fe.F rtol=1e-4
         @test model_std.p ≈ model_fe.p rtol=1e-4
     end
-
 end
