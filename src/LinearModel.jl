@@ -610,16 +610,18 @@ function Base.show(io::IO, m::OLSEstimator)
     nmswidths = pushfirst!(length.(colnms), 0)
     A = [nmswidths[i] > sum(A[i]) ? (A[i][1]+nmswidths[i]-sum(A[i]), A[i][2]) : A[i]
          for i in 1:length(A)]
-    totwidth = sum(sum.(A)) + 2 * (length(A) - 1)
+    totwidth = compute_table_width(A, colnms)
 
-    ctitle = string(typeof(m))
+    # Title: just "OLS"
+    ctitle = "OLS"
     halfwidth = max(0, div(totwidth - length(ctitle), 2))
     print(io, " " ^ halfwidth * ctitle * " " ^ halfwidth)
     ctop = top(m)
     for i in 1:size(ctop, 1)
         ctop[i, 1] = ctop[i, 1] * ":"
     end
-    println(io, '\n', repeat('=', totwidth))
+    println(io)
+    println_horizontal_line(io, totwidth)
     halfwidth = div(totwidth, 2) - 1
     interwidth = 2 + mod(totwidth, 2)
     for i in 1:(div(size(ctop, 1) - 1, 2) + 1)
@@ -633,18 +635,71 @@ function Base.show(io::IO, m::OLSEstimator)
         println(io)
     end
 
-    println(io, repeat('=', totwidth))
+    println_horizontal_line(io, totwidth)
     print(io, repeat(' ', sum(A[1])))
     for j in 1:length(colnms)
         print(io, "  ", lpad(colnms[j], sum(A[j + 1])))
     end
-    println(io, '\n', repeat('─', totwidth))
+    println(io)
+    println_horizontal_line(io, totwidth)
     for i in 1:size(mat, 1)
         Base.print_matrix_row(io, mat, A, i, 1:size(mat, 2), "  ")
         i != size(mat, 1) && println(io)
     end
-    println(io, '\n', repeat('=', totwidth))
+    println(io)
+    println_horizontal_line(io, totwidth)
+
+    # Note: variance-covariance type
+    vcov_name = vcov_type_name(m.vcov_estimator)
+    println(io, "Note: Std. errors computed using $vcov_name variance estimator")
     nothing
+end
+
+function Base.show(io::IO, ::MIME"text/html", m::OLSEstimator)
+    ct = coeftable(m)
+    cols = ct.cols
+    rownms = ct.rownms
+    colnms = ct.colnms
+
+    # Start table with "OLS" as caption
+    html_table_start(io; class = "regress-table regress-ols", caption = "OLS")
+
+    # Summary statistics section
+    ctop = top(m)
+    html_thead_start(io; class = "regress-summary")
+    for i in 1:size(ctop, 1)
+        html_row(io, [ctop[i, 1], ctop[i, 2]]; class = "regress-summary-row")
+    end
+    html_thead_end(io)
+
+    # Coefficient table header
+    html_thead_start(io; class = "regress-coef-header")
+    html_row(io, vcat([""], colnms); is_header = true)
+    html_thead_end(io)
+
+    # Coefficient table body
+    html_tbody_start(io; class = "regress-coef-body")
+    for i in 1:length(rownms)
+        row_data = [rownms[i]]
+        for j in 1:length(cols)
+            if j == ct.pvalcol
+                push!(row_data, format_pvalue(cols[j][i]))
+            else
+                push!(row_data, format_number(cols[j][i]))
+            end
+        end
+        html_row(io, row_data)
+    end
+    html_tbody_end(io)
+
+    # Footer with vcov type note
+    vcov_name = vcov_type_name(m.vcov_estimator)
+    html_tfoot_start(io; class = "regress-footer")
+    html_row(io, ["Note: Std. errors computed using $vcov_name variance estimator",
+        "", "", "", "", "", ""])
+    html_tfoot_end(io)
+
+    html_table_end(io)
 end
 
 ##############################################################################

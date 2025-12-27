@@ -84,11 +84,38 @@ function fit_tsls(df,
     Xendo = convert(Matrix{T}, modelmatrix(formula_endo_schema, subdf))
     _, coefnames_endo = coefnames(formula_endo_schema)
 
-    formula_iv_schema = apply_schema(data_prep.formula_iv,
-        schema(data_prep.formula_iv, subdf, contrasts),
-        StatisticalModel)
-    Z = convert(Matrix{T}, modelmatrix(formula_iv_schema, subdf))
-    _, coefnames_iv = coefnames(formula_iv_schema)
+    # Create regular instrument matrix (if any non-FE instruments)
+    has_regular_iv = data_prep.formula_iv != FormulaTerm(ConstantTerm(0), ConstantTerm(0))
+    if has_regular_iv
+        formula_iv_schema = apply_schema(data_prep.formula_iv,
+            schema(data_prep.formula_iv, subdf, contrasts),
+            StatisticalModel)
+        Z = convert(Matrix{T}, modelmatrix(formula_iv_schema, subdf))
+        _, coefnames_iv = coefnames(formula_iv_schema)
+    else
+        Z = Matrix{T}(undef, data_prep.nobs, 0)
+        coefnames_iv = String[]
+    end
+
+    ##############################################################################
+    ## Handle FE-based Instruments (Experimental)
+    ##############################################################################
+
+    # Parse FE instruments if present
+    iv_fes = FixedEffect[]
+    iv_feids = Symbol[]
+    iv_fekeys = Symbol[]
+    has_fe_iv = data_prep.has_fe_iv
+
+    if has_fe_iv
+        # Parse the FE terms from the instrument formula
+        iv_fes, iv_feids, iv_fekeys = parse_fixedeffect(subdf, data_prep.formula_iv_fe)
+
+        if isempty(iv_fes)
+            # This shouldn't happen if has_fe_iv was set correctly
+            has_fe_iv = false
+        end
+    end
 
     # Modify formula schema for prediction
     formula_schema = FormulaTerm(formula_schema.lhs,
@@ -241,9 +268,11 @@ function fit_tsls(df,
     end
     XexoZ = XexoZ[basis_Xexo, basis_Z]
 
-    # Check identification
-    size(ZXendo, 1) >= size(ZXendo, 2) ||
-        throw("Model not identified. There must be at least as many instruments as endogenous variables")
+    # Check identification (skip if using FE instruments, as they are handled separately)
+    if !has_fe_iv
+        size(ZXendo, 1) >= size(ZXendo, 2) ||
+            throw("Model not identified. There must be at least as many instruments as endogenous variables")
+    end
 
     # Compute final basis for coefficients
     basis_endo2 = trues(length(basis_endo))
@@ -251,24 +280,103 @@ function fit_tsls(df,
     basis_coef = vcat(basis_Xexo, basis_endo[basis_endo2])
 
     ##############################################################################
-    ## First-Stage Regression: Compute Pi = (Xexo, Z) \ Xendo
+    ## First-Stage Regression
     ##############################################################################
 
-    newZ = hcat(Xexo, Z)
     k_exo_final, k_z_final, k_endo_final = size(Xexo, 2), size(Z, 2), size(Xendo, 2)
-    newZXendo = vcat(XexoXendo, ZXendo)
 
-    # Build augmented system for ls_solve: [newZ'newZ, newZ'Xendo; Xendo'newZ, 0]
-    # Using block symmetric builder (only upper triangle matters for ls_solve!)
-    newZnewZ_aug = build_block_symmetric(
-        [XexoXexo.data, XexoZ, XexoXendo, ZZ.data,
-            ZXendo, zeros(T, k_endo_final, k_endo_final)],
-        [k_exo_final, k_z_final, k_endo_final]
-    )
-    Pi = ls_solve!(newZnewZ_aug, k_exo_final + k_z_final)
+    if has_fe_iv
+        ##########################################################################
+        ## FE-Based First Stage (Experimental)
+        ##
+        ## When instruments are specified as fe() terms, we use the FE absorption
+        ## algorithm for the first stage. This is much more efficient for
+        ## high-dimensional categorical instruments.
+        ##
+        ## The projection P_{[Xexo, D]} where D are the FE indicators is computed
+        ## using Frisch-Waugh-Lovell:
+        ##   1. Demean both Xexo and Xendo by the FE (within transformation)
+        ##   2. Run within-FE regression of Xendo on Xexo to get gamma
+        ##   3. Predicted = Xendo - (Xendo_demeaned - Xexo_demeaned * gamma)
+        ##
+        ## This correctly computes the projection onto span([Xexo, D]).
+        ##########################################################################
 
-    # Predicted endogenous variables
-    newnewZ = newZ * Pi
+        # Create FE solver for instrument FEs
+        iv_feM = AbstractFixedEffectSolver{T}(iv_fes, wts, Val{method}, nthreads)
+
+        # Step 1: Demean Xexo by instrument FEs (within transformation)
+        Xexo_demeaned = copy(Xexo)
+        if size(Xexo, 2) > 0
+            Xexo_cols = [Xexo_demeaned[:, j] for j in 1:k_exo_final]
+            solve_residuals!(Xexo_cols, iv_feM;
+                maxiter = maxiter, tol = tol, progress_bar = progress_bar)
+            for j in 1:k_exo_final
+                Xexo_demeaned[:, j] .= Xexo_cols[j]
+            end
+        end
+
+        # Step 2: Demean Xendo by instrument FEs
+        Xendo_demeaned = copy(Xendo)
+        Xendo_cols = [Xendo_demeaned[:, j] for j in 1:k_endo_final]
+        solve_residuals!(Xendo_cols, iv_feM;
+            maxiter = maxiter, tol = tol, progress_bar = progress_bar)
+        for j in 1:k_endo_final
+            Xendo_demeaned[:, j] .= Xendo_cols[j]
+        end
+
+        # Step 3: Within-FE regression of Xendo on Xexo
+        if size(Xexo, 2) > 0
+            XexoXexo_within = compute_crossproduct(Xexo_demeaned)
+            XexoXendo_within = Xexo_demeaned' * Xendo_demeaned
+            gamma = XexoXexo_within \ XexoXendo_within
+        else
+            gamma = zeros(T, 0, k_endo_final)
+        end
+
+        # Step 4: Compute within-FE residuals
+        if size(Xexo, 2) > 0
+            Xendo_within_res = Xendo_demeaned .- Xexo_demeaned * gamma
+        else
+            Xendo_within_res = Xendo_demeaned
+        end
+
+        # Step 5: Predicted endogenous = original Xendo - within residuals
+        # This equals the projection of Xendo onto span([Xexo, D])
+        newnewZ = Xendo .- Xendo_within_res
+
+        # For compatibility with the rest of the code, set up Pi and newZ
+        # Note: Pi from within regression is stored, but full first-stage includes FE
+        newZ = Xexo  # Only exogenous vars in newZ for FE case
+        Pi = gamma   # Within-FE first-stage coefficients
+
+        # Update k_z_final to 0 since we don't have explicit Z columns
+        k_z_final = 0
+        Z = Matrix{T}(undef, data_prep.nobs, 0)
+        ZZ = Symmetric(zeros(T, 0, 0))
+        XexoZ = zeros(T, k_exo_final, 0)
+        ZXendo = zeros(T, 0, k_endo_final)
+
+    else
+        ##########################################################################
+        ## Standard First Stage: Compute Pi = (Xexo, Z) \ Xendo
+        ##########################################################################
+
+        newZ = hcat(Xexo, Z)
+        newZXendo = vcat(XexoXendo, ZXendo)
+
+        # Build augmented system for ls_solve: [newZ'newZ, newZ'Xendo; Xendo'newZ, 0]
+        # Using block symmetric builder (only upper triangle matters for ls_solve!)
+        newZnewZ_aug = build_block_symmetric(
+            [XexoXexo.data, XexoZ, XexoXendo, ZZ.data,
+                ZXendo, zeros(T, k_endo_final, k_endo_final)],
+            [k_exo_final, k_z_final, k_endo_final]
+        )
+        Pi = ls_solve!(newZnewZ_aug, k_exo_final + k_z_final)
+
+        # Predicted endogenous variables
+        newnewZ = newZ * Pi
+    end
 
     ##############################################################################
     ## Second-Stage Regression using Xhat
@@ -310,47 +418,6 @@ function fit_tsls(df,
     first_stage_data = nothing
 
     if first_stage && size(Xendo, 2) > 0
-        # Compute residuals for first-stage F-stat: Xendo - newZ * Pi
-        Xendo_res = BLAS.gemm!('N', 'N', -one(T), newZ, Pi, one(T), copy(Xendo))
-
-        # Partial out Z w.r.t. Xexo using block system
-        XexoZ_aug = build_block_symmetric(
-            [XexoXexo.data, XexoZ, ZZ.data],
-            [k_exo_final, k_z_final]
-        )
-        Pi2 = ls_solve!(XexoZ_aug, k_exo_final)
-        Z_res = BLAS.gemm!('N', 'N', -one(T), Xexo, Pi2, one(T), copy(Z))
-
-        # Extract the relevant part of Pi (instruments only)
-        Pip = Pi[(k_exo_final + 1):end, :]
-
-        # Compute DOF for fixed effects
-        dof_fes_local = sum(nunique(fe) for fe in subfes; init = 0)
-
-        # Compute joint first-stage F-statistic using Kleibergen-Paap rank test
-        F_kp,
-        p_kp = compute_first_stage_fstat(
-            Xendo_res, Z_res, Pip,
-            CovarianceMatrices.HR1(),
-            data_prep.nobs,
-            size(X, 2),
-            dof_fes_local
-        )
-
-        # Compute per-endogenous first-stage F-statistics
-        # Pass original data for robust Wald F computation (matches R's approach)
-        F_kp_per_endo,
-        p_kp_per_endo = compute_per_endogenous_fstats(
-            Xendo_res, Z_res, Pip,
-            CovarianceMatrices.HR1(),
-            data_prep.nobs,
-            size(X, 2),
-            dof_fes_local;
-            Xendo_orig = Xendo,
-            newZ = newZ
-        )
-
-        # Store first-stage data for recomputation with different vcov
         # Get endogenous variable names (handle basis filtering)
         endo_names_final = if all(basis_endo)
             collect(String.(coefnames_endo))
@@ -363,17 +430,125 @@ function fit_tsls(df,
             [String(coefnames_endo[i]) for i in endo_idx]
         end
 
-        first_stage_data = FirstStageData{T}(
-            copy(Pip),
-            copy(Xendo_res),
-            copy(Z_res),
-            endo_names_final,
-            k_exo_final,
-            copy(Xendo),          # Original endogenous variables
-            copy(newZ),           # Full first-stage design [Xexo, Z]
-            data_prep.has_intercept
-        )
-    end
+        # Compute DOF for fixed effects
+        dof_fes_local = sum(nunique(fe) for fe in subfes; init = 0)
+
+        if has_fe_iv
+            ##################################################################
+            ## FE-Based First Stage F-Statistics
+            ##
+            ## For FE instruments, we compute a simple F-statistic based on
+            ## the variance explained by the FE means. This is analogous to
+            ## testing joint significance of the FE dummies.
+            ##################################################################
+
+            # First-stage residuals: Xendo - newnewZ (predicted)
+            Xendo_res = Xendo .- newnewZ
+
+            # Compute F-statistic as: (ESS/k) / (RSS/(n-k))
+            # where ESS = sum((predicted - mean)^2), RSS = sum(residuals^2)
+            # k = number of FE groups (degrees of freedom for instruments)
+            n_iv_fe_groups = sum(nunique(fe) for fe in iv_fes; init = 0)
+
+            for j in 1:k_endo_final
+                rss_j = sum(abs2, Xendo_res[:, j])
+                tss_j = sum(abs2, Xendo[:, j] .- mean(Xendo[:, j]))
+                ess_j = tss_j - rss_j
+
+                # F = (ESS/df1) / (RSS/df2)
+                df1 = n_iv_fe_groups - 1  # Instrument FE DOF
+                df2 = data_prep.nobs - n_iv_fe_groups - k_exo_final
+
+                if df1 > 0 && df2 > 0
+                    F_j = (ess_j / df1) / (rss_j / df2)
+                    p_j = fdistccdf(df1, df2, F_j)
+                    push!(F_kp_per_endo, F_j)
+                    push!(p_kp_per_endo, p_j)
+                else
+                    push!(F_kp_per_endo, T(NaN))
+                    push!(p_kp_per_endo, T(NaN))
+                end
+            end
+
+            # Joint F is just the first (or average if multiple endogenous)
+            if k_endo_final == 1
+                F_kp = F_kp_per_endo[1]
+                p_kp = p_kp_per_endo[1]
+            else
+                # For multiple endogenous, use harmonic mean of F-stats
+                F_kp = k_endo_final / sum(1 ./ F_kp_per_endo)
+                df1 = n_iv_fe_groups - 1
+                df2 = data_prep.nobs - n_iv_fe_groups - k_exo_final
+                p_kp = fdistccdf(df1, df2, F_kp)
+            end
+
+            # For FE case, we don't have traditional Pi/Z_res structure
+            # Store what we can for potential recomputation
+            first_stage_data = FirstStageData{T}(
+                zeros(T, 0, k_endo_final),  # Pi not applicable for FE case
+                copy(Xendo_res),
+                zeros(T, data_prep.nobs, 0),  # Z_res not applicable
+                endo_names_final,
+                k_exo_final,
+                copy(Xendo),
+                copy(newZ),
+                data_prep.has_intercept
+            )
+
+        else
+            ##################################################################
+            ## Standard First-Stage F-Statistics
+            ##################################################################
+
+            # Compute residuals for first-stage F-stat: Xendo - newZ * Pi
+            Xendo_res = BLAS.gemm!('N', 'N', -one(T), newZ, Pi, one(T), copy(Xendo))
+
+            # Partial out Z w.r.t. Xexo using block system
+            XexoZ_aug = build_block_symmetric(
+                [XexoXexo.data, XexoZ, ZZ.data],
+                [k_exo_final, k_z_final]
+            )
+            Pi2 = ls_solve!(XexoZ_aug, k_exo_final)
+            Z_res = BLAS.gemm!('N', 'N', -one(T), Xexo, Pi2, one(T), copy(Z))
+
+            # Extract the relevant part of Pi (instruments only)
+            Pip = Pi[(k_exo_final + 1):end, :]
+
+            # Compute joint first-stage F-statistic using Kleibergen-Paap rank test
+            F_kp,
+            p_kp = compute_first_stage_fstat(
+                Xendo_res, Z_res, Pip,
+                CovarianceMatrices.HR1(),
+                data_prep.nobs,
+                size(X, 2),
+                dof_fes_local
+            )
+
+            # Compute per-endogenous first-stage F-statistics
+            # Pass original data for robust Wald F computation (matches R's approach)
+            F_kp_per_endo,
+            p_kp_per_endo = compute_per_endogenous_fstats(
+                Xendo_res, Z_res, Pip,
+                CovarianceMatrices.HR1(),
+                data_prep.nobs,
+                size(X, 2),
+                dof_fes_local;
+                Xendo_orig = Xendo,
+                newZ = newZ
+            )
+
+            first_stage_data = FirstStageData{T}(
+                copy(Pip),
+                copy(Xendo_res),
+                copy(Z_res),
+                endo_names_final,
+                k_exo_final,
+                copy(Xendo),          # Original endogenous variables
+                copy(newZ),           # Full first-stage design [Xexo, Z]
+                data_prep.has_intercept
+            )
+        end  # end if has_fe_iv
+    end  # end if first_stage
 
     ##############################################################################
     ## Compute Statistics

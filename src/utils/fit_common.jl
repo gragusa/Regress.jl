@@ -108,8 +108,10 @@ function prepare_data(df::DataFrame,
         formula = FormulaTerm(formula.lhs, InterceptTerm{true}() + formula.rhs)
     end
 
-    formula, formula_endo, formula_iv = parse_iv(formula)
-    has_iv_flag = formula_iv != FormulaTerm(ConstantTerm(0), ConstantTerm(0))
+    formula, formula_endo, formula_iv, formula_iv_fe = parse_iv(formula)
+    has_iv_flag = formula_iv != FormulaTerm(ConstantTerm(0), ConstantTerm(0)) ||
+                  formula_iv_fe != FormulaTerm(ConstantTerm(0), ConstantTerm(0))
+    has_fe_iv = formula_iv_fe != FormulaTerm(ConstantTerm(0), ConstantTerm(0))
 
     formula, formula_fes = parse_fe(formula)
     has_fes = formula_fes != FormulaTerm(ConstantTerm(0), ConstantTerm(0))
@@ -133,9 +135,10 @@ function prepare_data(df::DataFrame,
     # Collect all variables
     exo_vars = unique(StatsModels.termvars(formula))
     iv_vars = unique(StatsModels.termvars(formula_iv))
+    iv_fe_vars = unique(StatsModels.termvars(formula_iv_fe))
     endo_vars = unique(StatsModels.termvars(formula_endo))
     fe_vars = unique(StatsModels.termvars(formula_fes))
-    all_vars = unique(vcat(exo_vars, endo_vars, iv_vars, fe_vars))
+    all_vars = unique(vcat(exo_vars, endo_vars, iv_vars, iv_fe_vars, fe_vars))
 
     # Create estimation sample
     esample = completecases(df, all_vars)
@@ -163,8 +166,10 @@ function prepare_data(df::DataFrame,
         formula_origin = formula_origin,
         formula_endo = formula_endo,
         formula_iv = formula_iv,
+        formula_iv_fe = formula_iv_fe,
         formula_fes = formula_fes,
         has_iv = has_iv_flag,
+        has_fe_iv = has_fe_iv,
         has_fes = has_fes,
         has_intercept = has_intercept,
         has_fe_intercept = has_fe_intercept,
@@ -175,6 +180,7 @@ function prepare_data(df::DataFrame,
         fekeys = fekeys,
         exo_vars = exo_vars,
         iv_vars = iv_vars,
+        iv_fe_vars = iv_fe_vars,
         endo_vars = endo_vars,
         fe_vars = fe_vars,
         all_vars = all_vars,
