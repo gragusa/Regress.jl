@@ -13,6 +13,27 @@ eachterm(@nospecialize(x::NTuple{N, AbstractTerm})) where {N} = x
 ##
 ##############################################################################
 has_iv(@nospecialize(f::FormulaTerm)) = any(x -> x isa FormulaTerm, eachterm(f.rhs))
+
+"""
+    has_fe_in_iv(formula_iv::FormulaTerm)
+
+Check if the instrument specification contains fe() terms.
+This enables the FE-based first-stage estimation for high-dimensional instruments.
+"""
+has_fe_in_iv(@nospecialize(f::FormulaTerm)) = has_fe(f)
+
+"""
+    parse_iv(f::FormulaTerm)
+
+Parse IV formula, separating endogenous variables from instruments.
+Also detects fe() terms in the instrument specification for efficient first-stage estimation.
+
+Returns:
+- formula_exo: Exogenous part of formula
+- formula_endo: Endogenous variables
+- formula_iv: Regular (non-FE) instruments
+- formula_iv_fe: FE-based instruments (empty if none)
+"""
 function parse_iv(@nospecialize(f::FormulaTerm))
     if has_iv(f)
         i = findfirst(x -> x isa FormulaTerm, eachterm(f.rhs))
@@ -25,12 +46,20 @@ function parse_iv(@nospecialize(f::FormulaTerm))
         length(exos) < length(endos) &&
             throw("Model not identified. There must be at least as many instrumental variables as endogeneneous variables")
         formula_endo = FormulaTerm(ConstantTerm(0), tuple(ConstantTerm(0), endos...))
-        formula_iv = FormulaTerm(ConstantTerm(0), tuple(ConstantTerm(0), exos...))
+
+        # Separate FE instruments from regular instruments
+        fe_ivs = Tuple(x for x in exos if has_fe(x))
+        regular_ivs = Tuple(x for x in exos if !has_fe(x))
+
+        formula_iv = FormulaTerm(ConstantTerm(0), tuple(ConstantTerm(0), regular_ivs...))
+        formula_iv_fe = FormulaTerm(ConstantTerm(0), tuple(ConstantTerm(0), fe_ivs...))
+
         formula_exo = FormulaTerm(
             f.lhs, tuple((term for term in eachterm(f.rhs) if !isa(term, FormulaTerm))..., both...))
-        return formula_exo, formula_endo, formula_iv
+        return formula_exo, formula_endo, formula_iv, formula_iv_fe
     else
         return f, FormulaTerm(ConstantTerm(0), ConstantTerm(0)),
+        FormulaTerm(ConstantTerm(0), ConstantTerm(0)),
         FormulaTerm(ConstantTerm(0), ConstantTerm(0))
     end
 end

@@ -838,8 +838,7 @@ function _estimator_name(m::IVEstimator)
 end
 
 function top(m::IVEstimator)
-    out = ["Estimator" _estimator_name(m);
-           "Number of obs" sprint(show, nobs(m), context = :compact => true);
+    out = ["Number of obs" sprint(show, nobs(m), context = :compact => true);
            "Converged" m.converged;
            "dof (model)" sprint(show, dof(m), context = :compact => true);
            "dof (residuals)" sprint(show, dof_residual(m), context = :compact => true);
@@ -889,7 +888,8 @@ function Base.show(io::IO, m::IVEstimator)
          for i in 1:length(A)]
     totwidth = compute_table_width(A, colnms)
 
-    ctitle = string(typeof(m))
+    # Title: estimator name (TSLS, LIML, Fuller, etc.)
+    ctitle = _estimator_name(m)
     halfwidth = max(0, div(totwidth - length(ctitle), 2))
     print(io, " " ^ halfwidth * ctitle * " " ^ halfwidth)
     ctop = top(m)
@@ -927,6 +927,10 @@ function Base.show(io::IO, m::IVEstimator)
 
     # Display per-endogenous first-stage F-statistics if available
     _show_per_endogenous_fstats(io, m, totwidth)
+
+    # Note: variance-covariance type only
+    vcov_name = vcov_type_name(m.vcov_estimator)
+    println(io, "Note: Std. errors computed using $vcov_name variance estimator")
 
     nothing
 end
@@ -970,8 +974,8 @@ function Base.show(io::IO, ::MIME"text/html", m::IVEstimator)
     rownms = ct.rownms
     colnms = ct.colnms
 
-    # Start table
-    html_table_start(io; class = "regress-table regress-iv", caption = string(typeof(m)))
+    # Start table with estimator name as caption
+    html_table_start(io; class="regress-table regress-iv", caption=_estimator_name(m))
 
     # Summary statistics section
     ctop = top(m)
@@ -1017,6 +1021,20 @@ function Base.show(io::IO, ::MIME"text/html", m::IVEstimator)
         end
         html_tfoot_end(io)
     end
+
+    # Footer with vcov type and instrument info
+    vcov_name = vcov_type_name(m.vcov_estimator)
+    note = "Note: Std. errors computed using $vcov_name variance estimator"
+    if !isnothing(m.postestimation) && !isnothing(m.postestimation.first_stage_data)
+        fsd = m.postestimation.first_stage_data
+        n_instruments = size(fsd.Z_res, 2)
+        n_endogenous = length(fsd.endogenous_names)
+        instr_str = n_instruments == 1 ? "instrument" : "instruments"
+        note *= "; $n_instruments excluded $instr_str, $n_endogenous endogenous"
+    end
+    html_tfoot_start(io; class="regress-footer")
+    html_row(io, [note, "", "", "", "", "", ""])
+    html_tfoot_end(io)
 
     html_table_end(io)
 end
