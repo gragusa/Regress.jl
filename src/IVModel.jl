@@ -117,7 +117,9 @@ one of `TSLS()`, `LIML()`, etc.
 iv(TSLS(), df, @formula(y ~ x + (endo ~ instrument)))
 ```
 """
-struct IVEstimator{T, E <: AbstractIVEstimator, V, P <: Union{PostEstimationDataIV{T}, Nothing}} <: StatsAPI.RegressionModel
+struct IVEstimator{
+    T, E <: AbstractIVEstimator, V, P <: Union{PostEstimationDataIV{T}, Nothing}} <:
+       StatsAPI.RegressionModel
     estimator::E  # Which IV estimator was used
 
     coef::Vector{T}   # Vector of coefficients
