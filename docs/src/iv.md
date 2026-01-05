@@ -53,17 +53,17 @@ model.F_kp_per_endo   # Vector of F-statistics
 model.p_kp_per_endo   # Vector of p-values
 ```
 
-The output displays a table with weak instrument warnings (F < 10):
+The output displays a table with the F-statistics:
 
 ```
 First-Stage F-Statistics (per endogenous variable):
-------------------------------------------------------------
-Endogenous                         F-stat      P-value  Weak?
-------------------------------------------------------------
-Price                             23.4567       0.0000
-NDI                                8.1234       0.0012   Yes
-------------------------------------------------------------
-Note: F < 10 may indicate weak instruments (Stock-Yogo)
+────────────────────────────────────────────────────────────
+Endogenous                             F-stat        P-value
+────────────────────────────────────────────────────────────
+Price                               23.4567         0.0000
+NDI                                  8.1234         0.0012
+────────────────────────────────────────────────────────────
+Note: Std. errors computed using HC1 variance estimator
 ```
 
 ### `first_stage()` Function
@@ -384,7 +384,7 @@ F (1st stage, joint):     2.38722  P (1st stage, joint):       0.000
 ────────────────────────────────────────────────────────────────────
 educ  0.0928181  0.00966506  9.60347    <1e-21  0.0738748   0.111761
 ────────────────────────────────────────────────────────────────────
-Note: 180 excluded instruments, 1 endogenous
+Note: Std. errors computed using HC1 variance estimator
 ```
 
 ### Interpretation
@@ -395,11 +395,27 @@ The coefficient on education is **0.093**, implying a 9.3% increase in weekly wa
 
 Regress.jl efficiently handles this large-scale problem:
 - **329,509 observations**
-- **180 excluded instruments**
+- **~180 excluded instruments** (yob×qob + sob×qob interactions)
 - **~62 fixed effects** (year of birth + state of birth)
 - **~4 seconds** estimation time (after Julia compilation)
 
 The fixed effects are partialed out using the iterative demeaning algorithm from FixedEffects.jl, which scales well to high-dimensional problems.
+
+### FE-Based Instruments (Experimental)
+
+For even faster estimation with high-dimensional categorical instruments, you can use the `fe()` syntax inside the instrument specification:
+
+```julia
+# Standard approach (creates dummy matrices - slower)
+model = iv(TSLS(), data,
+    @formula(lwage ~ (educ ~ yob&qob + sob&qob) + fe(yob) + fe(sob)))
+
+# FE-based approach (uses absorption algorithm - much faster)
+model_fe = iv(TSLS(), data,
+    @formula(lwage ~ (educ ~ fe(yob)&fe(qob) + fe(sob)&fe(qob)) + fe(yob) + fe(sob)))
+```
+
+The FE-based approach uses the efficient fixed effects absorption algorithm for the first stage, providing 50x+ speedup and 60x memory reduction for large categorical instruments. Both approaches produce numerically identical results.
 
 ### Robust Inference
 

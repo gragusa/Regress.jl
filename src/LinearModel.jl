@@ -59,7 +59,7 @@ struct OLSEstimator{T <: AbstractFloat, P <: OLSLinearPredictor{T}, V} <:
     # Formula and metadata
     formula::FormulaTerm
     formula_schema::FormulaTerm
-    contrasts::Dict
+    contrasts::Dict{Symbol, Any}
 
     # Sample information
     esample::BitVector              # Which observations used

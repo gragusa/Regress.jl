@@ -38,6 +38,9 @@ function fit_tsls(df,
     # Check nthreads
     nthreads = validate_nthreads(method, nthreads)
 
+    # Convert contrasts to Dict{Symbol, Any}
+    contrasts = convert(Dict{Symbol, Any}, contrasts)
+
     # Convert to DataFrame
     df = DataFrame(df; copycols = false)
 
@@ -683,7 +686,7 @@ function fit_tsls(df,
     ## Return IVEstimator
     ##############################################################################
 
-    return IVEstimator{T, typeof(default_vcov)}(
+    return IVEstimator{T, TSLS, typeof(default_vcov), typeof(postestimation_data)}(
         TSLS(),
         coef,
         esample_final, residuals2, augmentdf,

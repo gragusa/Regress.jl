@@ -108,15 +108,17 @@ one of `TSLS()`, `LIML()`, etc.
 
 # Type Parameters
 - `T`: Float type (Float64 or Float32)
+- `E`: IV Estimator type (TSLS, LIML, etc.)
 - `V`: Variance-covariance estimator type (HC1, HC3, CR1, etc.)
+- `P`: Post-estimation data type (PostEstimationDataIV or Nothing)
 
 # Examples
 ```julia
 iv(TSLS(), df, @formula(y ~ x + (endo ~ instrument)))
 ```
 """
-struct IVEstimator{T, V} <: StatsAPI.RegressionModel
-    estimator::AbstractIVEstimator  # Which IV estimator was used
+struct IVEstimator{T, E <: AbstractIVEstimator, V, P <: Union{PostEstimationDataIV{T}, Nothing}} <: StatsAPI.RegressionModel
+    estimator::E  # Which IV estimator was used
 
     coef::Vector{T}   # Vector of coefficients
 
@@ -125,7 +127,7 @@ struct IVEstimator{T, V} <: StatsAPI.RegressionModel
     fe::DataFrame
 
     # Post-estimation data for CovarianceMatrices.jl
-    postestimation::Union{PostEstimationDataIV{T}, Nothing}
+    postestimation::P
 
     fekeys::Vector{Symbol}
 
@@ -133,7 +135,7 @@ struct IVEstimator{T, V} <: StatsAPI.RegressionModel
     responsename::Union{String, Symbol} # Name of dependent variable
     formula::FormulaTerm        # Original formula
     formula_schema::FormulaTerm # Schema for predict
-    contrasts::Dict
+    contrasts::Dict{Symbol, Any}
 
     nobs::Int64             # Number of observations
     dof::Int64              # Number parameters estimated - has_intercept. Used for p-value of F-stat.
@@ -1178,7 +1180,7 @@ model_cr1 = model_cr + vcov(CR1(:firm))
 
 See also: [`VcovSpec`](@ref)
 """
-function Base.:+(m::IVEstimator{T, V1}, v::VcovSpec{V2}) where {T, V1, V2}
+function Base.:+(m::IVEstimator{T, E, V1, P}, v::VcovSpec{V2}) where {T, E, V1, P, V2}
     # Compute vcov matrix using StatsBase.vcov (which dispatches to IVModel.jl methods)
     vcov_mat = StatsBase.vcov(v.estimator, m)
 
@@ -1204,7 +1206,7 @@ function Base.:+(m::IVEstimator{T, V1}, v::VcovSpec{V2}) where {T, V1, V2}
     vcov_copy = deepcopy_vcov(v.estimator)
 
     # Return new IVEstimator with same data but different vcov type
-    return IVEstimator{T, V2}(
+    return IVEstimator{T, E, V2, P}(
         m.estimator, m.coef,
         m.esample, m.residuals, m.fe,
         m.postestimation, m.fekeys,
@@ -1247,7 +1249,7 @@ fs.F_per_endo        # Per-endogenous F-stats
 
 See also: [`FirstStageResult`](@ref)
 """
-function first_stage(m::IVEstimator{T, V}) where {T, V}
+function first_stage(m::IVEstimator{T}) where {T}
     isnothing(m.postestimation) &&
         error("Model does not have post-estimation data stored. Fit with save=true.")
     isnothing(m.postestimation.first_stage_data) && error("First-stage data not available.")

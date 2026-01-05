@@ -48,6 +48,9 @@ function fit_ols(df,
     collinearity in (:qr, :sweep) ||
         throw(ArgumentError("collinearity must be :qr or :sweep, got :$collinearity"))
 
+    # Convert contrasts to Dict{Symbol, Any}
+    contrasts = convert(Dict{Symbol, Any}, contrasts)
+
     # Convert to DataFrame
     df = DataFrame(df; copycols = false)
 

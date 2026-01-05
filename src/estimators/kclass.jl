@@ -46,6 +46,9 @@ function fit_kclass_estimator(
     # Check nthreads
     nthreads = validate_nthreads(method, nthreads)
 
+    # Convert contrasts to Dict{Symbol, Any}
+    contrasts = convert(Dict{Symbol, Any}, contrasts)
+
     # Convert to DataFrame
     df = DataFrame(df; copycols = false)
 
@@ -539,7 +542,7 @@ function fit_kclass_estimator(
     ## Return IVEstimator
     ##############################################################################
 
-    return IVEstimator{T, typeof(default_vcov)}(
+    return IVEstimator{T, typeof(estimator), typeof(default_vcov), typeof(postestimation_data)}(
         estimator,  # Store the actual estimator (LIML, Fuller, KClass)
         coef,
         esample_final, residuals2, augmentdf,
