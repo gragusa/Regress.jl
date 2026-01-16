@@ -740,9 +740,12 @@ end
 
 # Residual adjustment functions for OLSMatrixEstimator
 @noinline residualadjustment(k::CM.HR0, r::OLSMatrixEstimator) = 1.0
-@noinline residualadjustment(k::CM.HR1, r::OLSMatrixEstimator) = sqrt(nobs(r) / dof_residual(r))
-@noinline residualadjustment(k::CM.HR2, r::OLSMatrixEstimator) = @. 1.0 / sqrt(1.0 - $leverage(r))
-@noinline residualadjustment(k::CM.HR3, r::OLSMatrixEstimator) = @. 1.0 / (1.0 - $leverage(r))
+@noinline residualadjustment(k::CM.HR1, r::OLSMatrixEstimator) = sqrt(nobs(r) /
+                                                                      dof_residual(r))
+@noinline residualadjustment(k::CM.HR2, r::OLSMatrixEstimator) = @. 1.0 /
+                                                                    sqrt(1.0 - $leverage(r))
+@noinline residualadjustment(k::CM.HR3, r::OLSMatrixEstimator) = @. 1.0 /
+                                                                    (1.0 - $leverage(r))
 
 @noinline function residualadjustment(k::CM.HR4, r::OLSMatrixEstimator)
     n = nobs(r)
