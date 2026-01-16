@@ -2,6 +2,28 @@ const CM = CovarianceMatrices
 
 ##############################################################################
 ##
+## Helper: Mask vcov matrix with NaN for collinear entries
+##
+##############################################################################
+
+"""
+    mask_vcov_collinear(Σ::AbstractMatrix{T}, basis_coef::BitVector) where {T}
+
+Create a copy of vcov matrix with NaN for collinear entries.
+The matrix Σ is expected to be full size (matching length of basis_coef).
+Non-collinear entries are preserved; collinear entries are set to NaN.
+
+Uses indexed assignment instead of element-wise loop for better performance.
+"""
+function mask_vcov_collinear(Σ::AbstractMatrix{T}, basis_coef::BitVector) where {T}
+    Σ_out = fill(T(NaN), size(Σ))
+    valid_idx = findall(basis_coef)
+    Σ_out[valid_idx, valid_idx] = Σ[valid_idx, valid_idx]
+    return Σ_out
+end
+
+##############################################################################
+##
 ## Direct HC1 Vcov Computation (for use at fit time)
 ##
 ##############################################################################
@@ -37,12 +59,12 @@ function compute_hc1_vcov_direct(
         dof_fes::Int,
         dof_residual::Int
 ) where {T <: AbstractFloat}
-    # Compute moment matrix: M = X .* residuals
-    M = X .* residuals
-
     # HR1 residual adjustment: sqrt(n / dof_residual)
     adjustment = sqrt(T(n) / T(dof_residual))
-    M .*= adjustment
+
+    # Compute moment matrix with adjustment fused: M = X .* (residuals .* adjustment)
+    # This avoids a second pass over M
+    M = X .* (residuals .* adjustment)
 
     # aVar = M'M / n
     aVar = (M' * M) / T(n)
@@ -184,17 +206,7 @@ function CM.aVar(
     Σ = aVar(k, mm; demean = demean, prewhite = prewhite, scale = scale)
 
     all(basis_coef) && return Σ
-
-    Σ_out = similar(Σ)
-    fill!(Σ_out, NaN)
-    for j in axes(Σ, 1)
-        for i in axes(Σ, 2)
-            if basis_coef[j] && basis_coef[i]
-                Σ_out[j, i] = Σ[j, i]
-            end
-        end
-    end
-    return Σ_out
+    return mask_vcov_collinear(Σ, basis_coef)
 end
 
 # Disambiguating method for cluster-robust estimators (CR <: AbstractAsymptoticVarianceEstimator)
@@ -219,17 +231,7 @@ function CM.aVar(
     Σ = aVar(k, mm; demean = demean, prewhite = prewhite, scale = scale)
 
     all(basis_coef) && return Σ
-
-    Σ_out = similar(Σ)
-    fill!(Σ_out, NaN)
-    for j in axes(Σ, 1)
-        for i in axes(Σ, 2)
-            if basis_coef[j] && basis_coef[i]
-                Σ_out[j, i] = Σ[j, i]
-            end
-        end
-    end
-    return Σ_out
+    return mask_vcov_collinear(Σ, basis_coef)
 end
 
 function CM.setkernelweights!(
@@ -393,7 +395,11 @@ function leverage(m::OLSEstimator{T, <:OLSPredictorChol}) where {T}
     # For Cholesky: X'X = U'U, so (X'X)^(-1) = U^(-1) * U^(-T)
     # h_i = X_i * U^(-1) * U^(-T) * X_i' = ||X_i * U^(-1)||^2
     X = modelmatrix(m)
-    return vec(sum(abs2, X / m.pp.chol.U, dims = 2))
+    # Compute X / U and use column-major friendly sum
+    # XU = X / U is n×k, we want row-wise sum of squares
+    # Transpose to k×n for column-major access: sum(abs2, XU', dims=1)
+    XU = X / m.pp.chol.U
+    return vec(sum(abs2, XU', dims = 1))
 end
 
 function leverage(m::OLSEstimator{T, <:OLSPredictorQR}) where {T}
@@ -401,13 +407,14 @@ function leverage(m::OLSEstimator{T, <:OLSPredictorQR}) where {T}
     # h_i = ||Q_i||^2
     X = modelmatrix(m)
     Q = Matrix(m.pp.qr.Q)[:, 1:size(m.pp.qr.R, 1)]
-    return vec(sum(abs2, Q, dims = 2))
+    # Transpose for column-major access
+    return vec(sum(abs2, Q', dims = 1))
 end
 
 @noinline residualadjustment(k::CM.HR0, r::OLSEstimator) = 1.0
-@noinline residualadjustment(k::CM.HR1, r::OLSEstimator) = √nobs(r) / √dof_residual(r)
-@noinline residualadjustment(k::CM.HR2, r::OLSEstimator) = 1.0 ./ (1 .- leverage(r)) .^ 0.5
-@noinline residualadjustment(k::CM.HR3, r::OLSEstimator) = 1.0 ./ (1 .- leverage(r))
+@noinline residualadjustment(k::CM.HR1, r::OLSEstimator) = sqrt(nobs(r) / dof_residual(r))
+@noinline residualadjustment(k::CM.HR2, r::OLSEstimator) = @. 1.0 / sqrt(1.0 - $leverage(r))
+@noinline residualadjustment(k::CM.HR3, r::OLSEstimator) = @. 1.0 / (1.0 - $leverage(r))
 
 @noinline function residualadjustment(k::CM.HR4, r::OLSEstimator)
     n = nobs(r)
@@ -461,7 +468,7 @@ function residualadjustment(k::CM.CR2, r::OLSEstimator)
     !isempty(wts) && @. u *= sqrt(wts)
     XX = bread(r)
     for groups in 1:g.ngroups
-        ind = findall(x -> x .== groups, g)
+        ind = findall(==(groups), g)
         Xg = view(X, ind, :)
         ug = view(u, ind, :)
         if isempty(wts)
@@ -494,7 +501,7 @@ function residualadjustment(k::CM.CR3, r::OLSEstimator)
     !isempty(wts) && @. u *= sqrt(wts)
     XX = bread(r)
     for groups in 1:g.ngroups
-        ind = findall(g .== groups)
+        ind = findall(==(groups), g)
         Xg = view(X, ind, :)
         ug = view(u, ind, :)
         if isempty(wts)
@@ -719,21 +726,23 @@ Compute leverage values (diagonal of hat matrix H = X(X'X)^(-1)X').
 """
 function leverage(m::OLSMatrixEstimator{T, <:OLSPredictorChol}) where {T}
     X = modelmatrix(m)
-    return vec(sum(abs2, X / m.pp.chol.U, dims = 2))
+    # Transpose for column-major access: sum(abs2, XU', dims=1)
+    XU = X / m.pp.chol.U
+    return vec(sum(abs2, XU', dims = 1))
 end
 
 function leverage(m::OLSMatrixEstimator{T, <:OLSPredictorQR}) where {T}
     X = modelmatrix(m)
     Q = Matrix(m.pp.qr.Q)[:, 1:size(m.pp.qr.R, 1)]
-    return vec(sum(abs2, Q, dims = 2))
+    # Transpose for column-major access
+    return vec(sum(abs2, Q', dims = 1))
 end
 
 # Residual adjustment functions for OLSMatrixEstimator
 @noinline residualadjustment(k::CM.HR0, r::OLSMatrixEstimator) = 1.0
-@noinline residualadjustment(k::CM.HR1, r::OLSMatrixEstimator) = √nobs(r) / √dof_residual(r)
-@noinline residualadjustment(k::CM.HR2, r::OLSMatrixEstimator) = 1.0 ./
-                                                                 (1 .- leverage(r)) .^ 0.5
-@noinline residualadjustment(k::CM.HR3, r::OLSMatrixEstimator) = 1.0 ./ (1 .- leverage(r))
+@noinline residualadjustment(k::CM.HR1, r::OLSMatrixEstimator) = sqrt(nobs(r) / dof_residual(r))
+@noinline residualadjustment(k::CM.HR2, r::OLSMatrixEstimator) = @. 1.0 / sqrt(1.0 - $leverage(r))
+@noinline residualadjustment(k::CM.HR3, r::OLSMatrixEstimator) = @. 1.0 / (1.0 - $leverage(r))
 
 @noinline function residualadjustment(k::CM.HR4, r::OLSMatrixEstimator)
     n = nobs(r)
@@ -793,17 +802,7 @@ function CM.aVar(
     Σ = aVar(k, mm; demean = demean, prewhite = prewhite, scale = scale)
 
     all(basis_coef) && return Σ
-
-    Σ_out = similar(Σ)
-    fill!(Σ_out, NaN)
-    for j in axes(Σ, 1)
-        for i in axes(Σ, 2)
-            if basis_coef[j] && basis_coef[i]
-                Σ_out[j, i] = Σ[j, i]
-            end
-        end
-    end
-    return Σ_out
+    return mask_vcov_collinear(Σ, basis_coef)
 end
 
 # Disambiguating method for cluster-robust estimators
@@ -825,17 +824,7 @@ function CM.aVar(
     Σ = aVar(k, mm; demean = demean, prewhite = prewhite, scale = scale)
 
     all(basis_coef) && return Σ
-
-    Σ_out = similar(Σ)
-    fill!(Σ_out, NaN)
-    for j in axes(Σ, 1)
-        for i in axes(Σ, 2)
-            if basis_coef[j] && basis_coef[i]
-                Σ_out[j, i] = Σ[j, i]
-            end
-        end
-    end
-    return Σ_out
+    return mask_vcov_collinear(Σ, basis_coef)
 end
 
 function CM.setkernelweights!(

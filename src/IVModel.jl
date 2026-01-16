@@ -125,7 +125,7 @@ struct IVEstimator{
     coef::Vector{T}   # Vector of coefficients
 
     esample::BitVector      # Is the row of the original dataframe part of the estimation sample?
-    residuals::Union{AbstractVector, Nothing}
+    residuals::Union{Vector{T}, Vector{Union{T, Missing}}, Nothing}
     fe::DataFrame
 
     # Post-estimation data for CovarianceMatrices.jl
@@ -133,7 +133,7 @@ struct IVEstimator{
 
     fekeys::Vector{Symbol}
 
-    coefnames::Vector       # Name of coefficients
+    coefnames::Vector{String}       # Name of coefficients
     responsename::Union{String, Symbol} # Name of dependent variable
     formula::FormulaTerm        # Original formula
     formula_schema::FormulaTerm # Schema for predict
@@ -333,7 +333,7 @@ function residualadjustment(k::_CM.CR2, m::IVEstimator)
     u = copy(resid)
     XX = bread(m)
     for groups in 1:g.ngroups
-        ind = findall(x -> x == groups, g)
+        ind = findall(==(groups), g)
         Xg = view(X, ind, :)
         ug = view(u, ind)
         Hgg = Xg * XX * Xg'
@@ -354,7 +354,7 @@ function residualadjustment(k::_CM.CR3, m::IVEstimator)
     u = copy(resid)
     XX = bread(m)
     for groups in 1:g.ngroups
-        ind = findall(g .== groups)
+        ind = findall(==(groups), g)
         Xg = view(X, ind, :)
         ug = view(u, ind)
         Hgg = Xg * XX * Xg'
@@ -709,7 +709,7 @@ end
 
 # Note: is_cont_fe_int() and has_cont_fe_interaction() are defined in utils/fit_common.jl
 
-function StatsAPI.predict(m::IVEstimator, data)
+function StatsAPI.predict(m::IVEstimator{T}, data) where {T}
     Tables.istable(data) ||
         throw(ArgumentError("expected second argument to be a Table, got $(typeof(data))"))
 
@@ -719,12 +719,20 @@ function StatsAPI.predict(m::IVEstimator, data)
     cdata = StatsModels.columntable(data)
     cols, nonmissings = StatsModels.missing_omit(cdata, m.formula_schema.rhs)
     Xnew = modelmatrix(m.formula_schema, cols)
-    if all(nonmissings)
-        out = Xnew * m.coef
-    else
-        out = Vector{Union{Float64, Missing}}(missing, length(Tables.rows(cdata)))
-        out[nonmissings] = Xnew * m.coef
-    end
+
+    # Type-stable inner function via function barrier
+    return _predict_iv_impl(Xnew, m.coef, nonmissings, m, data, T)
+end
+
+# Type-stable inner function for IV predict
+function _predict_iv_impl(
+        Xnew::AbstractMatrix, coef_vec::AbstractVector{T},
+        nonmissings::AbstractVector{Bool}, m::IVEstimator{T}, data, ::Type{T}
+) where {T}
+    n = length(nonmissings)
+    # Always allocate with Union type for consistent return type
+    out = Vector{Union{T, Missing}}(missing, n)
+    @views out[nonmissings] .= Xnew * coef_vec
 
     if has_fe(m)
         nrow(fe(m)) > 0 ||
@@ -735,21 +743,13 @@ function StatsAPI.predict(m::IVEstimator, data)
             makeunique = true, matchmissing = :equal, order = :left)
         fes = combine(fes, AsTable(Not(m.fekeys)) => sum)
 
-        if any(ismissing, Matrix(select(df, m.fekeys))) || any(ismissing, Matrix(fes))
-            out = allowmissing(out)
-        end
-
-        out[nonmissings] .+= fes[nonmissings, 1]
-
-        if any(.!nonmissings)
-            out[.!nonmissings] .= missing
-        end
+        @views out[nonmissings] .+= fes[nonmissings, 1]
     end
 
     return out
 end
 
-function StatsAPI.residuals(m::IVEstimator, data)
+function StatsAPI.residuals(m::IVEstimator{T}, data) where {T}
     Tables.istable(data) ||
         throw(ArgumentError("expected second argument to be a Table, got $(typeof(data))"))
     has_fe(m) &&
@@ -758,12 +758,20 @@ function StatsAPI.residuals(m::IVEstimator, data)
     cols, nonmissings = StatsModels.missing_omit(cdata, m.formula_schema.rhs)
     Xnew = modelmatrix(m.formula_schema, cols)
     y = response(m.formula_schema, cdata)
-    if all(nonmissings)
-        out = y - Xnew * m.coef
-    else
-        out = Vector{Union{Float64, Missing}}(missing, length(Tables.rows(cdata)))
-        out[nonmissings] = y - Xnew * m.coef
-    end
+
+    # Type-stable inner function via function barrier
+    return _residuals_iv_impl(y, Xnew, m.coef, nonmissings, T)
+end
+
+# Type-stable inner function for IV residuals
+function _residuals_iv_impl(
+        y::AbstractVector, Xnew::AbstractMatrix, coef_vec::AbstractVector{T},
+        nonmissings::AbstractVector{Bool}, ::Type{T}
+) where {T}
+    n = length(nonmissings)
+    # Always allocate with Union type for consistent return type
+    out = Vector{Union{T, Missing}}(missing, n)
+    @views out[nonmissings] .= y .- Xnew * coef_vec
     return out
 end
 

@@ -451,7 +451,7 @@ end
 ##
 ##############################################################################
 
-function StatsAPI.predict(m::OLSEstimator, data)
+function StatsAPI.predict(m::OLSEstimator{T}, data) where {T}
     Tables.istable(data) ||
         throw(ArgumentError("expected second argument to be a Table, got $(typeof(data))"))
 
@@ -465,12 +465,20 @@ function StatsAPI.predict(m::OLSEstimator, data)
     # Use only non-collinear coefficients
     coef_valid = coef(m)[m.basis_coef]
 
-    if all(nonmissings)
-        out = Xnew[:, m.basis_coef] * coef_valid
-    else
-        out = Vector{Union{Float64, Missing}}(missing, length(Tables.rows(cdata)))
-        out[nonmissings] = Xnew[:, m.basis_coef] * coef_valid
-    end
+    # Type-stable inner function via function barrier
+    return _predict_ols_impl(Xnew, coef_valid, nonmissings, m.basis_coef, m, data, T)
+end
+
+# Type-stable inner function for OLS predict
+function _predict_ols_impl(
+        Xnew::AbstractMatrix, coef_valid::AbstractVector{T},
+        nonmissings::AbstractVector{Bool}, basis_coef::BitVector,
+        m::OLSEstimator{T}, data, ::Type{T}
+) where {T}
+    n = length(nonmissings)
+    # Always allocate with Union type for consistent return type
+    out = Vector{Union{T, Missing}}(missing, n)
+    @views out[nonmissings] .= Xnew[:, basis_coef] * coef_valid
 
     if has_fe(m)
         nrow(fe(m)) > 0 ||
@@ -481,21 +489,13 @@ function StatsAPI.predict(m::OLSEstimator, data)
             on = m.fes.fe_names, makeunique = true, matchmissing = :equal, order = :left)
         fes = combine(fes, AsTable(Not(m.fes.fe_names)) => sum)
 
-        if any(ismissing, Matrix(select(df, m.fes.fe_names))) || any(ismissing, Matrix(fes))
-            out = allowmissing(out)
-        end
-
-        out[nonmissings] .+= fes[nonmissings, 1]
-
-        if any(.!nonmissings)
-            out[.!nonmissings] .= missing
-        end
+        @views out[nonmissings] .+= fes[nonmissings, 1]
     end
 
     return out
 end
 
-function StatsAPI.residuals(m::OLSEstimator, data)
+function StatsAPI.residuals(m::OLSEstimator{T}, data) where {T}
     Tables.istable(data) ||
         throw(ArgumentError("expected second argument to be a Table, got $(typeof(data))"))
     has_fe(m) &&
@@ -509,12 +509,19 @@ function StatsAPI.residuals(m::OLSEstimator, data)
     # Use only non-collinear coefficients
     coef_valid = coef(m)[m.basis_coef]
 
-    if all(nonmissings)
-        out = y - Xnew[:, m.basis_coef] * coef_valid
-    else
-        out = Vector{Union{Float64, Missing}}(missing, length(Tables.rows(cdata)))
-        out[nonmissings] = y - Xnew[:, m.basis_coef] * coef_valid
-    end
+    # Type-stable inner function via function barrier
+    return _residuals_ols_impl(y, Xnew, coef_valid, nonmissings, m.basis_coef, T)
+end
+
+# Type-stable inner function for OLS residuals
+function _residuals_ols_impl(
+        y::AbstractVector, Xnew::AbstractMatrix, coef_valid::AbstractVector{T},
+        nonmissings::AbstractVector{Bool}, basis_coef::BitVector, ::Type{T}
+) where {T}
+    n = length(nonmissings)
+    # Always allocate with Union type for consistent return type
+    out = Vector{Union{T, Missing}}(missing, n)
+    @views out[nonmissings] .= y .- Xnew[:, basis_coef] * coef_valid
     return out
 end
 

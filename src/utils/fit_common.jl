@@ -502,10 +502,11 @@ function partial_out_fixed_effects!(cols::Vector,
 
     if !isempty(subfes)
         # Save copies if needed for FE estimation
+        # Use copy() instead of deepcopy() - vectors don't need deep copy
         if save_fes
-            oldy = deepcopy(cols[1])
+            oldy = copy(cols[1])
             if length(cols) > 1
-                oldX = hcat([deepcopy(col) for col in cols[2:end]]...)
+                oldX = reduce(hcat, copy.(cols[2:end]))
             end
         end
 

@@ -79,7 +79,7 @@ end
     df.y = 1.0 .+ 0.5 .* df.x .+ isequal.(df.g1, "b") .+ (df.g2 .== "d") * 2
     m = ols(df, @formula(y ~ x + fe(g1) + fe(g2)); save = :fe)  # Fixed: use ols for non-IV formula
     pred = predict(m, df)
-    @test pred isa Vector{Float64}
+    @test pred isa Vector{Union{Float64, Missing}}  # Always Union type for type stability
     @test pred ≈ df.y
 
     # Two groups + two FEs, missing one FE
@@ -104,12 +104,12 @@ end
     @test ismissing(pred[1])
     @test pred[2:end] ≈ df.y[2:end]
 
-    # Interactive FE 
+    # Interactive FE
     df = DataFrame(x = rand(100), g1 = rand(["a", "b"], 100), g2 = rand(["c", "d"], 100))
     df.y = 1.0 .+ 0.5 .* df.x .+ (df.g1 .== "b") .+ (df.g1 .== "b" .&& df.g2 .== "d")
     m = ols(df, @formula(y ~ x + fe(g1)&fe(g2)); save = :fe)  # Fixed: use ols
     pred = predict(m, df)
-    @test pred isa Vector{Float64}
+    @test pred isa Vector{Union{Float64, Missing}}  # Always Union type for type stability
     @test pred ≈ df.y
 
     # Interactive FE + missing 

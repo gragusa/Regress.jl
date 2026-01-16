@@ -92,7 +92,8 @@ function partial_out(
     subdf = Tables.columntable(disallowmissing!(df[esample, vars]))
     formula_y = FormulaTerm(ConstantTerm(0), (ConstantTerm(0), eachterm(formula.lhs)...))
     formula_y_schema = apply_schema(formula_y, schema(formula_y, subdf, contrasts), StatisticalModel)
-    Y = convert(Matrix{Float64}, modelmatrix(formula_y_schema, subdf))
+    T = double_precision ? Float64 : Float32
+    Y = convert(Matrix{T}, modelmatrix(formula_y_schema, subdf))
 
     ynames = coefnames(formula_y_schema)[2]
     if !isa(ynames, Vector)
@@ -111,7 +112,7 @@ function partial_out(
     # Compute residualized X
     formula_x = FormulaTerm(ConstantTerm(0), formula.rhs)
     formula_x_schema = apply_schema(formula_x, schema(formula_x, subdf, contrasts), StatisticalModel)
-    X = convert(Matrix{Float64}, modelmatrix(formula_x_schema, subdf))
+    X = convert(Matrix{T}, modelmatrix(formula_x_schema, subdf))
     if has_fes
         _, b,
         c = solve_residuals!(
