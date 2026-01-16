@@ -186,14 +186,6 @@ educ  0.0928181  0.00966506  9.60347    <1e-21  0.0738748   0.111761
 
 ```
 
-### Robust Inference with Many Instruments
-
-```julia
-# HC3 robust standard errors
-model_hc3 = model + vcov(HC3())
-coeftable(model_hc3)
-```
-
 ## API Reference
 
 ### Main Functions
