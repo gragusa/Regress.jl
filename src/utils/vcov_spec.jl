@@ -1,28 +1,11 @@
 ##############################################################################
 ##
-## VcovSpec - Wrapper for vcov specification in model + vcov() syntax
+## VcovSpec - Extension for vcov specification in model + vcov() syntax
+##
+## The VcovSpec type is imported from CovarianceMatricesBase.
+## Here we just add a specialized vcov method for CovarianceMatrices estimators.
 ##
 ##############################################################################
-
-"""
-    VcovSpec{V}
-
-Wrapper type for variance estimator specification.
-Used with `+` operator: `model + vcov(HC3())`
-
-# Fields
-- `estimator::V`: The variance estimator (HC0, CR1, etc.)
-
-# Examples
-```julia
-model = ols(df, @formula(y ~ x))
-model_hc3 = model + vcov(HC3())
-model_cr1 = model + vcov(CR1(:cluster))
-```
-"""
-struct VcovSpec{V <: CovarianceMatrices.AbstractAsymptoticVarianceEstimator}
-    estimator::V
-end
 
 """
     vcov(estimator::AbstractAsymptoticVarianceEstimator) -> VcovSpec
@@ -54,9 +37,4 @@ model_cr1 = model_cr + vcov(CR1(:firm))
 
 See also: [`OLSEstimator`](@ref), [`IVEstimator`](@ref)
 """
-StatsBase.vcov(v::CovarianceMatrices.AbstractAsymptoticVarianceEstimator) = VcovSpec(v)
-
-# Show method for VcovSpec
-function Base.show(io::IO, v::VcovSpec)
-    print(io, "VcovSpec(", v.estimator, ")")
-end
+vcov(v::CovarianceMatrices.AbstractAsymptoticVarianceEstimator) = VcovSpec(v)

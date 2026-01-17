@@ -286,12 +286,12 @@ end
 Create a new model with a different variance-covariance estimator.
 """
 function Base.:+(m::OLSMatrixEstimator{T, P, V1}, v::VcovSpec{V2}) where {T, P, V1, V2}
-    vcov_mat = StatsBase.vcov(v.estimator, m)
+    vcov_mat = StatsBase.vcov(v.source, m)
     se = sqrt.(diag(vcov_mat))
     cc = coef(m)
     t_stats = cc ./ se
     p_values = 2 .* tdistccdf.(dof_residual(m), abs.(t_stats))
-    vcov_copy = deepcopy_vcov(v.estimator)
+    vcov_copy = deepcopy_vcov(v.source)
 
     return OLSMatrixEstimator{T, P, V2}(
         m.rr, m.pp, m.basis_coef,
@@ -757,7 +757,7 @@ See also: [`VcovSpec`](@ref)
 """
 function Base.:+(m::OLSEstimator{T, P, V1}, v::VcovSpec{V2}) where {T, P, V1, V2}
     # Compute vcov matrix using StatsBase.vcov (which dispatches to covariance.jl methods)
-    vcov_mat = StatsBase.vcov(v.estimator, m)
+    vcov_mat = StatsBase.vcov(v.source, m)
 
     # Compute standard errors
     se = sqrt.(diag(vcov_mat))
@@ -772,7 +772,7 @@ function Base.:+(m::OLSEstimator{T, P, V1}, v::VcovSpec{V2}) where {T, P, V1, V2
     F_stat, p_val = compute_robust_fstat(cc, vcov_mat, has_int, dof_residual(m))
 
     # Deep copy the vcov estimator to avoid aliasing
-    vcov_copy = deepcopy_vcov(v.estimator)
+    vcov_copy = deepcopy_vcov(v.source)
 
     # Return new OLSEstimator with same data but different vcov type
     return OLSEstimator{T, P, V2}(

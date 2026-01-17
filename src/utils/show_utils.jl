@@ -241,12 +241,33 @@ vcov_type_name(::CovarianceMatrices.HR2) = "HC2"
 vcov_type_name(::CovarianceMatrices.HR3) = "HC3"
 
 # HAC estimators with bandwidth
-function vcov_type_name(v::CovarianceMatrices.HAC)
+# Fixed bandwidth: Bartlett(5) -> "Bartlett(5)"
+# Auto bandwidth: Bartlett(NeweyWest) -> "Bartlett(auto), bw: 4.27"
+
+# Helper to get clean kernel name (BartlettKernel -> Bartlett)
+function _hac_kernel_name(v::CovarianceMatrices.HAC)
     typename = string(typeof(v).name.name)
-    bw = v.bw
-    if bw isa CovarianceMatrices.Fixed
-        return @sprintf("%s(%d)", typename, Int(bw.bw))
+    return replace(typename, "Kernel" => "")
+end
+
+function vcov_type_name(v::CovarianceMatrices.HAC{<:CovarianceMatrices.Fixed})
+    typename = _hac_kernel_name(v)
+    bw_val = v.bw[1]
+    # Show as integer if it's a whole number
+    if bw_val == floor(bw_val)
+        return @sprintf("%s(%d)", typename, Int(bw_val))
     else
+        return @sprintf("%s(%.2f)", typename, bw_val)
+    end
+end
+
+function vcov_type_name(v::CovarianceMatrices.HAC)
+    typename = _hac_kernel_name(v)
+    bw_val = v.bw[1]
+    if bw_val == 0.0
+        # Bandwidth not yet computed
         return @sprintf("%s(auto)", typename)
+    else
+        return @sprintf("%s(auto), bw: %.2f", typename, bw_val)
     end
 end

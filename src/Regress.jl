@@ -24,6 +24,10 @@ using CovarianceMatrices: Bartlett, Parzen, QuadraticSpectral, TukeyHanning, Tru
 using CovarianceMatrices: Information, Misspecified
 using CovarianceMatrices: Uncorrelated
 
+# CovarianceMatricesBase for shared VcovSpec type
+using CovarianceMatricesBase
+import CovarianceMatricesBase: VcovSpec, vcov
+
 include("utils/fixedeffects.jl")
 include("utils/basecol.jl")
 include("utils/tss.jl")

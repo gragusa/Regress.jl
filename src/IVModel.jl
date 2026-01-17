@@ -1192,7 +1192,7 @@ See also: [`VcovSpec`](@ref)
 """
 function Base.:+(m::IVEstimator{T, E, V1, P}, v::VcovSpec{V2}) where {T, E, V1, P, V2}
     # Compute vcov matrix using StatsBase.vcov (which dispatches to IVModel.jl methods)
-    vcov_mat = StatsBase.vcov(v.estimator, m)
+    vcov_mat = StatsBase.vcov(v.source, m)
 
     # Compute standard errors
     se = sqrt.(diag(vcov_mat))
@@ -1207,13 +1207,13 @@ function Base.:+(m::IVEstimator{T, E, V1, P}, v::VcovSpec{V2}) where {T, E, V1, 
     F_stat, p_val = compute_robust_fstat(cc, vcov_mat, has_int, dof_residual(m))
 
     # Recompute first-stage F with this vcov type
-    F_kp, p_kp = recompute_first_stage_fstat(m, v.estimator)
+    F_kp, p_kp = recompute_first_stage_fstat(m, v.source)
 
     # Recompute per-endogenous F-stats
-    F_kp_per_endo, p_kp_per_endo = recompute_per_endogenous_fstats(m, v.estimator)
+    F_kp_per_endo, p_kp_per_endo = recompute_per_endogenous_fstats(m, v.source)
 
     # Deep copy the vcov estimator to avoid aliasing
-    vcov_copy = deepcopy_vcov(v.estimator)
+    vcov_copy = deepcopy_vcov(v.source)
 
     # Return new IVEstimator with same data but different vcov type
     return IVEstimator{T, E, V2, P}(
