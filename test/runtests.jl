@@ -1,5 +1,8 @@
 using Regress, Test
 
+@testset "Aqua" begin
+    include("Aqua.jl")
+end
 @testset "formula" begin
     include("formula.jl")
 end
