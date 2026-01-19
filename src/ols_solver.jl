@@ -110,18 +110,6 @@ function expand_coef_nan(coef_reduced::Vector{T}, basis::BitVector) where {T}
     return coef_full
 end
 
-"""
-    expand_vcov_nan(vcov_reduced, basis) -> Symmetric
-
-Expand reduced vcov matrix to full size with NaN for collinear columns.
-"""
-function expand_vcov_nan(vcov_reduced::Symmetric{T}, basis::BitVector) where {T}
-    k = length(basis)
-    vcov_full = fill(T(NaN), k, k)
-    vcov_full[basis, basis] = Matrix(vcov_reduced)
-    return Symmetric(vcov_full)
-end
-
 #=============================================================================
 # BLAS-Optimized Cross-Product
 =============================================================================#
@@ -250,59 +238,6 @@ function _fit_qr!(rr::OLSResponse{T}, X::Matrix{T},
 end
 
 #=============================================================================
-# Legacy Interface (for backward compatibility)
-=============================================================================#
-
-"""
-    build_predictor(X, y, factorization, has_intercept) -> (predictor, basis_coef)
-
-Build predictor object with factorization and detect collinearity.
-This is a legacy interface - prefer `fit_ols_core!` for new code.
-"""
-function build_predictor(X::Matrix{T}, y::Vector{T},
-        factorization::Symbol,
-        has_intercept::Bool) where {T <: AbstractFloat}
-    # Create temporary response for unified interface
-    rr = OLSResponse(y, zeros(T, length(y)), T[], Symbol("y"))
-    pp, basis_coef, _ = fit_ols_core!(rr, X, factorization)
-    return pp, basis_coef
-end
-
-"""
-    solve_ols!(rr, pp, basis_coef)
-
-Solve OLS problem - now just computes fitted values since coefficients
-are already computed in fit_ols_core!.
-
-This is a legacy interface for backward compatibility.
-Note: Requires X_reduced and mu to be stored (not compatible with save=:minimal).
-"""
-function solve_ols!(rr::OLSResponse{T},
-        pp::OLSPredictorChol{T},
-        basis_coef::BitVector) where {T}
-    has_predictor_data(pp) ||
-        error("X_reduced not stored. Model was fit with save=:minimal.")
-    has_response_data(rr) ||
-        error("Fitted values not stored. Model was fit with save=:minimal.")
-    # Coefficients already solved - just recompute fitted values if needed
-    beta_reduced = pp.beta[basis_coef]
-    mul!(rr.mu, pp.X_reduced, beta_reduced)
-    return pp.beta
-end
-
-function solve_ols!(rr::OLSResponse{T},
-        pp::OLSPredictorQR{T},
-        basis_coef::BitVector) where {T}
-    has_predictor_data(pp) ||
-        error("X_reduced not stored. Model was fit with save=:minimal.")
-    has_response_data(rr) ||
-        error("Fitted values not stored. Model was fit with save=:minimal.")
-    beta_reduced = pp.beta[basis_coef]
-    mul!(rr.mu, pp.X_reduced, beta_reduced)
-    return pp.beta
-end
-
-#=============================================================================
 # Residual Computation
 =============================================================================#
 
@@ -317,16 +252,4 @@ function compute_rss(y::AbstractVector{T}, mu::AbstractVector{T}) where {T}
         rss += (y[i] - mu[i])^2
     end
     return rss
-end
-
-"""
-    compute_residuals!(residuals, y, mu) -> residuals
-
-Compute residuals in-place: residuals = y - mu
-"""
-function compute_residuals!(residuals::Vector{T}, y::Vector{T}, mu::Vector{T}) where {T}
-    @inbounds @simd for i in eachindex(residuals, y, mu)
-        residuals[i] = y[i] - mu[i]
-    end
-    return residuals
 end

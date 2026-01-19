@@ -179,69 +179,6 @@ function sweep_collinear!(A::Matrix{T}, tol::Real = sqrt(eps(T))) where {T <: Ab
 end
 
 """
-    sweep_solve!(A, tol) -> (basis, rank)
-
-Sweep and solve variant that also handles the augmented system [X'X X'y; y'X y'y].
-Returns the basis and modifies A in-place so that A[1:k, k+1:end] contains
-the coefficients for non-collinear columns.
-"""
-function sweep_solve!(A::Matrix{T}, k::Int, tol::Real = sqrt(eps(T))) where {T <:
-                                                                             AbstractFloat}
-    n = size(A, 1)
-    @assert size(A, 2) == n "Matrix must be square"
-    @assert k <= n "k must be <= matrix size"
-
-    basis = trues(k)
-    rank = k
-
-    @inbounds for j in 1:k
-        d = A[j, j]
-        threshold = max(abs(d), one(T)) * tol
-
-        if abs(d) < threshold
-            # Column j is collinear
-            basis[j] = false
-            rank -= 1
-            for i in 1:n
-                A[i, j] = zero(T)
-                A[j, i] = zero(T)
-            end
-        else
-            inv_d = one(T) / d
-
-            # Sweep the full matrix (including RHS columns)
-            @inbounds for l in (j + 1):n
-                A_jl = A[j, l]
-                @simd for i in 1:(j - 1)
-                    A[i, l] -= A[i, j] * A_jl * inv_d
-                end
-                @simd for i in j:min(l, k)
-                    A[i, l] -= A[i, j] * A_jl * inv_d
-                end
-                # For RHS columns (l > k), also update rows > k if needed
-                if l > k
-                    @simd for i in (k + 1):l
-                        A[i, l] -= A[i, j] * A_jl * inv_d
-                    end
-                end
-            end
-
-            # Update row and column j
-            @simd for l in (j + 1):n
-                A[j, l] *= inv_d
-            end
-            @simd for i in 1:(j - 1)
-                A[i, j] *= inv_d
-            end
-
-            A[j, j] = -inv_d
-        end
-    end
-
-    return basis, rank
-end
-
-"""
     detect_collinearity_sweep(X; tol) -> (basis, X_reduced)
 
 Detect collinear columns using the sweep operator on X'X.

@@ -53,11 +53,7 @@ include("utils/covariance.jl")  # Helper functions for covariance calculations
 
 # Estimator implementations
 include("estimators/tsls.jl")  # TSLS implementation
-include("estimators/liml.jl")  # LIML note (implementation in kclass.jl)
 include("estimators/kclass.jl")  # K-class estimators: LIML, Fuller, KClass
-
-# Keep FixedEffectModel for backwards compatibility (if needed)
-# include("FixedEffectModel.jl")
 
 # Fitting functions
 include("fit_ols.jl")  # NEW: Pure OLS implementation
