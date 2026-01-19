@@ -1,4 +1,28 @@
 const CM = CovarianceMatrices
+using LinearAlgebra: BLAS
+
+##############################################################################
+##
+## Moment Matrix Computation (can be overridden by LoopVectorization extension)
+##
+##############################################################################
+
+"""
+    compute_moment_matrix!(M, X, residuals, adjustment) -> M
+
+Compute M = X .* (residuals * adjustment) in-place.
+This is the fallback using @simd; RegressLVExt overrides with @turbo.
+"""
+function compute_moment_matrix!(M::Matrix{T}, X::Matrix{T},
+                                residuals::Vector{T}, adjustment::T) where {T <: AbstractFloat}
+    n, k = size(X)
+    @inbounds for j in 1:k
+        @simd for i in 1:n
+            M[i, j] = X[i, j] * residuals[i] * adjustment
+        end
+    end
+    return M
+end
 
 ##############################################################################
 ##
@@ -62,12 +86,16 @@ function compute_hc1_vcov_direct(
     # HR1 residual adjustment: sqrt(n / dof_residual)
     adjustment = sqrt(T(n) / T(dof_residual))
 
-    # Compute moment matrix with adjustment fused: M = X .* (residuals .* adjustment)
-    # This avoids a second pass over M
-    M = X .* (residuals .* adjustment)
+    # Compute moment matrix with adjustment fused: M = X .* (residuals * adjustment)
+    # Uses compute_moment_matrix! which can be overridden by LoopVectorization extension
+    k = size(X, 2)
+    M = Matrix{T}(undef, n, k)
+    compute_moment_matrix!(M, X, residuals, adjustment)
 
-    # aVar = M'M / n
-    aVar = (M' * M) / T(n)
+    # aVar = M'M / n using BLAS.syrk! for symmetric rank-k update (2x faster)
+    aVar_buf = Matrix{T}(undef, k, k)
+    BLAS.syrk!('U', 'T', one(T) / T(n), M, zero(T), aVar_buf)
+    aVar = Symmetric(aVar_buf, :U)
 
     # Scale factor for HC1: n * dof_residual / (n - k - k_fe)
     p_total = dof_model + dof_fes
@@ -139,8 +167,11 @@ function compute_hc1_vcov_direct_iv(
     adjustment = sqrt(T(n) / T(dof_residual))
     M .*= adjustment
 
-    # aVar = M'M / n (reduced-size since Xhat is reduced)
-    aVar = (M' * M) / T(n)
+    # aVar = M'M / n using BLAS.syrk! for symmetric rank-k update (2x faster)
+    k = size(M, 2)
+    aVar_buf = Matrix{T}(undef, k, k)
+    BLAS.syrk!('U', 'T', one(T) / T(n), M, zero(T), aVar_buf)
+    aVar = Symmetric(aVar_buf, :U)
 
     # Scale factor for HC1: n * dof_residual / (n - k - k_fe)
     p_total = dof_model + dof_fes
