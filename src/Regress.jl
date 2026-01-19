@@ -127,13 +127,22 @@ end
 @compile_workload begin
     df = DataFrame(
         x1 = [1.0, 2.0, 3.0, 4.0, 5.0, 6.0], x2 = [1.0, 2.0, 4.0, 4.0, 3.0, 5.0],
-        y = [3.0, 4.0, 4.0, 5.0, 1.0, 2.0], id = [1, 1, 2, 2, 3, 3])
+        y = [3.0, 4.0, 4.0, 5.0, 1.0, 2.0], id = [1, 1, 2, 2, 3, 3],
+        z = [2.0, 3.0, 1.0, 4.0, 2.0, 5.0])  # instrument
+
+    # OLS precompilation
     model = ols(df, @formula(y ~ x1 + x2))
     ols(df, @formula(y ~ x1 + fe(id)))
+
     # Post-estimation vcov with + operator syntax
     model_hc3 = model + vcov(HC3())
     vcov(model_hc3)
     stderror(model_hc3)
+
+    # IV precompilation (TSLS)
+    iv_model = iv(TSLS(), df, @formula(y ~ x2 + (x1 ~ z)))
+    vcov(iv_model)
+    stderror(iv_model)
 end
 
 end

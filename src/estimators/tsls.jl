@@ -4,199 +4,25 @@
 ##
 ##############################################################################
 
+##############################################################################
+## Helper functions for IV estimation (extracted for faster compilation)
+##############################################################################
+
 """
-    fit_tsls(df, formula; kwargs...) -> IVEstimator{T}
+    _iv_collinearity_detection!(Xexo, Xendo, Z, XexoXexo, XendoXendo, ZZ,
+                                 has_intercept, coefnames_endo)
 
-Fit an instrumental variables model using Two-Stage Least Squares (TSLS).
-
-This function handles the complete TSLS estimation including:
-- Multi-stage collinearity detection
-- First-stage regression
-- Second-stage regression
-- First-stage F-statistics
+Multi-stage collinearity detection for IV models.
+Returns updated matrices and basis vectors.
 """
-function fit_tsls(df,
-        formula::FormulaTerm;
-        contrasts::Dict = Dict{Symbol, Any}(),
-        weights::Union{Symbol, Nothing} = nothing,
-        save::Union{Bool, Symbol} = :residuals,
-        save_cluster::Union{Symbol, Vector{Symbol}, Nothing} = nothing,
-        dof_add::Integer = 0,
-        method::Symbol = :cpu,
-        nthreads::Integer = method == :cpu ? Threads.nthreads() : 256,
-        double_precision::Bool = method == :cpu,
-        tol::Real = 1e-6,
-        maxiter::Integer = 10000,
-        drop_singletons::Bool = true,
-        progress_bar::Bool = true,
-        subset::Union{Nothing, AbstractVector} = nothing,
-        first_stage::Bool = true)
-
-    # Validate save keyword
-    save, save_residuals = validate_save_keyword(save)
-
-    # Check nthreads
-    nthreads = validate_nthreads(method, nthreads)
-
-    # Convert contrasts to Dict{Symbol, Any}
-    contrasts = convert(Dict{Symbol, Any}, contrasts)
-
-    # Convert to DataFrame
-    df = DataFrame(df; copycols = false)
-
-    ##############################################################################
-    ## Prepare Data
-    ##############################################################################
-
-    data_prep = prepare_data(df, formula, weights, subset, save, drop_singletons, nthreads)
-
-    # Extract cluster variables
-    cluster_data = extract_cluster_variables(df, data_prep.fe_vars, save_cluster, data_prep.esample)
-
-    # Create subsetted dataframe and weights
-    if data_prep.has_weights
-        wts = Weights(disallowmissing(view(df[!, weights], data_prep.esample)))
-    else
-        wts = uweights(data_prep.nobs)
-    end
-
-    # Create subsetted dataframe - use optimized function
-    subdf = _create_subdf(df, data_prep.all_vars, data_prep.esample)
-    subfes = isempty(data_prep.fes) ? FixedEffect[] :
-             FixedEffect[fe[data_prep.esample] for fe in data_prep.fes]
-
-    ##############################################################################
-    ## Create Model Matrices
-    ##############################################################################
-
-    # Determine numeric type
-    T = double_precision ? Float64 : Float32
-
-    # Apply schema for exogenous variables
-    s = schema(data_prep.formula, subdf, contrasts)
-    formula_schema = apply_schema(data_prep.formula, s, IVEstimator, data_prep.has_fe_intercept)
-
-    y = convert(Vector{T}, response(formula_schema, subdf))
-    Xexo = convert(Matrix{T}, modelmatrix(formula_schema, subdf))
-    response_name, coefnames_exo = coefnames(formula_schema)
-
-    # Create endogenous and instrument matrices
-    formula_endo_schema = apply_schema(data_prep.formula_endo,
-        schema(data_prep.formula_endo, subdf, contrasts),
-        StatisticalModel)
-    Xendo = convert(Matrix{T}, modelmatrix(formula_endo_schema, subdf))
-    _, coefnames_endo = coefnames(formula_endo_schema)
-
-    # Create regular instrument matrix (if any non-FE instruments)
-    has_regular_iv = data_prep.formula_iv != FormulaTerm(ConstantTerm(0), ConstantTerm(0))
-    if has_regular_iv
-        formula_iv_schema = apply_schema(data_prep.formula_iv,
-            schema(data_prep.formula_iv, subdf, contrasts),
-            StatisticalModel)
-        Z = convert(Matrix{T}, modelmatrix(formula_iv_schema, subdf))
-        _, coefnames_iv = coefnames(formula_iv_schema)
-    else
-        Z = Matrix{T}(undef, data_prep.nobs, 0)
-        coefnames_iv = String[]
-    end
-
-    ##############################################################################
-    ## Handle FE-based Instruments (Experimental)
-    ##############################################################################
-
-    # Parse FE instruments if present
-    iv_fes = FixedEffect[]
-    iv_feids = Symbol[]
-    iv_fekeys = Symbol[]
-    has_fe_iv = data_prep.has_fe_iv
-
-    if has_fe_iv
-        # Parse the FE terms from the instrument formula
-        iv_fes, iv_feids, iv_fekeys = parse_fixedeffect(subdf, data_prep.formula_iv_fe)
-
-        if isempty(iv_fes)
-            # This shouldn't happen if has_fe_iv was set correctly
-            has_fe_iv = false
-        end
-    end
-
-    # Modify formula schema for prediction
-    formula_schema = FormulaTerm(formula_schema.lhs,
-        MatrixTerm(tuple(eachterm(formula_schema.rhs)...,
-            (term
-            for term in eachterm(formula_endo_schema.rhs)
-            if term != ConstantTerm(0))...)))
-
-    coef_names = vcat(coefnames_exo, coefnames_endo)
-
-    # Compute total sum of squares
-    tss_total = tss(y, data_prep.has_intercept | data_prep.has_fe_intercept, wts)
-
-    # Validate finite values
-    all(isfinite, wts) || throw("Weights are not finite")
-    all(isfinite, y) || throw("Some observations for the dependent variable are infinite")
-    all(isfinite, Xexo) ||
-        throw("Some observations for the exogenous variables are infinite")
-    all(isfinite, Xendo) ||
-        throw("Some observations for the endogenous variables are infinite")
-    all(isfinite, Z) ||
-        throw("Some observations for the instrumental variables are infinite")
-
-    ##############################################################################
-    ## Partial Out Fixed Effects
-    ##############################################################################
-
-    oldy, oldX = nothing, nothing
-    feM = nothing
-
-    if data_prep.has_fes
-        # Combine all columns for demeaning
-        cols = vcat(eachcol(y), eachcol(Xexo), eachcol(Xendo), eachcol(Z))
-        colnames = vcat(response_name, coefnames_exo, coefnames_endo, coefnames_iv)
-
-        # Partial out fixed effects
-        feM, iterations,
-        converged,
-        tss_partial,
-        oldy_temp,
-        oldX_temp = partial_out_fixed_effects!(
-            cols, colnames, subfes, wts, method, nthreads,
-            tol, maxiter, progress_bar, data_prep.save_fes,
-            data_prep.has_intercept, data_prep.has_fe_intercept, T)
-
-        # For TSLS, we need to combine Xexo and Xendo for oldX
-        if data_prep.save_fes && oldX_temp !== nothing
-            # oldX_temp contains all X columns; reconstruct as hcat(Xexo, Xendo)
-            n_exo = size(Xexo, 2)
-            oldX = hcat(oldX_temp[:, 1:n_exo], oldX_temp[:, (n_exo + 1):(n_exo + size(Xendo, 2))])
-            oldy = oldy_temp
-        end
-    else
-        iterations, converged = 0, true
-        tss_partial = tss_total
-    end
-
-    ##############################################################################
-    ## Apply Weights
-    ##############################################################################
-
-    if data_prep.has_weights
-        sqrtw = sqrt.(wts)
-        y .= y .* sqrtw
-        Xexo .= Xexo .* sqrtw
-        Xendo .= Xendo .* sqrtw
-        Z .= Z .* sqrtw
-    end
-
-    ##############################################################################
-    ## Multi-Stage Collinearity Detection for IV
-    ##############################################################################
-
+function _iv_collinearity_detection!(
+    Xexo::Matrix{T}, Xendo::Matrix{T}, Z::Matrix{T},
+    XexoXexo::Symmetric{T}, XendoXendo::Symmetric{T}, ZZ::Symmetric{T},
+    has_intercept::Bool, coefnames_endo::Vector
+) where {T}
     perm = nothing
 
     # First pass: check collinearity within Xendo
-    XendoXendo = compute_crossproduct(Xendo)
-    # Note: basis! modifies its argument, so we need a copy for the first check
     XendoXendo_check = copy(XendoXendo.data)
     basis_endo = basis!(Symmetric(XendoXendo_check); has_intercept = false)
     if !all(basis_endo)
@@ -204,9 +30,7 @@ function fit_tsls(df,
         XendoXendo = Symmetric(XendoXendo.data[basis_endo, basis_endo])
     end
 
-    # Compute cross-products (using BLAS where beneficial)
-    XexoXexo = compute_crossproduct(Xexo)
-    ZZ = compute_crossproduct(Z)
+    # Compute cross-products
     XexoZ = Xexo' * Z
     XexoXendo = Xexo' * Xendo
     ZXendo = Z' * Xendo
@@ -218,7 +42,7 @@ function fit_tsls(df,
         [k_exo, k_z, k_endo]
     )
 
-    basis_all = basis!(XexoZXendo; has_intercept = data_prep.has_intercept)
+    basis_all = basis!(XexoZXendo; has_intercept = has_intercept)
     basis_Xexo = basis_all[1:k_exo]
     basis_Z = basis_all[(k_exo + 1):(k_exo + k_z)]
     basis_endo_small = basis_all[(k_exo + k_z + 1):end]
@@ -252,10 +76,9 @@ function fit_tsls(df,
             [XexoXexo.data, XexoZ, XexoXendo, ZZ.data, ZXendo, XendoXendo.data],
             [k_exo, k_z, k_endo]
         )
-        basis_all = basis!(XexoZXendo; has_intercept = data_prep.has_intercept)
+        basis_all = basis!(XexoZXendo; has_intercept = has_intercept)
         basis_Xexo = basis_all[1:k_exo]
         basis_Z = basis_all[(k_exo + 1):(k_exo + k_z)]
-        basis_endo_small2 = basis_all[(k_exo + k_z + 1):end]
     end
 
     # Apply basis to matrices
@@ -271,323 +94,534 @@ function fit_tsls(df,
     end
     XexoZ = XexoZ[basis_Xexo, basis_Z]
 
-    # Check identification (skip if using FE instruments, as they are handled separately)
-    if !has_fe_iv
-        size(ZXendo, 1) >= size(ZXendo, 2) ||
-            throw("Model not identified. There must be at least as many instruments as endogenous variables")
-    end
-
     # Compute final basis for coefficients
     basis_endo2 = trues(length(basis_endo))
     basis_endo2[basis_endo] = basis_endo_small
     basis_coef = vcat(basis_Xexo, basis_endo[basis_endo2])
 
-    ##############################################################################
-    ## First-Stage Regression
-    ##############################################################################
+    return (
+        Xexo = Xexo, Xendo = Xendo, Z = Z,
+        XexoXexo = XexoXexo, XendoXendo = XendoXendo, ZZ = ZZ,
+        XexoZ = XexoZ, XexoXendo = XexoXendo, ZXendo = ZXendo,
+        basis_endo = basis_endo, basis_endo_small = basis_endo_small,
+        basis_Xexo = basis_Xexo, basis_Z = basis_Z,
+        basis_coef = basis_coef, perm = perm
+    )
+end
 
-    k_exo_final, k_z_final, k_endo_final = size(Xexo, 2), size(Z, 2), size(Xendo, 2)
+"""
+    _iv_first_stage_standard(Xexo, Z, Xendo, XexoXexo, ZZ, XexoXendo, ZXendo, T)
 
-    if has_fe_iv
-        ##########################################################################
-        ## FE-Based First Stage (Experimental)
-        ##
-        ## When instruments are specified as fe() terms, we use the FE absorption
-        ## algorithm for the first stage. This is much more efficient for
-        ## high-dimensional categorical instruments.
-        ##
-        ## The projection P_{[Xexo, D]} where D are the FE indicators is computed
-        ## using Frisch-Waugh-Lovell:
-        ##   1. Demean both Xexo and Xendo by the FE (within transformation)
-        ##   2. Run within-FE regression of Xendo on Xexo to get gamma
-        ##   3. Predicted = Xendo - (Xendo_demeaned - Xexo_demeaned * gamma)
-        ##
-        ## This correctly computes the projection onto span([Xexo, D]).
-        ##########################################################################
+Standard first-stage regression: Pi = (Xexo, Z) \\ Xendo
+"""
+function _iv_first_stage_standard(
+    Xexo::Matrix{T}, Z::Matrix{T}, Xendo::Matrix{T},
+    XexoXexo::Symmetric{T}, ZZ::Symmetric{T},
+    XexoXendo::Matrix{T}, ZXendo::Matrix{T}
+) where {T}
+    k_exo, k_z, k_endo = size(Xexo, 2), size(Z, 2), size(Xendo, 2)
+    XexoZ = Xexo' * Z
 
-        # Create FE solver for instrument FEs
-        iv_feM = AbstractFixedEffectSolver{T}(iv_fes, wts, Val{method}, nthreads)
+    newZ = hcat(Xexo, Z)
 
-        # Step 1: Demean Xexo by instrument FEs (within transformation)
-        Xexo_demeaned = copy(Xexo)
-        if size(Xexo, 2) > 0
-            Xexo_cols = [Xexo_demeaned[:, j] for j in 1:k_exo_final]
-            solve_residuals!(Xexo_cols, iv_feM;
-                maxiter = maxiter, tol = tol, progress_bar = progress_bar)
-            for j in 1:k_exo_final
-                Xexo_demeaned[:, j] .= Xexo_cols[j]
-            end
+    # Build augmented system for ls_solve
+    newZnewZ_aug = build_block_symmetric(
+        [XexoXexo.data, XexoZ, XexoXendo, ZZ.data, ZXendo, zeros(T, k_endo, k_endo)],
+        [k_exo, k_z, k_endo]
+    )
+    Pi = ls_solve!(newZnewZ_aug, k_exo + k_z)
+
+    # Predicted endogenous variables
+    Xendo_hat = newZ * Pi
+
+    return (newZ = newZ, Pi = Pi, Xendo_hat = Xendo_hat, XexoZ = XexoZ)
+end
+
+"""
+    _iv_first_stage_fe(Xexo, Xendo, iv_fes, wts, method, nthreads, maxiter, tol, progress_bar, T)
+
+FE-based first-stage regression using Frisch-Waugh-Lovell.
+"""
+function _iv_first_stage_fe(
+    Xexo::Matrix{T}, Xendo::Matrix{T},
+    iv_fes::Vector{FixedEffect},
+    wts::AbstractWeights,
+    method::Symbol, nthreads::Int,
+    maxiter::Int, tol::Real, progress_bar::Bool
+) where {T}
+    k_exo, k_endo = size(Xexo, 2), size(Xendo, 2)
+    nobs = size(Xexo, 1)
+
+    # Create FE solver for instrument FEs
+    iv_feM = AbstractFixedEffectSolver{T}(iv_fes, wts, Val{method}, nthreads)
+
+    # Step 1: Demean Xexo by instrument FEs
+    Xexo_demeaned = copy(Xexo)
+    if k_exo > 0
+        Xexo_cols = [Xexo_demeaned[:, j] for j in 1:k_exo]
+        solve_residuals!(Xexo_cols, iv_feM; maxiter = maxiter, tol = tol, progress_bar = progress_bar)
+        for j in 1:k_exo
+            Xexo_demeaned[:, j] .= Xexo_cols[j]
         end
-
-        # Step 2: Demean Xendo by instrument FEs
-        Xendo_demeaned = copy(Xendo)
-        Xendo_cols = [Xendo_demeaned[:, j] for j in 1:k_endo_final]
-        solve_residuals!(Xendo_cols, iv_feM;
-            maxiter = maxiter, tol = tol, progress_bar = progress_bar)
-        for j in 1:k_endo_final
-            Xendo_demeaned[:, j] .= Xendo_cols[j]
-        end
-
-        # Step 3: Within-FE regression of Xendo on Xexo
-        if size(Xexo, 2) > 0
-            XexoXexo_within = compute_crossproduct(Xexo_demeaned)
-            XexoXendo_within = Xexo_demeaned' * Xendo_demeaned
-            gamma = XexoXexo_within \ XexoXendo_within
-        else
-            gamma = zeros(T, 0, k_endo_final)
-        end
-
-        # Step 4: Compute within-FE residuals
-        if size(Xexo, 2) > 0
-            Xendo_within_res = Xendo_demeaned .- Xexo_demeaned * gamma
-        else
-            Xendo_within_res = Xendo_demeaned
-        end
-
-        # Step 5: Predicted endogenous = original Xendo - within residuals
-        # This equals the projection of Xendo onto span([Xexo, D])
-        newnewZ = Xendo .- Xendo_within_res
-
-        # For compatibility with the rest of the code, set up Pi and newZ
-        # Note: Pi from within regression is stored, but full first-stage includes FE
-        newZ = Xexo  # Only exogenous vars in newZ for FE case
-        Pi = gamma   # Within-FE first-stage coefficients
-
-        # Update k_z_final to 0 since we don't have explicit Z columns
-        k_z_final = 0
-        Z = Matrix{T}(undef, data_prep.nobs, 0)
-        ZZ = Symmetric(zeros(T, 0, 0))
-        XexoZ = zeros(T, k_exo_final, 0)
-        ZXendo = zeros(T, 0, k_endo_final)
-
-    else
-        ##########################################################################
-        ## Standard First Stage: Compute Pi = (Xexo, Z) \ Xendo
-        ##########################################################################
-
-        newZ = hcat(Xexo, Z)
-        newZXendo = vcat(XexoXendo, ZXendo)
-
-        # Build augmented system for ls_solve: [newZ'newZ, newZ'Xendo; Xendo'newZ, 0]
-        # Using block symmetric builder (only upper triangle matters for ls_solve!)
-        newZnewZ_aug = build_block_symmetric(
-            [XexoXexo.data, XexoZ, XexoXendo, ZZ.data,
-                ZXendo, zeros(T, k_endo_final, k_endo_final)],
-            [k_exo_final, k_z_final, k_endo_final]
-        )
-        Pi = ls_solve!(newZnewZ_aug, k_exo_final + k_z_final)
-
-        # Predicted endogenous variables
-        newnewZ = newZ * Pi
     end
 
-    ##############################################################################
-    ## Second-Stage Regression using Xhat
-    ##############################################################################
+    # Step 2: Demean Xendo by instrument FEs
+    Xendo_demeaned = copy(Xendo)
+    Xendo_cols = [Xendo_demeaned[:, j] for j in 1:k_endo]
+    solve_residuals!(Xendo_cols, iv_feM; maxiter = maxiter, tol = tol, progress_bar = progress_bar)
+    for j in 1:k_endo
+        Xendo_demeaned[:, j] .= Xendo_cols[j]
+    end
 
-    Xhat = hcat(Xexo, newnewZ)
-    XexoNewnewZ = Xexo' * newnewZ
-    newnewZnewnewZ = compute_crossproduct(newnewZ)
+    # Step 3: Within-FE regression of Xendo on Xexo
+    if k_exo > 0
+        XexoXexo_within = compute_crossproduct(Xexo_demeaned)
+        XexoXendo_within = Xexo_demeaned' * Xendo_demeaned
+        gamma = XexoXexo_within \ XexoXendo_within
+        Xendo_within_res = Xendo_demeaned .- Xexo_demeaned * gamma
+    else
+        gamma = zeros(T, 0, k_endo)
+        Xendo_within_res = Xendo_demeaned
+    end
 
-    # Original X with actual endogenous variables (for storing)
-    X = hcat(Xexo, Xendo)
+    # Step 4: Predicted endogenous = original Xendo - within residuals
+    Xendo_hat = Xendo .- Xendo_within_res
 
-    # Build augmented system for second stage: [Xhat'Xhat, Xhat'y; y'Xhat, 0]
+    return (newZ = Xexo, Pi = gamma, Xendo_hat = Xendo_hat,
+            XexoZ = zeros(T, k_exo, 0),
+            Z = Matrix{T}(undef, nobs, 0),
+            ZZ = Symmetric(zeros(T, 0, 0)),
+            ZXendo = zeros(T, 0, k_endo))
+end
+
+"""
+    _iv_second_stage(Xexo, Xendo_hat, y, XexoXexo, T)
+
+Second-stage IV regression using predicted endogenous variables.
+"""
+function _iv_second_stage(
+    Xexo::Matrix{T}, Xendo_hat::Matrix{T}, y::Vector{T},
+    XexoXexo::Symmetric{T}
+) where {T}
+    k_exo, k_endo = size(Xexo, 2), size(Xendo_hat, 2)
+
+    Xhat = hcat(Xexo, Xendo_hat)
+    XexoXendo_hat = Xexo' * Xendo_hat
+    Xendo_hatXendo_hat = compute_crossproduct(Xendo_hat)
+
+    # Build augmented system for second stage
     Xhaty = Xhat' * y
-    k_xhat = size(Xhat, 2)
+    k_xhat = k_exo + k_endo
     XhatXhat_aug = build_block_symmetric(
-        [XexoXexo.data, XexoNewnewZ, reshape(Xhaty[1:k_exo_final], :, 1),
-            newnewZnewnewZ.data, reshape(Xhaty[(k_exo_final + 1):end], :, 1),
-            zeros(T, 1, 1)],
-        [k_exo_final, k_endo_final, 1]
+        [XexoXexo.data, XexoXendo_hat, reshape(Xhaty[1:k_exo], :, 1),
+         Xendo_hatXendo_hat.data, reshape(Xhaty[(k_exo + 1):end], :, 1),
+         zeros(T, 1, 1)],
+        [k_exo, k_endo, 1]
     )
     invsym!(XhatXhat_aug; diagonal = 1:k_xhat)
     invXhatXhat = Symmetric(.- XhatXhat_aug.data[1:k_xhat, 1:k_xhat])
     coef = XhatXhat_aug.data[1:k_xhat, end]
 
-    # Also build XhatXhat for storage
+    # Build XhatXhat for storage
     XhatXhat = build_block_symmetric(
-        [XexoXexo.data, XexoNewnewZ, newnewZnewnewZ.data],
-        [k_exo_final, k_endo_final]
+        [XexoXexo.data, XexoXendo_hat, Xendo_hatXendo_hat.data],
+        [k_exo, k_endo]
     )
 
-    ##############################################################################
-    ## First-Stage F-Statistics (if requested)
-    ##############################################################################
+    return (Xhat = Xhat, coef = coef, invXhatXhat = invXhatXhat, XhatXhat = XhatXhat)
+end
 
-    F_kp, p_kp = T(NaN), T(NaN)
+"""
+    _iv_first_stage_fstats_standard(...)
+
+Compute first-stage F-statistics for standard IV.
+"""
+function _iv_first_stage_fstats_standard(
+    Xendo::Matrix{T}, newZ::Matrix{T}, Pi::Matrix{T},
+    XexoXexo::Symmetric{T}, XexoZ::Matrix{T}, ZZ::Symmetric{T},
+    X::Matrix{T}, nobs::Int, dof_fes::Int,
+    endo_names::Vector{String}, k_exo::Int, has_intercept::Bool
+) where {T}
+    k_z = size(ZZ, 1)
+
+    # Compute residuals for first-stage F-stat
+    Xendo_res = BLAS.gemm!('N', 'N', -one(T), newZ, Pi, one(T), copy(Xendo))
+
+    # Partial out Z w.r.t. Xexo
+    XexoZ_aug = build_block_symmetric([XexoXexo.data, XexoZ, ZZ.data], [k_exo, k_z])
+    Pi2 = ls_solve!(XexoZ_aug, k_exo)
+    Z_res = BLAS.gemm!('N', 'N', -one(T), newZ[:, 1:k_exo], Pi2, one(T), copy(newZ[:, (k_exo + 1):end]))
+
+    # Extract the relevant part of Pi (instruments only)
+    Pip = Pi[(k_exo + 1):end, :]
+
+    # Compute joint first-stage F-statistic
+    F_kp, p_kp = compute_first_stage_fstat(
+        Xendo_res, Z_res, Pip,
+        CovarianceMatrices.HR1(),
+        nobs, size(X, 2), dof_fes
+    )
+
+    # Compute per-endogenous F-statistics
+    F_kp_per_endo, p_kp_per_endo = compute_per_endogenous_fstats(
+        Xendo_res, Z_res, Pip,
+        CovarianceMatrices.HR1(),
+        nobs, size(X, 2), dof_fes;
+        Xendo_orig = Xendo, newZ = newZ
+    )
+
+    first_stage_data = FirstStageData{T}(
+        copy(Pip), copy(Xendo_res), copy(Z_res),
+        endo_names, k_exo, copy(Xendo), copy(newZ), has_intercept
+    )
+
+    return (F_kp = F_kp, p_kp = p_kp,
+            F_kp_per_endo = F_kp_per_endo, p_kp_per_endo = p_kp_per_endo,
+            first_stage_data = first_stage_data)
+end
+
+"""
+    _iv_first_stage_fstats_fe(...)
+
+Compute first-stage F-statistics for FE-based IV.
+"""
+function _iv_first_stage_fstats_fe(
+    Xendo::Matrix{T}, Xendo_hat::Matrix{T},
+    iv_fes::Vector{FixedEffect},
+    newZ::Matrix{T}, nobs::Int, k_exo::Int,
+    endo_names::Vector{String}, has_intercept::Bool
+) where {T}
+    k_endo = size(Xendo, 2)
+    Xendo_res = Xendo .- Xendo_hat
+    n_iv_fe_groups = sum(nunique(fe) for fe in iv_fes; init = 0)
+
     F_kp_per_endo = T[]
     p_kp_per_endo = T[]
+
+    for j in 1:k_endo
+        rss_j = sum(abs2, Xendo_res[:, j])
+        tss_j = sum(abs2, Xendo[:, j] .- mean(Xendo[:, j]))
+        ess_j = tss_j - rss_j
+
+        df1 = n_iv_fe_groups - 1
+        df2 = nobs - n_iv_fe_groups - k_exo
+
+        if df1 > 0 && df2 > 0
+            F_j = (ess_j / df1) / (rss_j / df2)
+            p_j = fdistccdf(df1, df2, F_j)
+            push!(F_kp_per_endo, F_j)
+            push!(p_kp_per_endo, p_j)
+        else
+            push!(F_kp_per_endo, T(NaN))
+            push!(p_kp_per_endo, T(NaN))
+        end
+    end
+
+    # Joint F
+    if k_endo == 1
+        F_kp, p_kp = F_kp_per_endo[1], p_kp_per_endo[1]
+    else
+        F_kp = k_endo / sum(1 ./ F_kp_per_endo)
+        df1 = n_iv_fe_groups - 1
+        df2 = nobs - n_iv_fe_groups - k_exo
+        p_kp = fdistccdf(df1, df2, F_kp)
+    end
+
+    first_stage_data = FirstStageData{T}(
+        zeros(T, 0, k_endo), copy(Xendo_res), zeros(T, nobs, 0),
+        endo_names, k_exo, copy(Xendo), copy(newZ), has_intercept
+    )
+
+    return (F_kp = F_kp, p_kp = p_kp,
+            F_kp_per_endo = F_kp_per_endo, p_kp_per_endo = p_kp_per_endo,
+            first_stage_data = first_stage_data)
+end
+
+"""
+    _iv_compute_inference(Xhat, residuals_raw, invXhatXhat, basis_coef, coef,
+                          nobs, dof_model, dof_fes, dof_residual, formula_origin, T)
+
+Compute vcov matrix, standard errors, t-stats, p-values, and robust F-stat.
+"""
+function _iv_compute_inference(
+    Xhat::Matrix{T}, residuals_raw::Vector{T},
+    invXhatXhat::Symmetric{T}, basis_coef::BitVector, coef::Vector{T},
+    nobs::Int, dof_model::Int, dof_fes::Int, dof_residual::Int,
+    formula_origin
+) where {T}
+    # Compute HC1 vcov
+    vcov_matrix = compute_hc1_vcov_direct_iv(
+        Xhat, residuals_raw, invXhatXhat, basis_coef,
+        nobs, dof_model, dof_fes, dof_residual
+    )
+
+    # Standard errors
+    se = sqrt.(diag(vcov_matrix))
+
+    # t-stats and p-values
+    coef_full = copy(coef)
+    coef_full[.!basis_coef] .= zero(T)
+    t_stats = coef_full ./ se
+    p_values = 2 .* tdistccdf.(dof_residual, abs.(t_stats))
+
+    # Robust F-statistic
+    has_int = hasintercept(formula_origin)
+    F_stat_robust, p_val_robust = compute_robust_fstat(coef_full, vcov_matrix, has_int, dof_residual)
+
+    return (vcov_matrix = vcov_matrix, se = se, t_stats = t_stats,
+            p_values = p_values, F_stat_robust = F_stat_robust,
+            p_val_robust = p_val_robust)
+end
+
+##############################################################################
+##
+## Main fit_tsls function
+##
+##############################################################################
+
+"""
+    fit_tsls(df, formula; kwargs...) -> IVEstimator{T}
+
+Fit an instrumental variables model using Two-Stage Least Squares (TSLS).
+
+This function handles the complete TSLS estimation including:
+- Multi-stage collinearity detection
+- First-stage regression
+- Second-stage regression
+- First-stage F-statistics
+"""
+function fit_tsls(@nospecialize(df),
+        formula::FormulaTerm;
+        contrasts::Dict = Dict{Symbol, Any}(),
+        weights::Union{Symbol, Nothing} = nothing,
+        save::Union{Bool, Symbol} = :residuals,
+        save_cluster::Union{Symbol, Vector{Symbol}, Nothing} = nothing,
+        dof_add::Integer = 0,
+        method::Symbol = :cpu,
+        nthreads::Integer = method == :cpu ? Threads.nthreads() : 256,
+        double_precision::Bool = method == :cpu,
+        tol::Real = 1e-6,
+        maxiter::Integer = 10000,
+        drop_singletons::Bool = true,
+        progress_bar::Bool = true,
+        subset::Union{Nothing, AbstractVector} = nothing,
+        first_stage::Bool = true)
+
+    # Validate inputs
+    save, save_residuals = validate_save_keyword(save)
+    nthreads = validate_nthreads(method, nthreads)
+    contrasts = convert(Dict{Symbol, Any}, contrasts)
+    df = DataFrame(df; copycols = false)
+
+    # Prepare data
+    data_prep = prepare_data(df, formula, weights, subset, save, drop_singletons, nthreads)
+    cluster_data = extract_cluster_variables(df, data_prep.fe_vars, save_cluster, data_prep.esample)
+
+    # Create weights
+    wts = data_prep.has_weights ?
+          Weights(disallowmissing(view(df[!, weights], data_prep.esample))) :
+          uweights(data_prep.nobs)
+
+    # Create subsetted data
+    subdf = _create_subdf(df, data_prep.all_vars, data_prep.esample)
+    subfes = isempty(data_prep.fes) ? FixedEffect[] :
+             FixedEffect[fe[data_prep.esample] for fe in data_prep.fes]
+
+    # Determine numeric type
+    T = double_precision ? Float64 : Float32
+
+    ##########################################################################
+    ## Create Model Matrices
+    ##########################################################################
+
+    s = schema(data_prep.formula, subdf, contrasts)
+    formula_schema = apply_schema(data_prep.formula, s, IVEstimator, data_prep.has_fe_intercept)
+
+    y = convert(Vector{T}, response(formula_schema, subdf))
+    Xexo = convert(Matrix{T}, modelmatrix(formula_schema, subdf))
+    response_name, coefnames_exo = coefnames(formula_schema)
+
+    # Endogenous variables
+    formula_endo_schema = apply_schema(data_prep.formula_endo,
+        schema(data_prep.formula_endo, subdf, contrasts), StatisticalModel)
+    Xendo = convert(Matrix{T}, modelmatrix(formula_endo_schema, subdf))
+    _, coefnames_endo = coefnames(formula_endo_schema)
+
+    # Instruments
+    has_regular_iv = data_prep.formula_iv != FormulaTerm(ConstantTerm(0), ConstantTerm(0))
+    if has_regular_iv
+        formula_iv_schema = apply_schema(data_prep.formula_iv,
+            schema(data_prep.formula_iv, subdf, contrasts), StatisticalModel)
+        Z = convert(Matrix{T}, modelmatrix(formula_iv_schema, subdf))
+        _, coefnames_iv = coefnames(formula_iv_schema)
+    else
+        Z = Matrix{T}(undef, data_prep.nobs, 0)
+        coefnames_iv = String[]
+    end
+
+    # FE instruments
+    has_fe_iv = data_prep.has_fe_iv
+    iv_fes = FixedEffect[]
+    if has_fe_iv
+        iv_fes, _, _ = parse_fixedeffect(subdf, data_prep.formula_iv_fe)
+        has_fe_iv = !isempty(iv_fes)
+    end
+
+    # Update formula schema for prediction
+    # Use concrete vector to avoid runtime dispatch
+    schema_terms = collect(AbstractTerm, eachterm(formula_schema.rhs))
+    for term in eachterm(formula_endo_schema.rhs)
+        if term != ConstantTerm(0)
+            push!(schema_terms, term)
+        end
+    end
+    formula_schema = FormulaTerm(formula_schema.lhs, MatrixTerm(Tuple(schema_terms)))
+    coef_names = vcat(coefnames_exo, coefnames_endo)
+
+    # Compute TSS and validate
+    tss_total = tss(y, data_prep.has_intercept | data_prep.has_fe_intercept, wts)
+    all(isfinite, wts) || throw("Weights are not finite")
+    all(isfinite, y) || throw("Some observations for the dependent variable are infinite")
+    all(isfinite, Xexo) || throw("Some observations for the exogenous variables are infinite")
+    all(isfinite, Xendo) || throw("Some observations for the endogenous variables are infinite")
+    all(isfinite, Z) || throw("Some observations for the instrumental variables are infinite")
+
+    ##########################################################################
+    ## Partial Out Fixed Effects
+    ##########################################################################
+
+    oldy, oldX, feM = nothing, nothing, nothing
+    iterations, converged, tss_partial = 0, true, tss_total
+
+    if data_prep.has_fes
+        cols = vcat(eachcol(y), eachcol(Xexo), eachcol(Xendo), eachcol(Z))
+        colnames = vcat(response_name, coefnames_exo, coefnames_endo, coefnames_iv)
+
+        feM, iterations, converged, tss_partial, oldy_temp, oldX_temp = partial_out_fixed_effects!(
+            cols, colnames, subfes, wts, method, nthreads,
+            tol, maxiter, progress_bar, data_prep.save_fes,
+            data_prep.has_intercept, data_prep.has_fe_intercept, T)
+
+        if data_prep.save_fes && oldX_temp !== nothing
+            n_exo = size(Xexo, 2)
+            oldX = hcat(oldX_temp[:, 1:n_exo], oldX_temp[:, (n_exo + 1):(n_exo + size(Xendo, 2))])
+            oldy = oldy_temp
+        end
+    end
+
+    # Apply weights
+    if data_prep.has_weights
+        sqrtw = sqrt.(wts)
+        y .= y .* sqrtw
+        Xexo .= Xexo .* sqrtw
+        Xendo .= Xendo .* sqrtw
+        Z .= Z .* sqrtw
+    end
+
+    ##########################################################################
+    ## Collinearity Detection
+    ##########################################################################
+
+    XexoXexo = compute_crossproduct(Xexo)
+    XendoXendo = compute_crossproduct(Xendo)
+    ZZ = compute_crossproduct(Z)
+
+    coll = _iv_collinearity_detection!(
+        Xexo, Xendo, Z, XexoXexo, XendoXendo, ZZ,
+        data_prep.has_intercept, coefnames_endo
+    )
+
+    Xexo, Xendo, Z = coll.Xexo, coll.Xendo, coll.Z
+    XexoXexo, ZZ = coll.XexoXexo, coll.ZZ
+    XexoZ, XexoXendo, ZXendo = coll.XexoZ, coll.XexoXendo, coll.ZXendo
+    basis_coef, perm = coll.basis_coef, coll.perm
+    basis_endo, basis_endo_small = coll.basis_endo, coll.basis_endo_small
+
+    # Check identification
+    if !has_fe_iv
+        size(ZXendo, 1) >= size(ZXendo, 2) ||
+            throw("Model not identified. There must be at least as many instruments as endogenous variables")
+    end
+
+    ##########################################################################
+    ## First-Stage Regression
+    ##########################################################################
+
+    k_exo_final, k_z_final, k_endo_final = size(Xexo, 2), size(Z, 2), size(Xendo, 2)
+
+    if has_fe_iv
+        fs = _iv_first_stage_fe(Xexo, Xendo, iv_fes, wts, method, nthreads, maxiter, tol, progress_bar)
+        newZ, Pi, Xendo_hat = fs.newZ, fs.Pi, fs.Xendo_hat
+        Z, ZZ, XexoZ, ZXendo = fs.Z, fs.ZZ, fs.XexoZ, fs.ZXendo
+        k_z_final = 0
+    else
+        fs = _iv_first_stage_standard(Xexo, Z, Xendo, XexoXexo, ZZ, XexoXendo, ZXendo)
+        newZ, Pi, Xendo_hat, XexoZ = fs.newZ, fs.Pi, fs.Xendo_hat, fs.XexoZ
+    end
+
+    ##########################################################################
+    ## Second-Stage Regression
+    ##########################################################################
+
+    ss = _iv_second_stage(Xexo, Xendo_hat, y, XexoXexo)
+    Xhat, coef, invXhatXhat, XhatXhat = ss.Xhat, ss.coef, ss.invXhatXhat, ss.XhatXhat
+    X = hcat(Xexo, Xendo)
+
+    ##########################################################################
+    ## First-Stage F-Statistics
+    ##########################################################################
+
+    F_kp, p_kp = T(NaN), T(NaN)
+    F_kp_per_endo, p_kp_per_endo = T[], T[]
     first_stage_data = empty_first_stage_data(T)
 
-    if first_stage && size(Xendo, 2) > 0
-        # Get endogenous variable names (handle basis filtering)
-        endo_names_final = if all(basis_endo)
-            collect(String.(coefnames_endo))
-        else
-            # Filter names to match the retained endogenous variables
-            endo_idx = findall(basis_endo)
-            if !all(basis_endo_small)
-                endo_idx = endo_idx[basis_endo_small]
-            end
-            [String(coefnames_endo[i]) for i in endo_idx]
-        end
+    if first_stage && k_endo_final > 0
+        endo_names_final = all(basis_endo) ?
+            collect(String.(coefnames_endo)) :
+            [String(coefnames_endo[i]) for i in findall(basis_endo)[basis_endo_small]]
 
-        # Compute DOF for fixed effects
         dof_fes_local = sum(nunique(fe) for fe in subfes; init = 0)
 
         if has_fe_iv
-            ##################################################################
-            ## FE-Based First Stage F-Statistics
-            ##
-            ## For FE instruments, we compute a simple F-statistic based on
-            ## the variance explained by the FE means. This is analogous to
-            ## testing joint significance of the FE dummies.
-            ##################################################################
-
-            # First-stage residuals: Xendo - newnewZ (predicted)
-            Xendo_res = Xendo .- newnewZ
-
-            # Compute F-statistic as: (ESS/k) / (RSS/(n-k))
-            # where ESS = sum((predicted - mean)^2), RSS = sum(residuals^2)
-            # k = number of FE groups (degrees of freedom for instruments)
-            n_iv_fe_groups = sum(nunique(fe) for fe in iv_fes; init = 0)
-
-            for j in 1:k_endo_final
-                rss_j = sum(abs2, Xendo_res[:, j])
-                tss_j = sum(abs2, Xendo[:, j] .- mean(Xendo[:, j]))
-                ess_j = tss_j - rss_j
-
-                # F = (ESS/df1) / (RSS/df2)
-                df1 = n_iv_fe_groups - 1  # Instrument FE DOF
-                df2 = data_prep.nobs - n_iv_fe_groups - k_exo_final
-
-                if df1 > 0 && df2 > 0
-                    F_j = (ess_j / df1) / (rss_j / df2)
-                    p_j = fdistccdf(df1, df2, F_j)
-                    push!(F_kp_per_endo, F_j)
-                    push!(p_kp_per_endo, p_j)
-                else
-                    push!(F_kp_per_endo, T(NaN))
-                    push!(p_kp_per_endo, T(NaN))
-                end
-            end
-
-            # Joint F is just the first (or average if multiple endogenous)
-            if k_endo_final == 1
-                F_kp = F_kp_per_endo[1]
-                p_kp = p_kp_per_endo[1]
-            else
-                # For multiple endogenous, use harmonic mean of F-stats
-                F_kp = k_endo_final / sum(1 ./ F_kp_per_endo)
-                df1 = n_iv_fe_groups - 1
-                df2 = data_prep.nobs - n_iv_fe_groups - k_exo_final
-                p_kp = fdistccdf(df1, df2, F_kp)
-            end
-
-            # For FE case, we don't have traditional Pi/Z_res structure
-            # Store what we can for potential recomputation
-            first_stage_data = FirstStageData{T}(
-                zeros(T, 0, k_endo_final),  # Pi not applicable for FE case
-                copy(Xendo_res),
-                zeros(T, data_prep.nobs, 0),  # Z_res not applicable
-                endo_names_final,
-                k_exo_final,
-                copy(Xendo),
-                copy(newZ),
-                data_prep.has_intercept
-            )
-
+            fstats = _iv_first_stage_fstats_fe(
+                Xendo, Xendo_hat, iv_fes, newZ, data_prep.nobs, k_exo_final,
+                endo_names_final, data_prep.has_intercept)
         else
-            ##################################################################
-            ## Standard First-Stage F-Statistics
-            ##################################################################
+            fstats = _iv_first_stage_fstats_standard(
+                Xendo, newZ, Pi, XexoXexo, XexoZ, ZZ, X,
+                data_prep.nobs, dof_fes_local, endo_names_final,
+                k_exo_final, data_prep.has_intercept)
+        end
 
-            # Compute residuals for first-stage F-stat: Xendo - newZ * Pi
-            Xendo_res = BLAS.gemm!('N', 'N', -one(T), newZ, Pi, one(T), copy(Xendo))
-
-            # Partial out Z w.r.t. Xexo using block system
-            XexoZ_aug = build_block_symmetric(
-                [XexoXexo.data, XexoZ, ZZ.data],
-                [k_exo_final, k_z_final]
-            )
-            Pi2 = ls_solve!(XexoZ_aug, k_exo_final)
-            Z_res = BLAS.gemm!('N', 'N', -one(T), Xexo, Pi2, one(T), copy(Z))
-
-            # Extract the relevant part of Pi (instruments only)
-            Pip = Pi[(k_exo_final + 1):end, :]
-
-            # Compute joint first-stage F-statistic using Kleibergen-Paap rank test
-            F_kp,
-            p_kp = compute_first_stage_fstat(
-                Xendo_res, Z_res, Pip,
-                CovarianceMatrices.HR1(),
-                data_prep.nobs,
-                size(X, 2),
-                dof_fes_local
-            )
-
-            # Compute per-endogenous first-stage F-statistics
-            # Pass original data for robust Wald F computation (matches R's approach)
-            F_kp_per_endo,
-            p_kp_per_endo = compute_per_endogenous_fstats(
-                Xendo_res, Z_res, Pip,
-                CovarianceMatrices.HR1(),
-                data_prep.nobs,
-                size(X, 2),
-                dof_fes_local;
-                Xendo_orig = Xendo,
-                newZ = newZ
-            )
-
-            first_stage_data = FirstStageData{T}(
-                copy(Pip),
-                copy(Xendo_res),
-                copy(Z_res),
-                endo_names_final,
-                k_exo_final,
-                copy(Xendo),          # Original endogenous variables
-                copy(newZ),           # Full first-stage design [Xexo, Z]
-                data_prep.has_intercept
-            )
-        end  # end if has_fe_iv
-    end  # end if first_stage
-
-    ##############################################################################
-    ## Compute Statistics
-    ##############################################################################
-
-    # Residuals (esample only, for vcov computation)
-    residuals_raw = y - X * coef
-    # Unweight residuals if model was estimated with weights
-    residuals_esample = if data_prep.has_weights
-        residuals_raw ./ sqrt.(wts)
-    else
-        residuals_raw
+        F_kp, p_kp = fstats.F_kp, fstats.p_kp
+        F_kp_per_endo, p_kp_per_endo = fstats.F_kp_per_endo, fstats.p_kp_per_endo
+        first_stage_data = fstats.first_stage_data
     end
 
-    # Degrees of freedom
+    ##########################################################################
+    ## Compute Statistics
+    ##########################################################################
+
+    residuals_raw = y - X * coef
+    residuals_esample = data_prep.has_weights ? residuals_raw ./ sqrt.(wts) : residuals_raw
+
     ngroups_fes = [nunique(fe) for fe in subfes]
     dof_fes = sum(ngroups_fes)
     dof_base = data_prep.nobs - size(X, 2) - dof_fes - dof_add
     dof_residual = max(1, dof_base - (data_prep.has_intercept | data_prep.has_fe_intercept))
 
-    # R-squared (use raw weighted residuals for RSS)
     rss = sum(abs2, residuals_raw)
     r2_within = data_prep.has_fes ? one(T) - rss / tss_partial : one(T) - rss / tss_total
 
-    # F-statistic and p-value for the model
-    # For models with FE, use within TSS; otherwise use total TSS
+    dof_model = size(X, 2) - (data_prep.has_intercept & !data_prep.has_fe_intercept)
     tss_for_fstat = data_prep.has_fes ? tss_partial : tss_total
     mss_val = tss_for_fstat - rss
-    # Numerator DOF excludes intercept only if explicit intercept (not absorbed by FE)
-    dof_model = size(X, 2) - (data_prep.has_intercept & !data_prep.has_fe_intercept)
     F_stat = dof_model > 0 ? (mss_val / dof_model) / (rss / dof_residual) : T(NaN)
     p_val = dof_model > 0 ? fdistccdf(dof_model, dof_residual, F_stat) : T(NaN)
 
-    ##############################################################################
+    ##########################################################################
     ## Handle Omitted Variables
-    ##############################################################################
+    ##########################################################################
 
     if !all(basis_coef)
         newcoef = zeros(T, length(basis_coef))
@@ -595,46 +629,35 @@ function fit_tsls(df,
         for i in eachindex(newindex)
             newcoef[newindex[i]] = coef[i]
         end
-        # Set omitted coefficients to NaN
         newcoef[.!basis_coef] .= T(NaN)
         coef = newcoef
     end
 
-    # Handle permutation from recategorization
     if perm !== nothing
         _invperm = invperm(perm)
         coef = coef[_invperm]
         basis_coef = basis_coef[_invperm]
     end
 
-    ##############################################################################
-    ## Create PostEstimationData for vcov calculations
-    ##############################################################################
+    ##########################################################################
+    ## Create PostEstimationData
+    ##########################################################################
 
     postestimation_data = PostEstimationDataIV(
-        convert(Matrix{T}, Xhat),  # Store Xhat for inference
-        convert(Matrix{T}, X),     # Store original X with actual endogenous
-        cholesky(Symmetric(XhatXhat)),
-        invXhatXhat,
-        wts,
-        cluster_data,
-        basis_coef,
-        first_stage_data,  # First-stage data for F-stat recomputation
-        Matrix{T}(undef, 0, 0),  # Adj (K-class only, empty for TSLS)
-        T(NaN)                   # kappa (K-class only, NaN for TSLS)
+        convert(Matrix{T}, Xhat), convert(Matrix{T}, X),
+        cholesky(Symmetric(XhatXhat)), invXhatXhat, wts, cluster_data,
+        basis_coef, first_stage_data,
+        Matrix{T}(undef, 0, 0), T(NaN)
     )
 
-    ##############################################################################
+    ##########################################################################
     ## Solve for Fixed Effects (if requested)
-    ##############################################################################
+    ##########################################################################
 
     augmentdf = DataFrame()
     if data_prep.save_fes && oldy !== nothing
-        # Use non-NaN coefficients for FE computation
         coef_nonnan = coef[basis_coef]
-        newfes, b,
-        c = solve_coefficients!(oldy - oldX * coef_nonnan, feM;
-            tol = tol, maxiter = maxiter)
+        newfes, _, _ = solve_coefficients!(oldy - oldX * coef_nonnan, feM; tol = tol, maxiter = maxiter)
         for fekey in data_prep.fekeys
             augmentdf[!, fekey] = df[!, fekey]
         end
@@ -644,48 +667,22 @@ function fit_tsls(df,
         end
     end
 
-    # Handle Colon case for esample
-    esample_final = data_prep.esample == Colon() ? trues(data_prep.nrows) :
-                    data_prep.esample
+    esample_final = data_prep.esample == Colon() ? trues(data_prep.nrows) : data_prep.esample
 
-    ##############################################################################
-    ## Compute Default Vcov (HC1) and Related Statistics
-    ##############################################################################
+    ##########################################################################
+    ## Compute Inference
+    ##########################################################################
 
-    # Compute HC1 vcov matrix directly from components
-    # Use residuals_raw (weighted, for consistency with vcov computation)
-    vcov_matrix = compute_hc1_vcov_direct_iv(
-        convert(Matrix{T}, Xhat), residuals_raw, invXhatXhat, basis_coef,
-        data_prep.nobs, dof_model, dof_fes, dof_residual
-    )
+    inf = _iv_compute_inference(
+        convert(Matrix{T}, Xhat), residuals_raw, invXhatXhat, basis_coef, coef,
+        data_prep.nobs, dof_model, dof_fes, dof_residual, data_prep.formula_origin)
 
-    # Compute standard errors
-    se = sqrt.(diag(vcov_matrix))
-
-    # Compute t-statistics and p-values
-    # Use coef with zeros for collinear entries
-    coef_full = copy(coef)
-    coef_full[.!basis_coef] .= zero(T)
-    t_stats = coef_full ./ se
-    p_values = 2 .* tdistccdf.(dof_residual, abs.(t_stats))
-
-    # Compute robust F-statistic (Wald test) using vcov
-    has_int = hasintercept(data_prep.formula_origin)
-    F_stat_robust,
-    p_val_robust = compute_robust_fstat(
-        coef_full, vcov_matrix, has_int, dof_residual
-    )
-
-    # Default vcov estimator (HC1)
-    default_vcov = CovarianceMatrices.HC1()
-
-    ##############################################################################
+    ##########################################################################
     ## Return IVEstimator
-    ##############################################################################
+    ##########################################################################
 
-    return IVEstimator{T, TSLS, typeof(default_vcov), typeof(postestimation_data)}(
-        TSLS(),
-        coef,
+    return IVEstimator{T, TSLS, typeof(CovarianceMatrices.HC1()), typeof(postestimation_data)}(
+        TSLS(), coef,
         esample_final, residuals_esample, save_residuals, augmentdf,
         postestimation_data,
         data_prep.fekeys, coef_names, response_name,
@@ -693,8 +690,8 @@ function fit_tsls(df,
         data_prep.nobs, dof_model, dof_fes, dof_residual,
         rss, tss_total,
         iterations, converged, r2_within,
-        default_vcov, vcov_matrix, se, t_stats, p_values,
-        F_stat_robust, p_val_robust, F_kp, p_kp,
-        F_kp_per_endo, p_kp_per_endo  # Per-endogenous first-stage F-stats
+        CovarianceMatrices.HC1(), inf.vcov_matrix, inf.se, inf.t_stats, inf.p_values,
+        inf.F_stat_robust, inf.p_val_robust, F_kp, p_kp,
+        F_kp_per_endo, p_kp_per_endo
     )
 end

@@ -18,7 +18,7 @@ Supports fixed effects but NOT instrumental variables.
   - `:chol`: Faster but less stable (uses Cholesky decomposition)
   - `:qr`: More stable but ~2x slower (uses QR decomposition)
 """
-function fit_ols(df,
+function fit_ols(@nospecialize(df),
         formula::FormulaTerm;
         contrasts::Dict = Dict{Symbol, Any}(),
         weights::Union{Symbol, Nothing} = nothing,

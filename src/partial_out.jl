@@ -34,13 +34,13 @@ function partial_out(
         @nospecialize(df),
         @nospecialize(f::FormulaTerm);
         @nospecialize(weights::Union{Symbol, Expr, Nothing} = nothing),
-        @nospecialize(add_mean = false),
-        @nospecialize(maxiter::Integer = 10000),
+        add_mean::Bool = false,
+        maxiter::Integer = 10000,
         @nospecialize(contrasts::Dict = Dict{Symbol, Any}()),
-        @nospecialize(method::Symbol = :cpu),
-        @nospecialize(double_precision::Bool = true),
+        method::Symbol = :cpu,
+        double_precision::Bool = true,
         @nospecialize(tol::Real = double_precision ? 1e-8 : 1e-6),
-        @nospecialize(align = true))
+        align::Bool = true)
     if (ConstantTerm(0) ∉ eachterm(f.rhs)) & (ConstantTerm(1) ∉ eachterm(f.rhs))
         f = FormulaTerm(f.lhs, tuple(ConstantTerm(1), eachterm(f.rhs)...))
     end

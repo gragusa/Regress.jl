@@ -124,11 +124,14 @@ function prepare_data(df::DataFrame,
 
     # Remove intercept if absorbed by fixed effects
     if has_fe_intercept
-        formula = FormulaTerm(formula.lhs,
-            tuple(InterceptTerm{false}(),
-                (term
-                for term in eachterm(formula.rhs)
-                if !isa(term, Union{ConstantTerm, InterceptTerm}))...))
+        # Use concrete vector to avoid runtime dispatch
+        rhs_terms = AbstractTerm[InterceptTerm{false}()]
+        for term in eachterm(formula.rhs)
+            if !isa(term, Union{ConstantTerm, InterceptTerm})
+                push!(rhs_terms, term)
+            end
+        end
+        formula = FormulaTerm(formula.lhs, Tuple(rhs_terms))
     end
     has_intercept = hasintercept(formula)
 

@@ -23,7 +23,7 @@ the K-class coefficient formula instead of two-stage least squares.
 """
 function fit_kclass_estimator(
         estimator::AbstractIVEstimator,
-        df,
+        @nospecialize(df),
         formula::FormulaTerm;
         contrasts::Dict = Dict{Symbol, Any}(),
         weights::Union{Symbol, Nothing} = nothing,
@@ -101,11 +101,14 @@ function fit_kclass_estimator(
     _, coefnames_iv = coefnames(formula_iv_schema)
 
     # Modify formula schema for prediction
-    formula_schema = FormulaTerm(formula_schema.lhs,
-        MatrixTerm(tuple(eachterm(formula_schema.rhs)...,
-            (term
-            for term in eachterm(formula_endo_schema.rhs)
-            if term != ConstantTerm(0))...)))
+    # Use concrete vector to avoid runtime dispatch
+    schema_terms = collect(AbstractTerm, eachterm(formula_schema.rhs))
+    for term in eachterm(formula_endo_schema.rhs)
+        if term != ConstantTerm(0)
+            push!(schema_terms, term)
+        end
+    end
+    formula_schema = FormulaTerm(formula_schema.lhs, MatrixTerm(Tuple(schema_terms)))
 
     coef_names = vcat(coefnames_exo, coefnames_endo)
 
@@ -564,7 +567,7 @@ end
 
 Fit an instrumental variables model using LIML (Limited Information Maximum Likelihood).
 """
-function fit_liml(df, formula::FormulaTerm; kwargs...)
+function fit_liml(@nospecialize(df), formula::FormulaTerm; kwargs...)
     return fit_kclass_estimator(LIML(), df, formula; kwargs...)
 end
 
@@ -576,7 +579,7 @@ Fit an instrumental variables model using Fuller's bias-corrected estimator.
 # Keyword Arguments
 - `a::Real = 1.0`: Fuller bias correction parameter. Fuller(1) is median-unbiased.
 """
-function fit_fuller(df, formula::FormulaTerm; a::Real = 1.0, kwargs...)
+function fit_fuller(@nospecialize(df), formula::FormulaTerm; a::Real = 1.0, kwargs...)
     return fit_kclass_estimator(Fuller(a), df, formula; kwargs...)
 end
 
@@ -588,6 +591,6 @@ Fit an instrumental variables model using generic K-class estimator.
 # Keyword Arguments
 - `kappa::Real`: K-class parameter. k=1 gives TSLS.
 """
-function fit_kclass(df, formula::FormulaTerm; kappa::Real, kwargs...)
+function fit_kclass(@nospecialize(df), formula::FormulaTerm; kappa::Real, kwargs...)
     return fit_kclass_estimator(KClass(kappa), df, formula; kwargs...)
 end

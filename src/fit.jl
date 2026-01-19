@@ -81,7 +81,7 @@ coeftable(model, :firm_id, :CR1)
 
 See also: [`iv`](@ref), [`OLSEstimator`](@ref)
 """
-function ols(df, formula::FormulaTerm; kwargs...)
+function ols(@nospecialize(df), formula::FormulaTerm; kwargs...)
     has_iv(formula) &&
         throw(ArgumentError("Formula contains instrumental variables. Use `iv(TSLS(), df, formula)` instead."))
     return fit_ols(df, formula; kwargs...)
@@ -350,22 +350,22 @@ function _check_iv_formula(formula::FormulaTerm)
         throw(ArgumentError("Formula does not contain instrumental variables. Use `ols(df, formula)` instead."))
 end
 
-function iv(::TSLS, df, formula::FormulaTerm; kwargs...)
+function iv(::TSLS, @nospecialize(df), formula::FormulaTerm; kwargs...)
     _check_iv_formula(formula)
     return fit_tsls(df, formula; kwargs...)
 end
 
-function iv(::LIML, df, formula::FormulaTerm; kwargs...)
+function iv(::LIML, @nospecialize(df), formula::FormulaTerm; kwargs...)
     _check_iv_formula(formula)
     return fit_liml(df, formula; kwargs...)
 end
 
-function iv(estimator::Fuller, df, formula::FormulaTerm; kwargs...)
+function iv(estimator::Fuller, @nospecialize(df), formula::FormulaTerm; kwargs...)
     _check_iv_formula(formula)
     return fit_fuller(df, formula; a = estimator.a, kwargs...)
 end
 
-function iv(estimator::KClass, df, formula::FormulaTerm; kwargs...)
+function iv(estimator::KClass, @nospecialize(df), formula::FormulaTerm; kwargs...)
     _check_iv_formula(formula)
     return fit_kclass(df, formula; kappa = estimator.kappa, kwargs...)
 end

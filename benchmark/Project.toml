@@ -1,0 +1,12 @@
+[deps]
+CSV = "336ed68f-0bac-5ca0-87d4-7b16caf5d00b"
+CUDA = "052768ef-5323-5732-b1bb-66c8b64840ba"
+CategoricalArrays = "324d7699-5711-5eae-9e2f-1d82baa6b597"
+CovarianceMatrices = "60f91f6f-d783-54cb-84f9-544141854719"
+DataFrames = "a93c6f00-e57d-5684-b7b6-d8193f3e46c0"
+ExplicitImports = "7d51a73a-1435-4ff3-83d9-f097790105c7"
+FixedEffectModels = "9d5cd8c9-2029-5cab-9928-427838db53e3"
+Plots = "91a5bcdd-55d7-5caf-9e0b-520d859cae80"
+RCall = "6f49c342-dc21-5d91-9882-a32aef131414"
+Regress = "0ccf13ad-a1f2-44b4-972b-15ef40764d74"
+
