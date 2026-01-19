@@ -1,28 +1,41 @@
 module Regress
 
-using DataFrames
-using FixedEffects
-using LinearAlgebra
-using Printf
-using Reexport
-using PrecompileTools
-using StableRNGs
-using Statistics
-using StatsAPI
-using StatsBase
-using StatsFuns
+using CovarianceMatrices: CovarianceMatrices, AbstractAsymptoticVarianceEstimator,
+                          aVar, momentmatrix, stderror, vcov,
+                          HC0, HC1, HC2, HC3, HC4, HC5,
+                          CR0, CR1, CR2, CR3,
+                          Bartlett, Parzen, QuadraticSpectral, TukeyHanning, Truncated,
+                          Information, Misspecified, Uncorrelated, VcovSpec
+using DataFrames: DataFrames, AsTable, DataFrame, Not, combine, completecases,
+                  disallowmissing, disallowmissing!, dropmissing, leftjoin,
+                  nrow, select
+using FixedEffects: FixedEffects, AbstractFixedEffectSolver, FixedEffect,
+                    solve_coefficients!, solve_residuals!
+using LinearAlgebra: LinearAlgebra, BLAS, Cholesky, ColumnNorm, Hermitian, I,
+                     Symmetric, UpperTriangular, cholesky, cholesky!, diag,
+                     diagm, eigvals, issuccess, ldiv!, mul!, qr, rank, rmul!,
+                     svd, tr
+using PrecompileTools: PrecompileTools, @compile_workload
+using Printf: Printf, @printf, @sprintf
+using Reexport: Reexport, @reexport
+using StableRNGs: StableRNGs
+using Statistics: Statistics
+using StatsAPI: StatsAPI
+using StatsBase: StatsBase, AbstractWeights, CoefTable, UnitWeights, Weights,
+                 adjr2, coef, coeftable, deviance, dof, dof_residual,
+                 loglikelihood, mean, nobs, nulldeviance, nullloglikelihood,
+                 r2, residuals, rss, uweights, weights
+using StatsFuns: StatsFuns, chisqccdf, fdistccdf, tdistccdf, tdistinvcdf
 @reexport using StatsModels
-using Tables
+using StatsModels: StatsModels, @formula, AbstractTerm, ConstantTerm,
+                   FormulaTerm, FunctionTerm, InteractionTerm, InterceptTerm,
+                   MatrixTerm, StatisticalModel, Term, apply_schema, coefnames,
+                   formula, hasintercept, modelmatrix, omitsintercept,
+                   response, schema, term
+using Tables: Tables
 
-# CovarianceMatrices.jl for post-estimation vcov
+# Re-export CovarianceMatrices.jl for post-estimation vcov
 @reexport using CovarianceMatrices
-using CovarianceMatrices: AbstractAsymptoticVarianceEstimator
-using CovarianceMatrices: HC0, HC1, HC2, HC3, HC4, HC5
-using CovarianceMatrices: CR0, CR1, CR2, CR3
-using CovarianceMatrices: Bartlett, Parzen, QuadraticSpectral, TukeyHanning, Truncated
-using CovarianceMatrices: Information, Misspecified
-using CovarianceMatrices: Uncorrelated
-using CovarianceMatrices: VcovSpec
 
 include("utils/fixedeffects.jl")
 include("utils/basecol.jl")

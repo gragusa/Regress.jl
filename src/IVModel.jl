@@ -1040,7 +1040,7 @@ function StatsAPI.predict(m::IVEstimator, data)
     has_cont_fe_interaction(m.formula) &&
         throw(ArgumentError("Interaction of fixed effect and continuous variable detected in formula; this is currently not supported in `predict`"))
 
-    cdata = StatsModels.columntable(data)
+    cdata = Tables.columntable(data)
     cols, nonmissings = StatsModels.missing_omit(cdata, m.formula_schema.rhs)
     Xnew = modelmatrix(m.formula_schema, cols)
 
@@ -1079,7 +1079,7 @@ function StatsAPI.residuals(m::IVEstimator, data)
         throw(ArgumentError("expected second argument to be a Table, got $(typeof(data))"))
     has_fe(m) &&
         throw("To access residuals for a model with high-dimensional fixed effects,  run `m = iv(..., save = :residuals)` and then access residuals with `residuals(m)`.")
-    cdata = StatsModels.columntable(data)
+    cdata = Tables.columntable(data)
     cols, nonmissings = StatsModels.missing_omit(cdata, m.formula_schema.rhs)
     Xnew = modelmatrix(m.formula_schema, cols)
     y = response(m.formula_schema, cdata)

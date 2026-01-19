@@ -378,7 +378,7 @@ function StatsAPI.predict(m::OLSEstimator{T}, data) where {T}
     has_cont_fe_interaction(m.formula) &&
         throw(ArgumentError("Interaction of fixed effect and continuous variable detected in formula; this is currently not supported in `predict`"))
 
-    cdata = StatsModels.columntable(data)
+    cdata = Tables.columntable(data)
     cols, nonmissings = StatsModels.missing_omit(cdata, m.formula_schema.rhs)
     Xnew = modelmatrix(m.formula_schema, cols)
 
@@ -421,7 +421,7 @@ function StatsAPI.residuals(m::OLSEstimator{T}, data) where {T}
     has_fe(m) &&
         throw("To access residuals for a model with high-dimensional fixed effects, access them directly with `residuals(m)`.")
 
-    cdata = StatsModels.columntable(data)
+    cdata = Tables.columntable(data)
     cols, nonmissings = StatsModels.missing_omit(cdata, m.formula_schema.rhs)
     Xnew = modelmatrix(m.formula_schema, cols)
     y = response(m.formula_schema, cdata)
