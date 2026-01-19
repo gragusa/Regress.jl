@@ -1,10 +1,11 @@
-[![Build Status](https://github.com/gragusa/Regress.jl/actions/workflows/ci.yml/badge.svg)](https://github.com/gragusa/Regress.jl/actions/workflows/ci.yml)[![codecov.io](http://codecov.io/github/gragusa/Regress.jl/coverage.svg?branch=master)](http://codecov.io/github/gragusa/Regress.jl?branch=master)[![Aqua QA](https://raw.githubusercontent.com/JuliaTesting/Aqua.jl/master/badge.svg)](https://github.com/JuliaTesting/Aqua.jl) ![SciML Code Style](https://img.shields.io/static/v1?label=code%20style&message=SciML&color=9558b2&labelColor=389826)](https://github.com/SciML/SciMLStyle)
-
 # Regress.jl
+
+[![Build Status](https://github.com/gragusa/Regress.jl/actions/workflows/ci.yml/badge.svg)](https://github.com/gragusa/Regress.jl/actions/workflows/ci.yml) [![codecov.io](http://codecov.io/github/gragusa/Regress.jl/coverage.svg?branch=master)](http://codecov.io/github/gragusa/Regress.jl?branch=master) [![Aqua QA](https://raw.githubusercontent.com/JuliaTesting/Aqua.jl/master/badge.svg)](https://github.com/JuliaTesting/Aqua.jl) ![SciML Code Style](https://img.shields.io/static/v1?label=code%20style&message=SciML&color=9558b2&labelColor=389826)](https://github.com/SciML/SciMLStyle)
+
 
 High-performance linear models with fixed effects and instrumental variables.
 
-Regress.jl is inspired by and grateful to [FixedEffectModels.jl](https://github.com/FixedEffects/FixedEffectModels.jl). While sharing similar goals, `Regress.jl` takes a different architectural approach, with tight integration with [CovarianceMatrices.jl](https://github.com/gragusa/CovarianceMatrices.jl) and an extended family of IV estimators.
+`Regress.jl` is inspired by [FixedEffectModels.jl](https://github.com/FixedEffects/FixedEffectModels.jl). While sharing similar goals, `Regress.jl` takes a different architectural approach, with tight integration with [CovarianceMatrices.jl](https://github.com/gragusa/CovarianceMatrices.jl) and an extended family of IV estimators.
 
 ## Key Features
 
