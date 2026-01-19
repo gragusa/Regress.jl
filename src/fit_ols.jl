@@ -117,7 +117,13 @@ function fit_ols(@nospecialize(df),
 
     if data_prep.has_fes
         # Combine columns for demeaning
-        cols = vcat(eachcol(rr.y), eachcol(X))
+        # Direct construction avoids vcat overhead and extra allocations
+        n_cols = 1 + size(X, 2)
+        cols = Vector{AbstractVector{T}}(undef, n_cols)
+        cols[1] = rr.y
+        @inbounds for j in 1:size(X, 2)
+            cols[j + 1] = view(X, :, j)
+        end
         colnames = vcat(response_name, coef_names)
 
         # Partial out fixed effects (modifies cols in-place)

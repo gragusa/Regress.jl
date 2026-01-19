@@ -42,19 +42,29 @@ deepcopy_vcov(v::CM.CR1{T}) where {T <: Tuple{Vararg{Symbol}}} = v
 deepcopy_vcov(v::CM.CR2{T}) where {T <: Tuple{Vararg{Symbol}}} = v
 deepcopy_vcov(v::CM.CR3{T}) where {T <: Tuple{Vararg{Symbol}}} = v
 
-# CR estimators with data vectors - deep copy the vectors
+# CR estimators with data vectors/Clustering - deep copy the vectors
+# CovarianceMatrices.jl wraps vectors in Clustering(groups, ngroups)
+_copy_cluster_element(vec::AbstractVector) = copy(vec)
+_copy_cluster_element(c::CM.Clustering) = CM.Clustering(copy(c.groups), c.ngroups)
+
 function deepcopy_vcov(v::CM.CR0{T}) where {T <: Tuple}
-    CM.CR0(Tuple(copy(vec) for vec in v.g))
+    CM.CR0(Tuple(_copy_cluster_element(g) for g in v.g))
 end
 function deepcopy_vcov(v::CM.CR1{T}) where {T <: Tuple}
-    CM.CR1(Tuple(copy(vec) for vec in v.g))
+    CM.CR1(Tuple(_copy_cluster_element(g) for g in v.g))
 end
 function deepcopy_vcov(v::CM.CR2{T}) where {T <: Tuple}
-    CM.CR2(Tuple(copy(vec) for vec in v.g))
+    CM.CR2(Tuple(_copy_cluster_element(g) for g in v.g))
 end
 function deepcopy_vcov(v::CM.CR3{T}) where {T <: Tuple}
-    CM.CR3(Tuple(copy(vec) for vec in v.g))
+    CM.CR3(Tuple(_copy_cluster_element(g) for g in v.g))
 end
+
+# CachedCR estimators
+# CachedCR has preallocated buffers that can be reused - return same instance
+# The cache is designed to be reused for repeated variance calculations (e.g., wild bootstrap)
+# Note: CachedCR in Regress.jl is always created with actual data vectors (symbols are resolved)
+deepcopy_vcov(v::CM.CachedCR) = v
 
 # HAC estimators - use deepcopy (copies bw, kw, wlock arrays)
 # The fallback deepcopy handles these correctly

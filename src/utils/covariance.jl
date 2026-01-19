@@ -196,12 +196,14 @@ function CM.aVar(
         kwargs...
 ) where {K <: CM.AbstractAsymptoticVarianceEstimator}
     CM.setkernelweights!(k, m)
-    mm = begin
-        u = residualadjustment(k, m)
-        M = copy(momentmatrix(m))
-        @. M = M * u
-        M
-    end
+    # Compute moment matrix directly: X .* (y - mu) .* u in single fused broadcast
+    # This avoids separate allocation for residuals vector
+    # Note: y and mu are already weighted if model has weights
+    u = residualadjustment(k, m)
+    X = modelmatrix(m)
+    y = m.rr.y
+    mu = m.rr.mu
+    mm = @. X * (y - mu) * u
     basis_coef = m.basis_coef
     Σ = aVar(k, mm; demean = demean, prewhite = prewhite, scale = scale)
 
@@ -221,12 +223,13 @@ function CM.aVar(
         scale = true,
         kwargs...
 ) where {K <: CM.CR}
-    mm = begin
-        u = residualadjustment(k, m)
-        M = copy(momentmatrix(m))
-        @. M = M * u
-        M
-    end
+    # Compute moment matrix directly: X .* (y - mu) .* u in single fused broadcast
+    # This avoids separate allocation for residuals vector
+    u = residualadjustment(k, m)
+    X = modelmatrix(m)
+    y = m.rr.y
+    mu = m.rr.mu
+    mm = @. X * (y - mu) * u
     basis_coef = m.basis_coef
     Σ = aVar(k, mm; demean = demean, prewhite = prewhite, scale = scale)
 
@@ -360,6 +363,153 @@ end
 
 ##############################################################################
 ##
+## CachedCR Support for Symbol-Based Cluster Lookup
+##
+## CachedCR provides preallocated buffers for fast repeated variance calculations
+## (e.g., wild bootstrap). These methods support the symbol-based API.
+##
+## Usage:
+##   # Create CachedCR from model (resolves symbol to actual cluster data)
+##   cached = CachedCR(CR1(:firm_id), model)
+##
+##   # Use in wild bootstrap
+##   for b in 1:1000
+##       m_boot = model + vcov(cached)
+##   end
+##
+##############################################################################
+
+"""
+    CachedCR(cr::CR, m::OLSEstimator)
+
+Create a CachedCR estimator by resolving symbol-based cluster specification
+from the model's stored cluster data.
+
+This is the recommended way to create a CachedCR for use with Regress.jl models,
+as it handles symbol-to-vector resolution and determines the correct ncols.
+
+# Examples
+```julia
+# Fit model with cluster data saved
+m = ols(df, @formula(y ~ x1 + x2), save_cluster = :firm_id)
+
+# Create CachedCR from symbol-based CR estimator
+cached = CachedCR(CR1(:firm_id), m)
+
+# Use in wild bootstrap loop
+for b in 1:1000
+    # ... perturb model ...
+    V = vcov(cached, m)
+end
+```
+
+See also: [`CachedCR`](@ref CovarianceMatrices.CachedCR)
+"""
+function CM.CachedCR(cr::CM.CR0{T}, m::OLSEstimator) where {T <: Tuple{Vararg{Symbol}}}
+    cluster_vecs = _lookup_cluster_vecs(cr.g, m)
+    ncols = sum(m.basis_coef)  # Number of non-collinear coefficients
+    return CM.CachedCR(CM.CR0(cluster_vecs), ncols)
+end
+
+function CM.CachedCR(cr::CM.CR1{T}, m::OLSEstimator) where {T <: Tuple{Vararg{Symbol}}}
+    cluster_vecs = _lookup_cluster_vecs(cr.g, m)
+    ncols = sum(m.basis_coef)
+    return CM.CachedCR(CM.CR1(cluster_vecs), ncols)
+end
+
+function CM.CachedCR(cr::CM.CR2{T}, m::OLSEstimator) where {T <: Tuple{Vararg{Symbol}}}
+    cluster_vecs = _lookup_cluster_vecs(cr.g, m)
+    ncols = sum(m.basis_coef)
+    return CM.CachedCR(CM.CR2(cluster_vecs), ncols)
+end
+
+function CM.CachedCR(cr::CM.CR3{T}, m::OLSEstimator) where {T <: Tuple{Vararg{Symbol}}}
+    cluster_vecs = _lookup_cluster_vecs(cr.g, m)
+    ncols = sum(m.basis_coef)
+    return CM.CachedCR(CM.CR3(cluster_vecs), ncols)
+end
+
+# For CR with data vectors, just compute ncols from model
+function CM.CachedCR(cr::CM.CR, m::OLSEstimator)
+    ncols = sum(m.basis_coef)
+    return CM.CachedCR(cr, ncols)
+end
+
+"""
+    vcov(v::CM.CachedCR, m::OLSEstimator)
+
+Compute cluster-robust variance using CachedCR estimator.
+
+# Examples
+```julia
+# Create CachedCR from model
+cached = CachedCR(CR1(:firm_id), model)
+
+# Compute vcov
+V = vcov(cached, model)
+
+# Or use with + operator
+model_robust = model + vcov(cached)
+```
+"""
+function CM.vcov(v::CM.CachedCR, m::OLSEstimator)
+    # Compute moment matrix: X .* (y - mu)
+    # Note: For CachedCR, we use uniform residual adjustment (same as CR0/CR1)
+    X = modelmatrix(m)
+    y = m.rr.y
+    mu = m.rr.mu
+    mm = @. X * (y - mu)
+
+    # Get bread matrix and number of observations
+    B = bread(m)
+    n = nobs(m)
+    basis_coef = m.basis_coef
+
+    # Use cached aVar computation
+    Σ = aVar(v, mm)
+
+    # Compute scale factor using fixest-style small sample correction
+    # This matches the standard vcov(CR, OLSEstimator) method
+    scale = _cluster_robust_scale(v.estimator, m, n)
+
+    # Apply sandwich: V = scale * B * Σ * B
+    vcov_mat = scale .* B * Σ * B
+
+    all(basis_coef) && return Symmetric(vcov_mat)
+    return mask_vcov_collinear(Symmetric(vcov_mat), basis_coef)
+end
+
+"""
+    aVar(k::CM.CachedCR, m::OLSEstimator; kwargs...)
+
+Compute asymptotic variance using CachedCR estimator.
+"""
+function CM.aVar(
+        k::CM.CachedCR,
+        m::OLSEstimator;
+        demean = false,
+        prewhite = false,
+        scale = true,
+        kwargs...
+)
+    # Compute moment matrix directly
+    X = modelmatrix(m)
+    y = m.rr.y
+    mu = m.rr.mu
+    mm = @. X * (y - mu)
+    basis_coef = m.basis_coef
+
+    Σ = aVar(k, mm; demean = demean, prewhite = prewhite, scale = scale)
+
+    all(basis_coef) && return Σ
+    return mask_vcov_collinear(Σ, basis_coef)
+end
+
+# Residual adjustment for CachedCR (same as CR0/CR1 - no adjustment)
+@noinline residualadjustment(k::CM.CachedCR, r::OLSEstimator) = 1.0
+
+##############################################################################
+##
 ## Helper Functions for Cluster Variable Handling
 ##
 ##############################################################################
@@ -403,12 +553,14 @@ function leverage(m::OLSEstimator{T, <:OLSPredictorChol}) where {T}
 end
 
 function leverage(m::OLSEstimator{T, <:OLSPredictorQR}) where {T}
-    # For QR: X = QR, so X(X'X)^(-1)X' = QQ'
-    # h_i = ||Q_i||^2
+    # For QR: X = QR, so (X'X)^(-1) = R^(-1) R^(-T)
+    # H = X(X'X)^(-1)X' and h_i = X_i (X'X)^(-1) X_i' = ||X_i R^(-1)||^2
+    # Using R-factor directly avoids materializing full n×n Q matrix
     X = modelmatrix(m)
-    Q = Matrix(m.pp.qr.Q)[:, 1:size(m.pp.qr.R, 1)]
-    # Transpose for column-major access
-    return vec(sum(abs2, Q', dims = 1))
+    R = m.pp.qr.R
+    # Solve X / R using forward substitution: O(nk²) vs O(n²k) for full Q
+    XRinv = X / UpperTriangular(R)
+    return vec(sum(abs2, XRinv, dims = 2))
 end
 
 @noinline residualadjustment(k::CM.HR0, r::OLSEstimator) = 1.0
@@ -458,6 +610,44 @@ end
 # HAC (kernel) estimators - no residual adjustment needed
 @noinline residualadjustment(k::CM.HAC, r::OLSEstimator) = 1.0
 
+"""
+    _get_group_ranges(g)
+
+Precompute group indices for efficient per-group iteration.
+Returns (perm, starts) where perm[starts[i]:(starts[i+1]-1)] gives indices for group i.
+
+This avoids O(n × G) complexity from calling findall for each group.
+"""
+function _get_group_ranges(g)
+    groups = g.groups
+    ngroups = g.ngroups
+    n = length(groups)
+
+    # Count elements per group
+    counts = zeros(Int, ngroups)
+    @inbounds for i in 1:n
+        counts[groups[i]] += 1
+    end
+
+    # Compute starting positions (cumulative sum + 1)
+    starts = Vector{Int}(undef, ngroups + 1)
+    starts[1] = 1
+    @inbounds for i in 1:ngroups
+        starts[i + 1] = starts[i] + counts[i]
+    end
+
+    # Fill in permutation array
+    perm = Vector{Int}(undef, n)
+    pos = copy(starts)
+    @inbounds for i in 1:n
+        gid = groups[i]
+        perm[pos[gid]] = i
+        pos[gid] += 1
+    end
+
+    return perm, starts
+end
+
 function residualadjustment(k::CM.CR2, r::OLSEstimator)
     wts = r.rr.wts
     @assert length(k.g) == 1
@@ -467,8 +657,12 @@ function residualadjustment(k::CM.CR2, r::OLSEstimator)
     u = copy(u_orig)
     !isempty(wts) && @. u *= sqrt(wts)
     XX = bread(r)
-    for groups in 1:g.ngroups
-        ind = findall(==(groups), g.groups)
+
+    # Precompute group ranges once instead of O(n) findall per group
+    perm, starts = _get_group_ranges(g)
+
+    for group_id in 1:g.ngroups
+        ind = @view perm[starts[group_id]:(starts[group_id + 1] - 1)]
         Xg = view(X, ind, :)
         ug = view(u, ind, :)
         if isempty(wts)
@@ -476,7 +670,7 @@ function residualadjustment(k::CM.CR2, r::OLSEstimator)
             ldiv!(ug, cholesky!(Symmetric(I - Hᵧᵧ); check = false).L, ug)
         else
             Hᵧᵧ = (Xg * XX * Xg') .* view(wts, ind)'
-            ug .= matrixpowbysvd(I - Hᵧᵧ, -0.5)*ug
+            ug .= matrixpowbysvd(I - Hᵧᵧ, -0.5) * ug
         end
     end
     # Return the adjustment factor: adjusted_u / original_u
@@ -484,11 +678,11 @@ function residualadjustment(k::CM.CR2, r::OLSEstimator)
     return u ./ u_orig
 end
 
-function matrixpowbysvd(A, p; tol = eps()^(1/1.5))
+function matrixpowbysvd(A, p; tol = eps()^(1 / 1.5))
     s = svd(A)
     V = s.S
     V[V .< tol] .= 0
-    return s.V*diagm(0=>V .^ p)*s.Vt
+    return s.V * diagm(0 => V .^ p) * s.Vt
 end
 
 function residualadjustment(k::CM.CR3, r::OLSEstimator)
@@ -500,8 +694,12 @@ function residualadjustment(k::CM.CR3, r::OLSEstimator)
     u = copy(u_orig)
     !isempty(wts) && @. u *= sqrt(wts)
     XX = bread(r)
-    for groups in 1:g.ngroups
-        ind = findall(==(groups), g.groups)
+
+    # Precompute group ranges once instead of O(n) findall per group
+    perm, starts = _get_group_ranges(g)
+
+    for group_id in 1:g.ngroups
+        ind = @view perm[starts[group_id]:(starts[group_id + 1] - 1)]
         Xg = view(X, ind, :)
         ug = view(u, ind, :)
         if isempty(wts)
@@ -509,7 +707,7 @@ function residualadjustment(k::CM.CR3, r::OLSEstimator)
             ldiv!(ug, cholesky!(Symmetric(I - Hᵧᵧ); check = false), ug)
         else
             Hᵧᵧ = (Xg * XX * Xg') .* view(wts, ind)'
-            ug .= (I - Hᵧᵧ)^(-1)*ug
+            ug .= (I - Hᵧᵧ)^(-1) * ug
         end
     end
     # Return the adjustment factor: adjusted_u / original_u
@@ -732,10 +930,12 @@ function leverage(m::OLSMatrixEstimator{T, <:OLSPredictorChol}) where {T}
 end
 
 function leverage(m::OLSMatrixEstimator{T, <:OLSPredictorQR}) where {T}
+    # For QR: (X'X)^(-1) = R^(-1) R^(-T)
+    # h_i = ||X_i R^(-1)||^2, using R-factor directly avoids materializing full Q
     X = modelmatrix(m)
-    Q = Matrix(m.pp.qr.Q)[:, 1:size(m.pp.qr.R, 1)]
-    # Transpose for column-major access
-    return vec(sum(abs2, Q', dims = 1))
+    R = m.pp.qr.R
+    XRinv = X / UpperTriangular(R)
+    return vec(sum(abs2, XRinv, dims = 2))
 end
 
 # Residual adjustment functions for OLSMatrixEstimator
@@ -795,12 +995,12 @@ function CM.aVar(
         kwargs...
 ) where {K <: CM.AbstractAsymptoticVarianceEstimator}
     CM.setkernelweights!(k, m)
-    mm = begin
-        u = residualadjustment(k, m)
-        M = copy(momentmatrix(m))
-        @. M = M * u
-        M
-    end
+    # Compute moment matrix directly: X .* (y - mu) .* u in single fused broadcast
+    u = residualadjustment(k, m)
+    X = modelmatrix(m)
+    y = m.rr.y
+    mu = m.rr.mu
+    mm = @. X * (y - mu) * u
     basis_coef = m.basis_coef
     Σ = aVar(k, mm; demean = demean, prewhite = prewhite, scale = scale)
 
@@ -817,12 +1017,12 @@ function CM.aVar(
         scale = true,
         kwargs...
 ) where {K <: CM.CR}
-    mm = begin
-        u = residualadjustment(k, m)
-        M = copy(momentmatrix(m))
-        @. M = M * u
-        M
-    end
+    # Compute moment matrix directly: X .* (y - mu) .* u in single fused broadcast
+    u = residualadjustment(k, m)
+    X = modelmatrix(m)
+    y = m.rr.y
+    mu = m.rr.mu
+    mm = @. X * (y - mu) * u
     basis_coef = m.basis_coef
     Σ = aVar(k, mm; demean = demean, prewhite = prewhite, scale = scale)
 

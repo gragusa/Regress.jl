@@ -509,7 +509,14 @@ function partial_out_fixed_effects!(cols::Vector,
         if save_fes
             oldy = copy(cols[1])
             if length(cols) > 1
-                oldX = reduce(hcat, copy.(cols[2:end]))
+                # Pre-allocate and copy directly instead of reduce(hcat, copy.(...))
+                # which repeatedly allocates and copies during concatenation
+                n = length(cols[1])
+                k = length(cols) - 1
+                oldX = Matrix{T}(undef, n, k)
+                @inbounds for j in 1:k
+                    copyto!(view(oldX, :, j), cols[j + 1])
+                end
             end
         end
 
