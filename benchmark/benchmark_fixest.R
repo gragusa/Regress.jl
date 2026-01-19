@@ -5,9 +5,8 @@
 # Usage: Rscript benchmark_fixest.R [nthreads] [output_path]
 #
 
-library(fixest)
-library(microbenchmark)
-library(data.table)
+library(pacman)
+p_load(fixest, microbenchmark, data.table)
 
 args <- commandArgs(trailingOnly = TRUE)
 nthreads <- if (length(args) > 0) as.integer(args[1]) else 1
