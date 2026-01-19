@@ -28,7 +28,6 @@ include("gpu_utils.jl")
     result = ols(df, model)
     model = @formula Sales ~ CPI + (Price ~ Pimin) + fe(State)
     result = iv(TSLS(), df, model)
-    
 end
 
 @testset "Predict" begin

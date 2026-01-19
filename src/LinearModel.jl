@@ -501,16 +501,16 @@ end
 function top(m::OLSEstimator)
     # Use shared summary plus OLS specific fields
     out_common = _summary_table_common(m) # Matrix
-    
+
     # We need to insert "Converged" at index 2
     # "Converged" row
     row_converged = ["Converged" m.fes.converged]
-    
+
     # Reconstruct matrix
     part1 = out_common[1:1, :]
     part2 = out_common[2:end, :]
     out = vcat(part1, row_converged, part2)
-    
+
     # Add Iterations if FE
     if has_fe(m)
         row_iter = ["Iterations" sprint(show, m.fes.iterations, context = :compact => true)]

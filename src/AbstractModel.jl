@@ -135,7 +135,6 @@ function StatsAPI.confint(ve::CovarianceMatrices.AbstractAsymptoticVarianceEstim
     hcat(coef_val .- scale .* se, coef_val .+ scale .* se)
 end
 
-
 ##############################################################################
 ##
 ## Shared Coeftable Implementation
@@ -186,7 +185,7 @@ function _summary_table_common(m::AbstractRegressModel)
            "R² adjusted" @sprintf("%.3f", adjr2(m));
            "F-statistic" sprint(show, m.F, context = :compact => true);
            "P-value" @sprintf("%.3f", m.p);]
-    
+
     if has_fe(m)
         out = vcat(out, ["R² within" @sprintf("%.3f", m.r2_within)])
     end
