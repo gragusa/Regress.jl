@@ -280,9 +280,9 @@ Note: Requires X_reduced and mu to be stored (not compatible with save=:minimal)
 function solve_ols!(rr::OLSResponse{T},
         pp::OLSPredictorChol{T},
         basis_coef::BitVector) where {T}
-    pp.X_reduced === nothing &&
+    has_predictor_data(pp) ||
         error("X_reduced not stored. Model was fit with save=:minimal.")
-    rr.mu === nothing &&
+    has_response_data(rr) ||
         error("Fitted values not stored. Model was fit with save=:minimal.")
     # Coefficients already solved - just recompute fitted values if needed
     beta_reduced = pp.beta[basis_coef]
@@ -293,9 +293,9 @@ end
 function solve_ols!(rr::OLSResponse{T},
         pp::OLSPredictorQR{T},
         basis_coef::BitVector) where {T}
-    pp.X_reduced === nothing &&
+    has_predictor_data(pp) ||
         error("X_reduced not stored. Model was fit with save=:minimal.")
-    rr.mu === nothing &&
+    has_response_data(rr) ||
         error("Fitted values not stored. Model was fit with save=:minimal.")
     beta_reduced = pp.beta[basis_coef]
     mul!(rr.mu, pp.X_reduced, beta_reduced)

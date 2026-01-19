@@ -69,6 +69,31 @@ struct FirstStageResult{T <: AbstractFloat}
 end
 
 """
+    has_first_stage_data(fsd::FirstStageData) -> Bool
+
+Check if FirstStageData has actual data (not an empty sentinel).
+"""
+has_first_stage_data(fsd::FirstStageData) = !isempty(fsd.Pi)
+
+"""
+    empty_first_stage_data(::Type{T}) where T
+
+Create an empty FirstStageData sentinel.
+"""
+function empty_first_stage_data(::Type{T}) where {T <: AbstractFloat}
+    FirstStageData{T}(
+        Matrix{T}(undef, 0, 0),
+        Matrix{T}(undef, 0, 0),
+        Matrix{T}(undef, 0, 0),
+        String[],
+        0,
+        Matrix{T}(undef, 0, 0),
+        Matrix{T}(undef, 0, 0),
+        false
+    )
+end
+
+"""
     PostEstimationDataIV{T}
 
 Container for post-estimation data required for IV variance-covariance calculations.
@@ -81,9 +106,12 @@ Container for post-estimation data required for IV variance-covariance calculati
 - `weights::AbstractWeights`: Weights used in estimation
 - `cluster_vars::NamedTuple`: Cluster variables (subsetted to esample)
 - `basis_coef::BitVector`: Indicator of which coefficients are not collinear
-- `first_stage_data::Union{FirstStageData{T}, Nothing}`: First-stage data for F-statistics
-- `Adj::Union{Matrix{T}, Nothing}`: K-class adjustment matrix (W - k*Wres) for vcov
-- `kappa::Union{T, Nothing}`: K-class parameter (nothing for TSLS, k_LIML for LIML, etc.)
+- `first_stage_data::FirstStageData{T}`: First-stage data for F-statistics (empty if not computed)
+- `Adj::Matrix{T}`: K-class adjustment matrix (empty 0×0 for TSLS)
+- `kappa::T`: K-class parameter (NaN for TSLS, k_LIML for LIML, etc.)
+
+Use `has_first_stage_data(pe.first_stage_data)` to check if first-stage data is available.
+Use `has_kclass_adj(pe)` to check if K-class adjustment matrix is available.
 """
 struct PostEstimationDataIV{T, W <: AbstractWeights}
     X::Matrix{T}
@@ -93,13 +121,20 @@ struct PostEstimationDataIV{T, W <: AbstractWeights}
     weights::W
     cluster_vars::NamedTuple
     basis_coef::BitVector
-    first_stage_data::Union{FirstStageData{T}, Nothing}
-    Adj::Union{Matrix{T}, Nothing}
-    kappa::Union{T, Nothing}
+    first_stage_data::FirstStageData{T}
+    Adj::Matrix{T}              # Empty (0×0) for TSLS, filled for K-class
+    kappa::T                    # NaN for TSLS
 end
 
 """
-    IVEstimator <: StatsAPI.RegressionModel
+    has_kclass_adj(pe::PostEstimationDataIV) -> Bool
+
+Check if the post-estimation data has K-class adjustment matrix.
+"""
+has_kclass_adj(pe::PostEstimationDataIV) = !isempty(pe.Adj)
+
+"""
+    IVEstimator <: AbstractRegressModel
 
 Model type for instrumental variables regression.
 
@@ -118,14 +153,14 @@ iv(TSLS(), df, @formula(y ~ x + (endo ~ instrument)))
 ```
 """
 struct IVEstimator{
-    T, E <: AbstractIVEstimator, V, P <: Union{PostEstimationDataIV{T}, Nothing}} <:
-       StatsAPI.RegressionModel
+    T, E <: AbstractIVEstimator, V, P <: Union{PostEstimationDataIV{T}, Nothing}} <: AbstractRegressModel
     estimator::E  # Which IV estimator was used
 
     coef::Vector{T}   # Vector of coefficients
 
     esample::BitVector      # Is the row of the original dataframe part of the estimation sample?
-    residuals::Union{Vector{T}, Vector{Union{T, Missing}}, Nothing}
+    residuals_esample::Vector{T}  # Residuals for esample rows only (for vcov computation)
+    has_residuals::Bool           # Whether residuals were saved
     fe::DataFrame
 
     # Post-estimation data for CovarianceMatrices.jl
@@ -169,6 +204,23 @@ end
 
 has_iv(::IVEstimator) = true
 has_fe(m::IVEstimator) = has_fe(m.formula)
+r2_within(m::IVEstimator) = m.r2_within
+model_hasintercept(m::IVEstimator) = hasintercept(m.formula)
+
+"""
+    has_residuals_data(m::IVEstimator) -> Bool
+
+Check if residuals were saved during fitting.
+"""
+has_residuals_data(m::IVEstimator) = m.has_residuals
+
+"""
+    residuals_for_vcov(m::IVEstimator) -> Vector{T}
+
+Get residuals for variance-covariance computation (esample rows only).
+This is the type-stable internal accessor for vcov calculations.
+"""
+residuals_for_vcov(m::IVEstimator) = m.residuals_esample
 
 ##############################################################################
 ##
@@ -199,11 +251,9 @@ StatsAPI.nobs(m::IVEstimator) = m.nobs
 StatsAPI.dof(m::IVEstimator) = m.dof
 StatsAPI.dof_residual(m::IVEstimator) = m.dof_residual
 StatsAPI.r2(m::IVEstimator) = r2(m, :devianceratio)
-StatsAPI.islinear(m::IVEstimator) = true
 StatsAPI.deviance(m::IVEstimator) = rss(m)
 StatsAPI.nulldeviance(m::IVEstimator) = m.tss
 StatsAPI.rss(m::IVEstimator) = m.rss
-StatsAPI.mss(m::IVEstimator) = nulldeviance(m) - rss(m)
 StatsModels.formula(m::IVEstimator) = m.formula_schema
 dof_fes(m::IVEstimator) = m.dof_fes
 
@@ -225,34 +275,14 @@ Required for post-estimation variance-covariance calculations.
 function CovarianceMatrices.momentmatrix(m::IVEstimator)
     isnothing(m.postestimation) &&
         error("Model does not have post-estimation data stored. Post-estimation vcov not available.")
-    isnothing(m.residuals) &&
+    !has_residuals_data(m) &&
         error("Model does not have residuals stored. Use save=:residuals or save=:all when fitting.")
 
     # Use Adj if available (K-class: LIML, Fuller), otherwise use X (TSLS)
     pe = m.postestimation
-    X_for_vcov = isnothing(pe.Adj) ? pe.X : pe.Adj
-    return X_for_vcov .* m.residuals
+    X_for_vcov = has_kclass_adj(pe) ? pe.Adj : pe.X
+    return X_for_vcov .* residuals_for_vcov(m)
 end
-
-"""
-    CovarianceMatrices.score(m::IVEstimator)
-
-Returns the score matrix (Jacobian of moment conditions) for IV: -X'X/n.
-"""
-# function CovarianceMatrices.hessian_objective(m::IVEstimator)
-#     isnothing(m.X) && error("Model does not have design matrix stored. Post-estimation vcov not available.")
-#     return -Symmetric(m.X' * m.X) / m.nobs
-# end
-
-"""
-    CovarianceMatrices.objective_hessian(m::IVEstimator)
-
-Returns the Hessian of the least squares objective function: X'X/n.
-"""
-# function CovarianceMatrices.hessian_objective(m::IVEstimator)
-#     isnothing(m.X) && error("Model does not have design matrix stored. Post-estimation vcov not available.")
-#     return Symmetric(m.X' * m.X) / m.nobs
-# end
 
 ##############################################################################
 ##
@@ -329,7 +359,7 @@ function residualadjustment(k::_CM.CR2, m::IVEstimator)
     @assert length(k.g) == 1 "CR2 for IV currently only supports single-way clustering"
     g = k.g[1]
     X = m.postestimation.X
-    resid = m.residuals
+    resid = residuals_for_vcov(m)
     u = copy(resid)
     XX = bread(m)
     for groups in 1:g.ngroups
@@ -350,7 +380,7 @@ function residualadjustment(k::_CM.CR3, m::IVEstimator)
     @assert length(k.g) == 1 "CR3 for IV currently only supports single-way clustering"
     g = k.g[1]
     X = m.postestimation.X
-    resid = m.residuals
+    resid = residuals_for_vcov(m)
     u = copy(resid)
     XX = bread(m)
     for groups in 1:g.ngroups
@@ -381,15 +411,15 @@ function _CM.aVar(
         kwargs...
 ) where {K <: _CM.AbstractAsymptoticVarianceEstimator}
     isnothing(m.postestimation) && error("Model does not have post-estimation data stored.")
-    isnothing(m.residuals) && error("Model does not have residuals stored.")
+    !has_residuals_data(m) && error("Model does not have residuals stored.")
 
     # Compute adjusted moment matrix
     # Use Adj if available (K-class: LIML, Fuller), otherwise use X (TSLS)
     pe = m.postestimation
-    X_for_vcov = isnothing(pe.Adj) ? pe.X : pe.Adj
+    X_for_vcov = has_kclass_adj(pe) ? pe.Adj : pe.X
 
     u = residualadjustment(k, m)
-    M = X_for_vcov .* m.residuals
+    M = X_for_vcov .* residuals_for_vcov(m)
     if !(u isa Number && u == 1.0)
         M = M .* u
     end
@@ -409,15 +439,15 @@ function _CM.aVar(
         kwargs...
 ) where {K <: _CM.CR}
     isnothing(m.postestimation) && error("Model does not have post-estimation data stored.")
-    isnothing(m.residuals) && error("Model does not have residuals stored.")
+    !has_residuals_data(m) && error("Model does not have residuals stored.")
 
     # Compute adjusted moment matrix
     # Use Adj if available (K-class: LIML, Fuller), otherwise use X (TSLS)
     pe = m.postestimation
-    X_for_vcov = isnothing(pe.Adj) ? pe.X : pe.Adj
+    X_for_vcov = has_kclass_adj(pe) ? pe.Adj : pe.X
 
     u = residualadjustment(k, m)
-    M = X_for_vcov .* m.residuals
+    M = X_for_vcov .* residuals_for_vcov(m)
     if !(u isa Number && u == 1.0)
         M = M .* u
     end
@@ -465,20 +495,20 @@ vcov(CR1(df.firm_id[model.esample]), model)
 vcov(CR1((df.firm_id[model.esample], df.year[model.esample])), model)
 
 # Convenience API (for stored cluster variables - avoids manual subsetting)
-model = iv(TSLS(), df, @formula(y ~ x + (endo ~ inst)), save_cluster=:firm_id)
+model = iv(TSLS(), df, @formula(y ~ x + (endo ~ inst)), save_cluster = :firm_id)
 vcov(:firm_id, :CR1, model)
 ```
 """
 function StatsBase.vcov(ve::CovarianceMatrices.AbstractAsymptoticVarianceEstimator, m::IVEstimator{T}) where {T}
     isnothing(m.postestimation) &&
         error("Model does not have post-estimation data stored. Post-estimation vcov not available.")
-    isnothing(m.residuals) &&
+    !has_residuals_data(m) &&
         error("Model does not have residuals stored. Use save=:residuals or save=:all when fitting.")
 
     n = nobs(m)
     k = dof(m)
     B = bread(m)
-    resid = m.residuals
+    resid = residuals_for_vcov(m)
 
     # Check for truly homoskedastic variance estimators (not HC0/HC1)
     # Uncorrelated() assumes i.i.d. errors
@@ -644,426 +674,14 @@ end
 function _cluster_not_found_error(cluster_name::Symbol, m::IVEstimator)
     available = isempty(m.postestimation.cluster_vars) ? "none" :
                 join(keys(m.postestimation.cluster_vars), ", :")
-    error("""
-    Cluster variable :$cluster_name not found in model.
+    error("\n    Cluster variable :$cluster_name not found in model.
 
     Available cluster variables: :$available
 
     To use this cluster variable, either:
       1. Re-fit with save_cluster=:$cluster_name
       2. Use data directly: vcov(CR1(df.$cluster_name[model.esample]), model)
-    """)
-end
-
-##############################################################################
-##
-## Additional Methods
-##
-##############################################################################
-
-function StatsAPI.loglikelihood(m::IVEstimator)
-    n = nobs(m)
-    -n/2 * (log(2π * deviance(m) / n) + 1)
-end
-
-function StatsAPI.nullloglikelihood(m::IVEstimator)
-    n = nobs(m)
-    -n/2 * (log(2π * nulldeviance(m) / n) + 1)
-end
-
-function nullloglikelihood_within(m::IVEstimator)
-    n = nobs(m)
-    tss_within = deviance(m) / (1 - m.r2_within)
-    -n/2 * (log(2π * tss_within / n) + 1)
-end
-
-function StatsAPI.adjr2(model::IVEstimator, variant::Symbol = :devianceratio)
-    has_int = hasintercept(formula(model))
-    k = dof(model) + dof_fes(model) + has_int
-    if variant == :McFadden
-        k = k - has_int - has_fe(model)
-        ll = loglikelihood(model)
-        ll0 = nullloglikelihood(model)
-        1 - (ll - k)/ll0
-    elseif variant == :devianceratio
-        n = nobs(model)
-        dev = deviance(model)
-        dev0 = nulldeviance(model)
-        1 - (dev*(n - (has_int | has_fe(model)))) / (dev0 * max(n - k, 1))
-    else
-        throw(ArgumentError("variant must be one of :McFadden or :devianceratio"))
-    end
-end
-
-function StatsAPI.confint(m::IVEstimator; level::Real = 0.95)
-    scale = tdistinvcdf(StatsAPI.dof_residual(m), 1 - (1 - level) / 2)
-    se = stderror(m)
-    hcat(m.coef - scale * se, m.coef + scale * se)
-end
-
-##############################################################################
-##
-## Predict and Residuals
-##
-##############################################################################
-
-# Note: is_cont_fe_int() and has_cont_fe_interaction() are defined in utils/fit_common.jl
-
-function StatsAPI.predict(m::IVEstimator{T}, data) where {T}
-    Tables.istable(data) ||
-        throw(ArgumentError("expected second argument to be a Table, got $(typeof(data))"))
-
-    has_cont_fe_interaction(m.formula) &&
-        throw(ArgumentError("Interaction of fixed effect and continuous variable detected in formula; this is currently not supported in `predict`"))
-
-    cdata = StatsModels.columntable(data)
-    cols, nonmissings = StatsModels.missing_omit(cdata, m.formula_schema.rhs)
-    Xnew = modelmatrix(m.formula_schema, cols)
-
-    # Type-stable inner function via function barrier
-    return _predict_iv_impl(Xnew, m.coef, nonmissings, m, data, T)
-end
-
-# Type-stable inner function for IV predict
-function _predict_iv_impl(
-        Xnew::AbstractMatrix, coef_vec::AbstractVector{T},
-        nonmissings::AbstractVector{Bool}, m::IVEstimator{T}, data, ::Type{T}
-) where {T}
-    n = length(nonmissings)
-    # Always allocate with Union type for consistent return type
-    out = Vector{Union{T, Missing}}(missing, n)
-    @views out[nonmissings] .= Xnew * coef_vec
-
-    if has_fe(m)
-        nrow(fe(m)) > 0 ||
-            throw(ArgumentError("Model has no estimated fixed effects. To store estimates of fixed effects, run `iv` with the option save = :fe"))
-
-        df = DataFrame(data; copycols = false)
-        fes = leftjoin(select(df, m.fekeys), dropmissing(unique(m.fe)); on = m.fekeys,
-            makeunique = true, matchmissing = :equal, order = :left)
-        fes = combine(fes, AsTable(Not(m.fekeys)) => sum)
-
-        @views out[nonmissings] .+= fes[nonmissings, 1]
-    end
-
-    return out
-end
-
-function StatsAPI.residuals(m::IVEstimator{T}, data) where {T}
-    Tables.istable(data) ||
-        throw(ArgumentError("expected second argument to be a Table, got $(typeof(data))"))
-    has_fe(m) &&
-        throw("To access residuals for a model with high-dimensional fixed effects,  run `m = iv(..., save = :residuals)` and then access residuals with `residuals(m)`.")
-    cdata = StatsModels.columntable(data)
-    cols, nonmissings = StatsModels.missing_omit(cdata, m.formula_schema.rhs)
-    Xnew = modelmatrix(m.formula_schema, cols)
-    y = response(m.formula_schema, cdata)
-
-    # Type-stable inner function via function barrier
-    return _residuals_iv_impl(y, Xnew, m.coef, nonmissings, T)
-end
-
-# Type-stable inner function for IV residuals
-function _residuals_iv_impl(
-        y::AbstractVector, Xnew::AbstractMatrix, coef_vec::AbstractVector{T},
-        nonmissings::AbstractVector{Bool}, ::Type{T}
-) where {T}
-    n = length(nonmissings)
-    # Always allocate with Union type for consistent return type
-    out = Vector{Union{T, Missing}}(missing, n)
-    @views out[nonmissings] .= y .- Xnew * coef_vec
-    return out
-end
-
-function StatsAPI.residuals(m::IVEstimator)
-    if m.residuals === nothing
-        has_fe(m) &&
-            throw("To access residuals in a fixed effect regression,  run `iv` with the option save = :residuals, and then access residuals with `residuals()`")
-        !has_fe(m) &&
-            throw("To access residuals,  use residuals(m, data) where `m` is an estimated IVEstimator and  `data` is a Table")
-    end
-    m.residuals
-end
-
-"""
-   fe(m::IVEstimator; keepkeys = false)
-
-Return a DataFrame with fixed effects estimates.
-"""
-function fe(m::IVEstimator; keepkeys = false)
-    !has_fe(m) && throw("fe() is not defined for models without fixed effects")
-    if keepkeys
-        m.fe
-    else
-        m.fe[!, (length(m.fekeys) + 1):end]
-    end
-end
-
-function StatsAPI.coeftable(m::IVEstimator; level = 0.95)
-    cc = coef(m)
-    se = m.se
-    tt = m.t_stats
-    pv = m.p_values
-    coefnms = coefnames(m)
-
-    # Compute confidence intervals using precomputed se
-    scale = tdistinvcdf(dof_residual(m), 1 - (1 - level) / 2)
-    conf_int = hcat(cc .- scale .* se, cc .+ scale .* se)
-
-    # put (intercept) last
-    if !isempty(coefnms) &&
-       ((coefnms[1] == Symbol("(Intercept)")) || (coefnms[1] == "(Intercept)"))
-        newindex = vcat(2:length(cc), 1)
-        cc = cc[newindex]
-        se = se[newindex]
-        tt = tt[newindex]
-        pv = pv[newindex]
-        conf_int = conf_int[newindex, :]
-        coefnms = coefnms[newindex]
-    end
-
-    CoefTable(
-        hcat(cc, se, tt, pv, conf_int[:, 1:2]),
-        ["Estimate", "Std. Error", "t-stat", "Pr(>|t|)", "Lower 95%", "Upper 95%"],
-        ["$(coefnms[i])" for i in 1:length(cc)], 4)
-end
-
-##############################################################################
-##
-## Display Result
-##
-##############################################################################
-
-function _estimator_name(m::IVEstimator)
-    e = m.estimator
-    if e isa TSLS
-        return "TSLS"
-    elseif e isa LIML
-        return "LIML"
-    elseif e isa Fuller
-        return @sprintf("Fuller(%.1f)", e.a)
-    elseif e isa KClass
-        return @sprintf("KClass(%.4f)", e.kappa)
-    else
-        return string(typeof(e).name.name)
-    end
-end
-
-function top(m::IVEstimator)
-    out = ["Number of obs" sprint(show, nobs(m), context = :compact => true);
-           "Converged" m.converged;
-           "dof (model)" sprint(show, dof(m), context = :compact => true);
-           "dof (residuals)" sprint(show, dof_residual(m), context = :compact => true);
-           "R²" @sprintf("%.3f", r2(m));
-           "R² adjusted" @sprintf("%.3f", adjr2(m));
-           "F-statistic" sprint(show, m.F, context = :compact => true);
-           "P-value" @sprintf("%.3f", m.p);]
-
-    # Show kappa for K-class estimators
-    if !isnothing(m.postestimation) && !isnothing(m.postestimation.kappa)
-        out = vcat(out, ["K-class kappa" @sprintf("%.4f", m.postestimation.kappa)])
-    end
-
-    # Always show first-stage diagnostics for IV models (joint Kleibergen-Paap)
-    out = vcat(out,
-        ["F (1st stage, joint)" sprint(show, m.F_kp, context = :compact => true);
-         "P (1st stage, joint)" @sprintf("%.3f", m.p_kp);])
-    if has_fe(m)
-        out = vcat(out,
-            ["R² within" @sprintf("%.3f", m.r2_within);
-             "Iterations" sprint(show, m.iterations, context = :compact => true);])
-    end
-    return out
-end
-
-import StatsBase: NoQuote, PValue
-function Base.show(io::IO, m::IVEstimator)
-    ct = coeftable(m)
-    cols = ct.cols;
-    rownms = ct.rownms;
-    colnms = ct.colnms;
-    nc = length(cols)
-    nr = length(cols[1])
-    if length(rownms) == 0
-        rownms = [lpad("[$i]", floor(Integer, log10(nr))+3) for i in 1:nr]
-    end
-    mat = [j == 1 ? NoQuote(rownms[i]) :
-           j-1 == ct.pvalcol ? NoQuote(sprint(show, PValue(cols[j - 1][i]))) :
-           j-1 in ct.teststatcol ? TestStat(cols[j - 1][i]) :
-           cols[j - 1][i] isa AbstractString ? NoQuote(cols[j - 1][i]) : cols[j - 1][i]
-           for i in 1:nr, j in 1:(nc + 1)]
-    io = IOContext(io, :compact=>true, :limit=>false)
-    A = Base.alignment(io, mat, 1:size(mat, 1), 1:size(mat, 2),
-        typemax(Int), typemax(Int), 3)
-    nmswidths = pushfirst!(length.(colnms), 0)
-    A = [nmswidths[i] > sum(A[i]) ? (A[i][1]+nmswidths[i]-sum(A[i]), A[i][2]) : A[i]
-         for i in 1:length(A)]
-    totwidth = compute_table_width(A, colnms)
-
-    # Title: estimator name (TSLS, LIML, Fuller, etc.)
-    ctitle = _estimator_name(m)
-    halfwidth = max(0, div(totwidth - length(ctitle), 2))
-    print(io, " " ^ halfwidth * ctitle * " " ^ halfwidth)
-    ctop = top(m)
-    for i in 1:size(ctop, 1)
-        ctop[i, 1] = ctop[i, 1] * ":"
-    end
-    println(io)
-    println_horizontal_line(io, totwidth)
-    halfwidth = div(totwidth, 2) - 1
-    interwidth = 2 + mod(totwidth, 2)
-    for i in 1:(div(size(ctop, 1) - 1, 2) + 1)
-        print(io, ctop[2 * i - 1, 1])
-        print(io, lpad(ctop[2 * i - 1, 2], halfwidth - length(ctop[2 * i - 1, 1])))
-        print(io, " " ^ interwidth)
-        if size(ctop, 1) >= 2*i
-            print(io, ctop[2 * i, 1])
-            print(io, lpad(ctop[2 * i, 2], halfwidth - length(ctop[2 * i, 1])))
-        end
-        println(io)
-    end
-
-    println_horizontal_line(io, totwidth)
-    print(io, repeat(' ', sum(A[1])))
-    for j in 1:length(colnms)
-        print(io, "  ", lpad(colnms[j], sum(A[j + 1])))
-    end
-    println(io)
-    println_horizontal_line(io, totwidth)
-    for i in 1:size(mat, 1)
-        Base.print_matrix_row(io, mat, A, i, 1:size(mat, 2), "  ")
-        i != size(mat, 1) && println(io)
-    end
-    println(io)
-    println_horizontal_line(io, totwidth)
-
-    # Display per-endogenous first-stage F-statistics if available
-    _show_per_endogenous_fstats(io, m, totwidth)
-
-    # Note: variance-covariance type only
-    vcov_name = vcov_type_name(m.vcov_estimator)
-    println(io, "Note: Std. errors computed using $vcov_name variance estimator")
-
-    nothing
-end
-
-"""
-    _show_per_endogenous_fstats(io::IO, m::IVEstimator, totwidth::Int)
-
-Display per-endogenous first-stage F-statistics table.
-"""
-function _show_per_endogenous_fstats(io::IO, m::IVEstimator, totwidth::Int)
-    # Check if we have per-endogenous F-stats
-    isempty(m.F_kp_per_endo) && return
-    isnothing(m.postestimation) && return
-    isnothing(m.postestimation.first_stage_data) && return
-
-    fsd = m.postestimation.first_stage_data
-    endo_names = fsd.endogenous_names
-
-    # Print header
-    println(io, "\nFirst-Stage F-Statistics (per endogenous variable):")
-    println_horizontal_line(io, totwidth)
-    @printf(io, "%-30s %14s %14s\n", "Endogenous", "F-stat", "P-value")
-    println_horizontal_line(io, totwidth)
-
-    # Print each endogenous variable
-    for (j, name) in enumerate(endo_names)
-        F_j = m.F_kp_per_endo[j]
-        p_j = m.p_kp_per_endo[j]
-
-        # Truncate name if too long
-        display_name = length(name) > 28 ? name[1:25] * "..." : name
-        @printf(io, "%-30s %14.4f %14.4f\n", display_name, F_j, p_j)
-    end
-
-    println_horizontal_line(io, totwidth)
-end
-
-function Base.show(io::IO, ::MIME"text/html", m::IVEstimator)
-    ct = coeftable(m)
-    cols = ct.cols
-    rownms = ct.rownms
-    colnms = ct.colnms
-
-    # Start table with estimator name as caption
-    html_table_start(io; class = "regress-table regress-iv", caption = _estimator_name(m))
-
-    # Summary statistics section
-    ctop = top(m)
-    html_thead_start(io; class = "regress-summary")
-    for i in 1:size(ctop, 1)
-        html_row(io, [ctop[i, 1], ctop[i, 2]]; class = "regress-summary-row")
-    end
-    html_thead_end(io)
-
-    # Coefficient table header
-    html_thead_start(io; class = "regress-coef-header")
-    html_row(io, vcat([""], colnms); is_header = true)
-    html_thead_end(io)
-
-    # Coefficient table body
-    html_tbody_start(io; class = "regress-coef-body")
-    for i in 1:length(rownms)
-        row_data = [rownms[i]]
-        for j in 1:length(cols)
-            if j == ct.pvalcol
-                push!(row_data, format_pvalue(cols[j][i]))
-            else
-                push!(row_data, format_number(cols[j][i]))
-            end
-        end
-        html_row(io, row_data)
-    end
-    html_tbody_end(io)
-
-    # First-stage diagnostics section (if available)
-    if !isempty(m.F_kp_per_endo) && !isnothing(m.postestimation) &&
-       !isnothing(m.postestimation.first_stage_data)
-        fsd = m.postestimation.first_stage_data
-        endo_names = fsd.endogenous_names
-
-        html_tfoot_start(io; class = "regress-first-stage")
-        html_row(io, ["First-Stage F-Statistics", "", "", "", "", "", ""];
-            class = "regress-first-stage-header")
-        for (j, name) in enumerate(endo_names)
-            F_j = m.F_kp_per_endo[j]
-            p_j = m.p_kp_per_endo[j]
-            html_row(io, [name, format_number(F_j), format_pvalue(p_j), "", "", "", ""])
-        end
-        html_tfoot_end(io)
-    end
-
-    # Footer with vcov type and instrument info
-    vcov_name = vcov_type_name(m.vcov_estimator)
-    note = "Note: Std. errors computed using $vcov_name variance estimator"
-    if !isnothing(m.postestimation) && !isnothing(m.postestimation.first_stage_data)
-        fsd = m.postestimation.first_stage_data
-        n_instruments = size(fsd.Z_res, 2)
-        n_endogenous = length(fsd.endogenous_names)
-        instr_str = n_instruments == 1 ? "instrument" : "instruments"
-        note *= "; $n_instruments excluded $instr_str, $n_endogenous endogenous"
-    end
-    html_tfoot_start(io; class = "regress-footer")
-    html_row(io, [note, "", "", "", "", "", ""])
-    html_tfoot_end(io)
-
-    html_table_end(io)
-end
-
-##############################################################################
-##
-## Schema
-##
-##############################################################################
-function StatsModels.apply_schema(t::FormulaTerm, schema::StatsModels.Schema,
-        Mod::Type{IVEstimator}, has_fe_intercept)
-    schema = StatsModels.FullRank(schema)
-    if has_fe_intercept
-        push!(schema.already, InterceptTerm{true}())
-    end
-    FormulaTerm(apply_schema(t.lhs, schema.schema, StatisticalModel),
-        StatsModels.collect_matrix_terms(apply_schema(t.rhs, schema, StatisticalModel)))
+    ")
 end
 
 ##############################################################################
@@ -1117,7 +735,7 @@ Requires model to have stored first-stage data.
 function recompute_first_stage_fstat(m::IVEstimator{T}, vcov_type) where {T}
     pe = m.postestimation
     isnothing(pe) && return T(NaN), T(NaN)
-    isnothing(pe.first_stage_data) && return T(NaN), T(NaN)
+    !has_first_stage_data(pe.first_stage_data) && return T(NaN), T(NaN)
 
     fsd = pe.first_stage_data
     dof_fes_val = dof_fes(m)
@@ -1142,7 +760,7 @@ Recompute per-endogenous F-statistics using a different vcov estimator.
 function recompute_per_endogenous_fstats(m::IVEstimator{T}, vcov_type) where {T}
     pe = m.postestimation
     isnothing(pe) && return T[], T[]
-    isnothing(pe.first_stage_data) && return T[], T[]
+    !has_first_stage_data(pe.first_stage_data) && return T[], T[]
 
     fsd = pe.first_stage_data
     dof_fes_val = dof_fes(m)
@@ -1194,17 +812,8 @@ function Base.:+(m::IVEstimator{T, E, V1, P}, v::VcovSpec{V2}) where {T, E, V1, 
     # Compute vcov matrix using StatsBase.vcov (which dispatches to IVModel.jl methods)
     vcov_mat = StatsBase.vcov(v.source, m)
 
-    # Compute standard errors
-    se = sqrt.(diag(vcov_mat))
-
-    # Compute t-statistics and p-values
-    cc = coef(m)
-    t_stats = cc ./ se
-    p_values = 2 .* tdistccdf.(dof_residual(m), abs.(t_stats))
-
-    # Compute robust F-statistic (Wald test)
-    has_int = hasintercept(formula(m))
-    F_stat, p_val = compute_robust_fstat(cc, vcov_mat, has_int, dof_residual(m))
+    # Use shared helper for stats
+    se, t_stats, p_values, F_stat, p_val = _calculate_vcov_stats(m, vcov_mat)
 
     # Recompute first-stage F with this vcov type
     F_kp, p_kp = recompute_first_stage_fstat(m, v.source)
@@ -1218,7 +827,7 @@ function Base.:+(m::IVEstimator{T, E, V1, P}, v::VcovSpec{V2}) where {T, E, V1, 
     # Return new IVEstimator with same data but different vcov type
     return IVEstimator{T, E, V2, P}(
         m.estimator, m.coef,
-        m.esample, m.residuals, m.fe,
+        m.esample, m.residuals_esample, m.has_residuals, m.fe,
         m.postestimation, m.fekeys,
         m.coefnames, m.responsename,
         m.formula, m.formula_schema, m.contrasts,
@@ -1262,7 +871,7 @@ See also: [`FirstStageResult`](@ref)
 function first_stage(m::IVEstimator{T}) where {T}
     isnothing(m.postestimation) &&
         error("Model does not have post-estimation data stored. Fit with save=true.")
-    isnothing(m.postestimation.first_stage_data) && error("First-stage data not available.")
+    !has_first_stage_data(m.postestimation.first_stage_data) && error("First-stage data not available.")
 
     fsd = m.postestimation.first_stage_data
 
@@ -1303,12 +912,12 @@ function Base.show(io::IO, fs::FirstStageResult{T}) where {T}
     # Per-endogenous table
     println(io, "\nPer-Endogenous F-Statistics:")
     println_horizontal_line(io, totwidth)
-    @printf(io, "%-30s %14s %14s\n", "Endogenous", "F-stat", "P-value")
+    @printf(io, "% -30s %14s %14s\n", "Endogenous", "F-stat", "P-value")
     println_horizontal_line(io, totwidth)
 
     for (j, name) in enumerate(fs.endogenous_names)
         display_name = length(name) > 28 ? name[1:25] * "..." : name
-        @printf(io, "%-30s %14.4f %14.4f\n",
+        @printf(io, "% -30s %14.4f %14.4f\n",
             display_name, fs.F_per_endo[j], fs.p_per_endo[j])
     end
 
@@ -1348,4 +957,201 @@ function Base.show(io::IO, ::MIME"text/html", fs::FirstStageResult{T}) where {T}
     html_tfoot_end(io)
 
     html_table_end(io)
+end
+
+##############################################################################
+##
+## Schema
+##
+##############################################################################
+function StatsModels.apply_schema(t::FormulaTerm, schema::StatsModels.Schema,
+        Mod::Type{<:IVEstimator}, has_fe_intercept)
+    schema = StatsModels.FullRank(schema)
+    if has_fe_intercept
+        push!(schema.already, InterceptTerm{true}())
+    end
+    FormulaTerm(apply_schema(t.lhs, schema.schema, StatisticalModel),
+        StatsModels.collect_matrix_terms(apply_schema(t.rhs, schema, StatisticalModel)))
+end
+
+##############################################################################
+##
+## Display Result
+##
+##############################################################################
+
+function _estimator_name(m::IVEstimator)
+    e = m.estimator
+    if e isa TSLS
+        return "TSLS"
+    elseif e isa LIML
+        return "LIML"
+    elseif e isa Fuller
+        return @sprintf("Fuller(%.1f)", e.a)
+    elseif e isa KClass
+        return @sprintf("KClass(%.4f)", e.kappa)
+    else
+        return string(typeof(e).name.name)
+    end
+end
+
+function top(m::IVEstimator)
+    # Use shared summary
+    out_common = _summary_table_common(m) # Matrix
+    
+    # Add IV specific fields
+    
+    # Add Converged status (IV also uses FE solver logic for convergence if FE present)
+    # Insert at index 2
+    row_converged = ["Converged" m.converged]
+    
+    # Split
+    part1 = out_common[1:1, :]
+    part2 = out_common[2:end, :]
+    out = vcat(part1, row_converged, part2)
+
+    # Show kappa for K-class estimators
+    if !isnothing(m.postestimation) && !isnan(m.postestimation.kappa)
+        out = vcat(out, ["K-class kappa" @sprintf("%.4f", m.postestimation.kappa)])
+    end
+
+    # Always show first-stage diagnostics for IV models (joint Kleibergen-Paap)
+    out = vcat(out,
+        ["F (1st stage, joint)" sprint(show, m.F_kp, context = :compact => true);
+         "P (1st stage, joint)" @sprintf("%.3f", m.p_kp);])
+    
+    # Add Iterations if FE
+    if has_fe(m)
+        out = vcat(out,
+            ["Iterations" sprint(show, m.iterations, context = :compact => true);])
+    end
+    return out
+end
+
+# Predict and Residuals
+# Note: is_cont_fe_int() and has_cont_fe_interaction() are defined in utils/fit_common.jl
+
+function StatsAPI.predict(m::IVEstimator, data)
+    Tables.istable(data) ||
+        throw(ArgumentError("expected second argument to be a Table, got $(typeof(data))"))
+
+    has_cont_fe_interaction(m.formula) &&
+        throw(ArgumentError("Interaction of fixed effect and continuous variable detected in formula; this is currently not supported in `predict`"))
+
+    cdata = StatsModels.columntable(data)
+    cols, nonmissings = StatsModels.missing_omit(cdata, m.formula_schema.rhs)
+    Xnew = modelmatrix(m.formula_schema, cols)
+
+    # Type-stable inner function via function barrier
+    T = eltype(m.coef)
+    return _predict_iv_impl(Xnew, m.coef, nonmissings, m, data, T)
+end
+
+# Type-stable inner function for IV predict
+function _predict_iv_impl(
+        Xnew::AbstractMatrix, coef_vec::AbstractVector{T},
+        nonmissings::AbstractVector{Bool}, m::IVEstimator, data, ::Type{T}
+) where {T}
+    n = length(nonmissings)
+    # Always allocate with Union type for consistent return type
+    out = Vector{Union{T, Missing}}(missing, n)
+    @views out[nonmissings] .= Xnew * coef_vec
+
+    if has_fe(m)
+        nrow(fe(m)) > 0 ||
+            throw(ArgumentError("Model has no estimated fixed effects. To store estimates of fixed effects, run `iv` with the option save = :fe"))
+
+        df = DataFrame(data; copycols = false)
+        fes = leftjoin(select(df, m.fekeys), dropmissing(unique(m.fe)); on = m.fekeys,
+          makeunique = true, matchmissing = :equal, order = :left)
+        fes = combine(fes, AsTable(Not(m.fekeys)) => sum)
+
+        @views out[nonmissings] .+= fes[nonmissings, 1]
+    end
+
+    return out
+end
+
+function StatsAPI.residuals(m::IVEstimator, data)
+    Tables.istable(data) ||
+        throw(ArgumentError("expected second argument to be a Table, got $(typeof(data))"))
+    has_fe(m) &&
+        throw("To access residuals for a model with high-dimensional fixed effects,  run `m = iv(..., save = :residuals)` and then access residuals with `residuals(m)`.")
+    cdata = StatsModels.columntable(data)
+    cols, nonmissings = StatsModels.missing_omit(cdata, m.formula_schema.rhs)
+    Xnew = modelmatrix(m.formula_schema, cols)
+    y = response(m.formula_schema, cdata)
+
+    # Type-stable inner function via function barrier
+    T = eltype(m.coef)
+    return _residuals_iv_impl(y, Xnew, m.coef, nonmissings, T)
+end
+
+# Type-stable inner function for IV residuals
+function _residuals_iv_impl(
+        y::AbstractVector, Xnew::AbstractMatrix, coef_vec::AbstractVector{T},
+        nonmissings::AbstractVector{Bool}, ::Type{T}
+) where {T}
+    n = length(nonmissings)
+    # Always allocate with Union type for consistent return type
+    out = Vector{Union{T, Missing}}(missing, n)
+    @views out[nonmissings] .= y .- Xnew * coef_vec
+    return out
+end
+
+function StatsAPI.residuals(m::IVEstimator{T}) where {T}
+    if !has_residuals_data(m)
+        has_fe(m) &&
+            throw("To access residuals in a fixed effect regression, run `iv` with the option save = :residuals, and then access residuals with `residuals()`")
+        !has_fe(m) &&
+            throw("To access residuals, use residuals(m, data) where `m` is an estimated IVEstimator and `data` is a Table")
+    end
+    # Reconstruct full-length residuals with missings for non-esample rows
+    n = length(m.esample)
+    out = Vector{Union{T, Missing}}(missing, n)
+    out[m.esample] .= m.residuals_esample
+    return out
+end
+
+"""
+   fe(m::IVEstimator; keepkeys = false)
+
+Return a DataFrame with fixed effects estimates.
+"""
+function fe(m::IVEstimator; keepkeys = false)
+    !has_fe(m) && throw("fe() is not defined for models without fixed effects")
+    if keepkeys
+        m.fe
+    else
+        m.fe[!, (length(m.fekeys) + 1):end]
+    end
+end
+
+function StatsAPI.coeftable(m::IVEstimator; level = 0.95)
+    cc = coef(m)
+    se = m.se
+    tt = m.t_stats
+    pv = m.p_values
+    coefnms = coefnames(m)
+
+    # Compute confidence intervals using precomputed se
+    scale = tdistinvcdf(dof_residual(m), 1 - (1 - level) / 2)
+    conf_int = hcat(cc .- scale .* se, cc .+ scale .* se)
+
+    # put (intercept) last
+    if !isempty(coefnms) &&
+       ((coefnms[1] == Symbol("(Intercept)")) || (coefnms[1] == "(Intercept)"))
+        newindex = vcat(2:length(cc), 1)
+        cc = cc[newindex]
+        se = se[newindex]
+        tt = tt[newindex]
+        pv = pv[newindex]
+        conf_int = conf_int[newindex, :]
+        coefnms = coefnms[newindex]
+    end
+
+    CoefTable(
+        hcat(cc, se, tt, pv, conf_int[:, 1:2]),
+        ["Estimate", "Std. Error", "t-stat", "Pr(>|t|)", "Lower 95%", "Upper 95%"],
+        ["$(coefnms[i])" for i in 1:length(cc)], 4)
 end

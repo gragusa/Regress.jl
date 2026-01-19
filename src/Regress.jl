@@ -1,4 +1,3 @@
-
 module Regress
 
 using DataFrames
@@ -23,10 +22,7 @@ using CovarianceMatrices: CR0, CR1, CR2, CR3
 using CovarianceMatrices: Bartlett, Parzen, QuadraticSpectral, TukeyHanning, Truncated
 using CovarianceMatrices: Information, Misspecified
 using CovarianceMatrices: Uncorrelated
-
-# CovarianceMatricesBase for shared VcovSpec type
-using CovarianceMatricesBase
-import CovarianceMatricesBase: VcovSpec, vcov
+using CovarianceMatrices: VcovSpec
 
 include("utils/fixedeffects.jl")
 include("utils/basecol.jl")
@@ -48,6 +44,7 @@ include("ols_solver.jl")            # Solver utilities
 
 # Model types and estimators
 include("estimators.jl")
+include("AbstractModel.jl")
 include("LinearModel.jl")
 include("IVModel.jl")
 

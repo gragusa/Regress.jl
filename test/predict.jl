@@ -7,7 +7,6 @@ include("gpu_utils.jl")
 
     model = @formula Sales ~ NDI
     result = ols(df, model)
-    show(result)
     predict(result, df)
     residuals(result, df)
     @test responsename(result) == :Sales  # responsename returns Symbol
@@ -15,7 +14,6 @@ include("gpu_utils.jl")
     model = @formula Sales ~ CPI + (Price ~ Pimin)
     result = iv(TSLS(), df, model)
     coeftable(result)
-    show(result)
     predict(result, df)
     residuals(result, df)
     @test nobs(result) == 1380
@@ -28,10 +26,9 @@ include("gpu_utils.jl")
 
     model = @formula Sales ~ Price + fe(State)
     result = ols(df, model)
-    show(result)
     model = @formula Sales ~ CPI + (Price ~ Pimin) + fe(State)
     result = iv(TSLS(), df, model)
-    show(result)
+    
 end
 
 @testset "Predict" begin

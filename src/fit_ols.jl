@@ -299,9 +299,9 @@ function fit_ols(df,
     ##############################################################################
 
     if !save_matrices
-        # Clear y and mu from response to save memory
-        rr.y = nothing
-        rr.mu = nothing
+        # Clear data from response and predictor to save memory
+        clear_response_data!(rr)
+        clear_predictor_data!(pp)
     end
 
     ##############################################################################

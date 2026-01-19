@@ -319,7 +319,7 @@ function fit_kclass_estimator(
     F_kp, p_kp = T(NaN), T(NaN)
     F_kp_per_endo = T[]
     p_kp_per_endo = T[]
-    first_stage_data = nothing
+    first_stage_data = empty_first_stage_data(T)
 
     if first_stage && k_endo_final > 0
         # Compute first-stage quantities (same as TSLS)
@@ -394,15 +394,13 @@ function fit_kclass_estimator(
     ## Compute Statistics
     ##############################################################################
 
-    residuals = residuals_kclass
-    residuals2 = nothing
-    if save_residuals
-        residuals2 = Vector{Union{T, Missing}}(missing, data_prep.nrows)
-        if data_prep.has_weights
-            residuals2[data_prep.esample] .= residuals ./ sqrt.(wts)
-        else
-            residuals2[data_prep.esample] .= residuals
-        end
+    # Residuals (esample only, for vcov computation)
+    residuals_raw = residuals_kclass
+    # Unweight residuals if model was estimated with weights
+    residuals_esample = if data_prep.has_weights
+        residuals_raw ./ sqrt.(wts)
+    else
+        residuals_raw
     end
 
     # Degrees of freedom
@@ -411,8 +409,8 @@ function fit_kclass_estimator(
     dof_base = data_prep.nobs - size(X, 2) - dof_fes - dof_add
     dof_residual = max(1, dof_base - (data_prep.has_intercept | data_prep.has_fe_intercept))
 
-    # R-squared
-    rss = sum(abs2, residuals)
+    # R-squared (use raw weighted residuals for RSS)
+    rss = sum(abs2, residuals_raw)
     r2_within = data_prep.has_fes ? one(T) - rss / tss_partial : one(T) - rss / tss_total
 
     # F-statistic and p-value
@@ -517,7 +515,7 @@ function fit_kclass_estimator(
     k = size(X, 2)
     scale = n / dof_residual
 
-    M = Adj_reordered .* residuals
+    M = Adj_reordered .* residuals_raw
     meat = M' * M
     vcov_matrix = Symmetric(scale .* invA_reordered * meat * invA_reordered)
 
@@ -546,7 +544,7 @@ function fit_kclass_estimator(
         T, typeof(estimator), typeof(default_vcov), typeof(postestimation_data)}(
         estimator,  # Store the actual estimator (LIML, Fuller, KClass)
         coef,
-        esample_final, residuals2, augmentdf,
+        esample_final, residuals_esample, save_residuals, augmentdf,
         postestimation_data,
         data_prep.fekeys, coef_names, response_name,
         data_prep.formula_origin, formula_schema, contrasts,

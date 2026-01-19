@@ -344,19 +344,28 @@ vcov(CR1(:firm_id, :year), model)
 
 See also: [`ols`](@ref), [`TSLS`](@ref), [`LIML`](@ref), [`Fuller`](@ref), [`KClass`](@ref), [`IVEstimator`](@ref)
 """
-function iv(estimator::AbstractIVEstimator, df, formula::FormulaTerm; kwargs...)
+# Check formula before dispatching to specific estimator
+function _check_iv_formula(formula::FormulaTerm)
     !has_iv(formula) &&
         throw(ArgumentError("Formula does not contain instrumental variables. Use `ols(df, formula)` instead."))
+end
 
-    if estimator isa TSLS
-        return fit_tsls(df, formula; kwargs...)
-    elseif estimator isa LIML
-        return fit_liml(df, formula; kwargs...)
-    elseif estimator isa Fuller
-        return fit_fuller(df, formula; a = estimator.a, kwargs...)
-    elseif estimator isa KClass
-        return fit_kclass(df, formula; kappa = estimator.kappa, kwargs...)
-    else
-        error("Unknown IV estimator: $(typeof(estimator))")
-    end
+function iv(::TSLS, df, formula::FormulaTerm; kwargs...)
+    _check_iv_formula(formula)
+    return fit_tsls(df, formula; kwargs...)
+end
+
+function iv(::LIML, df, formula::FormulaTerm; kwargs...)
+    _check_iv_formula(formula)
+    return fit_liml(df, formula; kwargs...)
+end
+
+function iv(estimator::Fuller, df, formula::FormulaTerm; kwargs...)
+    _check_iv_formula(formula)
+    return fit_fuller(df, formula; a = estimator.a, kwargs...)
+end
+
+function iv(estimator::KClass, df, formula::FormulaTerm; kwargs...)
+    _check_iv_formula(formula)
+    return fit_kclass(df, formula; kappa = estimator.kappa, kwargs...)
 end

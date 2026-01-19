@@ -5,7 +5,6 @@ version = "0.1.0"
 [deps]
 CategoricalArrays = "324d7699-5711-5eae-9e2f-1d82baa6b597"
 CovarianceMatrices = "60f91f6f-d783-54cb-84f9-544141854719"
-CovarianceMatricesBase = "a1b2c3d4-e5f6-7890-abcd-ef1234567890"
 DataFrames = "a93c6f00-e57d-5684-b7b6-d8193f3e46c0"
 FixedEffects = "c8885935-8500-56a7-9867-7708b20db0eb"
 LinearAlgebra = "37e2e46d-f89d-539d-b4ee-838fcccc9c8e"
@@ -21,13 +20,12 @@ StatsModels = "3eaba693-59b7-5ba5-a881-562e759f1c8d"
 Tables = "bd369af6-aec1-5ad0-b16a-f7cc5008161c"
 
 [sources]
-CovarianceMatricesBase = {path = "../CovarianceMatricesBase.jl"}
+CovarianceMatrices = {path = "../CovarianceMatrices.jl"}
 FixedEffects = {rev = "master", url = "https://github.com/gragusa/FixedEffects.jl"}
 
 [compat]
 CategoricalArrays = "1.0.2"
 CovarianceMatrices = "0.30"
-CovarianceMatricesBase = "0.1"
 DataFrames = "0.21, 0.22, 1"
 FixedEffects = "2.4.1"
 PrecompileTools = "1"

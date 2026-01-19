@@ -418,7 +418,7 @@ function fit_tsls(df,
     F_kp, p_kp = T(NaN), T(NaN)
     F_kp_per_endo = T[]
     p_kp_per_endo = T[]
-    first_stage_data = nothing
+    first_stage_data = empty_first_stage_data(T)
 
     if first_stage && size(Xendo, 2) > 0
         # Get endogenous variable names (handle basis filtering)
@@ -557,16 +557,13 @@ function fit_tsls(df,
     ## Compute Statistics
     ##############################################################################
 
-    # Residuals
-    residuals = y - X * coef
-    residuals2 = nothing
-    if save_residuals
-        residuals2 = Vector{Union{T, Missing}}(missing, data_prep.nrows)
-        if data_prep.has_weights
-            residuals2[data_prep.esample] .= residuals ./ sqrt.(wts)
-        else
-            residuals2[data_prep.esample] .= residuals
-        end
+    # Residuals (esample only, for vcov computation)
+    residuals_raw = y - X * coef
+    # Unweight residuals if model was estimated with weights
+    residuals_esample = if data_prep.has_weights
+        residuals_raw ./ sqrt.(wts)
+    else
+        residuals_raw
     end
 
     # Degrees of freedom
@@ -575,8 +572,8 @@ function fit_tsls(df,
     dof_base = data_prep.nobs - size(X, 2) - dof_fes - dof_add
     dof_residual = max(1, dof_base - (data_prep.has_intercept | data_prep.has_fe_intercept))
 
-    # R-squared
-    rss = sum(abs2, residuals)
+    # R-squared (use raw weighted residuals for RSS)
+    rss = sum(abs2, residuals_raw)
     r2_within = data_prep.has_fes ? one(T) - rss / tss_partial : one(T) - rss / tss_total
 
     # F-statistic and p-value for the model
@@ -623,8 +620,8 @@ function fit_tsls(df,
         cluster_data,
         basis_coef,
         first_stage_data,  # First-stage data for F-stat recomputation
-        nothing,  # Adj (K-class only, not needed for TSLS)
-        nothing   # kappa (K-class only, not needed for TSLS)
+        Matrix{T}(undef, 0, 0),  # Adj (K-class only, empty for TSLS)
+        T(NaN)                   # kappa (K-class only, NaN for TSLS)
     )
 
     ##############################################################################
@@ -656,9 +653,9 @@ function fit_tsls(df,
     ##############################################################################
 
     # Compute HC1 vcov matrix directly from components
-    # Use residuals (Vector{T}) not residuals2 (Vector{Union{T, Missing}})
+    # Use residuals_raw (weighted, for consistency with vcov computation)
     vcov_matrix = compute_hc1_vcov_direct_iv(
-        convert(Matrix{T}, Xhat), residuals, invXhatXhat, basis_coef,
+        convert(Matrix{T}, Xhat), residuals_raw, invXhatXhat, basis_coef,
         data_prep.nobs, dof_model, dof_fes, dof_residual
     )
 
@@ -689,7 +686,7 @@ function fit_tsls(df,
     return IVEstimator{T, TSLS, typeof(default_vcov), typeof(postestimation_data)}(
         TSLS(),
         coef,
-        esample_final, residuals2, augmentdf,
+        esample_final, residuals_esample, save_residuals, augmentdf,
         postestimation_data,
         data_prep.fekeys, coef_names, response_name,
         data_prep.formula_origin, formula_schema, contrasts,

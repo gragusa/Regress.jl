@@ -5,7 +5,7 @@
 ##############################################################################
 
 """
-    OLSEstimator <: StatsAPI.RegressionModel
+    OLSEstimator <: AbstractRegressModel
 
 Model type for linear regression estimated by ordinary least squares (OLS).
 
@@ -48,7 +48,7 @@ Use `ols(df, formula)` to fit this model type.
 - `p::T`: P-value of F-statistic
 """
 struct OLSEstimator{T <: AbstractFloat, P <: OLSLinearPredictor{T}, V} <:
-       StatsAPI.RegressionModel
+       AbstractRegressModel
     # Core GLM-style components
     rr::OLSResponse{T}              # Response object
     pp::P                           # Predictor object (Chol or QR)
@@ -99,6 +99,8 @@ end
 has_iv(::OLSEstimator) = false
 has_fe(m::OLSEstimator) = has_fe(m.formula)
 dof_fes(m::OLSEstimator) = m.dof_fes
+r2_within(m::OLSEstimator) = m.r2_within
+model_hasintercept(m::OLSEstimator) = m.has_intercept
 
 ##############################################################################
 ##
@@ -107,7 +109,7 @@ dof_fes(m::OLSEstimator) = m.dof_fes
 ##############################################################################
 
 """
-    OLSMatrixEstimator <: StatsAPI.RegressionModel
+    OLSMatrixEstimator <: AbstractRegressModel
 
 Lightweight OLS model for matrix-based estimation without formula machinery.
 Compatible with CovarianceMatrices.jl for post-estimation robust vcov.
@@ -153,7 +155,7 @@ stderror(model)  # Uses precomputed vcov
 ```
 """
 struct OLSMatrixEstimator{T <: AbstractFloat, P <: OLSLinearPredictor{T}, V} <:
-       StatsAPI.RegressionModel
+       AbstractRegressModel
     rr::OLSResponse{T}              # Response object
     pp::P                           # Predictor object (Chol or QR)
     basis_coef::BitVector           # Which coefficients are not collinear
@@ -176,13 +178,14 @@ end
 has_iv(::OLSMatrixEstimator) = false
 has_fe(::OLSMatrixEstimator) = false
 dof_fes(::OLSMatrixEstimator) = 0
+model_hasintercept(m::OLSMatrixEstimator) = m.has_intercept
 
 """
     has_matrices(m::OLSMatrixEstimator) -> Bool
 
 Check if model has stored matrices (X, y, mu).
 """
-has_matrices(m::OLSMatrixEstimator) = m.pp.X !== nothing
+has_matrices(m::OLSMatrixEstimator) = has_predictor_data(m.pp)
 
 ##############################################################################
 ##
@@ -198,28 +201,26 @@ function StatsAPI.coef(m::OLSMatrixEstimator)
 end
 
 function StatsAPI.response(m::OLSMatrixEstimator)
-    m.rr.y === nothing &&
+    has_response_data(m.rr) ||
         error("Response vector not stored.")
     return m.rr.y
 end
 
 function StatsAPI.fitted(m::OLSMatrixEstimator)
-    m.rr.mu === nothing &&
+    has_response_data(m.rr) ||
         error("Fitted values not stored.")
     return m.rr.mu
 end
 
 function StatsAPI.modelmatrix(m::OLSMatrixEstimator)
-    m.pp.X === nothing &&
+    has_predictor_data(m.pp) ||
         error("Model matrix not stored.")
     return m.pp.X
 end
 
 function StatsAPI.residuals(m::OLSMatrixEstimator)
-    m.rr.y === nothing &&
+    has_response_data(m.rr) ||
         error("Response vector not stored. Cannot compute residuals.")
-    m.rr.mu === nothing &&
-        error("Fitted values not stored. Cannot compute residuals.")
     resid = m.rr.y .- m.rr.mu
     # Unweight residuals if model was estimated with weights
     if isweighted(m.rr)
@@ -238,9 +239,7 @@ StatsAPI.dof_residual(m::OLSMatrixEstimator) = m.dof_residual
 StatsAPI.deviance(m::OLSMatrixEstimator) = m.rss
 StatsAPI.nulldeviance(m::OLSMatrixEstimator) = m.tss
 StatsAPI.rss(m::OLSMatrixEstimator) = m.rss
-StatsAPI.mss(m::OLSMatrixEstimator) = m.tss - m.rss
 StatsAPI.r2(m::OLSMatrixEstimator) = m.r2
-StatsAPI.islinear(m::OLSMatrixEstimator) = true
 
 # Variance-covariance (returns precomputed matrix)
 StatsAPI.vcov(m::OLSMatrixEstimator) = m.vcov_matrix
@@ -248,30 +247,13 @@ StatsAPI.vcov(m::OLSMatrixEstimator) = m.vcov_matrix
 # Standard errors (returns precomputed values)
 StatsAPI.stderror(m::OLSMatrixEstimator) = m.se
 
-# Log-likelihood
-function StatsAPI.loglikelihood(m::OLSMatrixEstimator)
-    n = nobs(m)
-    sigma_sq = deviance(m) / n
-    return -n/2 * (log(2π) + log(sigma_sq) + 1)
-end
-
-function StatsAPI.nullloglikelihood(m::OLSMatrixEstimator)
-    n = nobs(m)
-    sigma_sq = nulldeviance(m) / n
-    return -n/2 * (log(2π) + log(sigma_sq) + 1)
-end
-
+# Adjusted R2 - kept specialized because AbstractRegressModel relies on formula()
 function StatsAPI.adjr2(m::OLSMatrixEstimator)
     n = nobs(m)
     k = dof(m)
     dev = deviance(m)
     dev0 = nulldeviance(m)
     return 1 - (dev * (n - m.has_intercept)) / (dev0 * max(n - k, 1))
-end
-
-function StatsAPI.confint(m::OLSMatrixEstimator; level::Real = 0.95)
-    scale = tdistinvcdf(dof_residual(m), 1 - (1 - level) / 2)
-    hcat(coef(m) .- scale .* m.se, coef(m) .+ scale .* m.se)
 end
 
 ##############################################################################
@@ -287,10 +269,7 @@ Create a new model with a different variance-covariance estimator.
 """
 function Base.:+(m::OLSMatrixEstimator{T, P, V1}, v::VcovSpec{V2}) where {T, P, V1, V2}
     vcov_mat = StatsBase.vcov(v.source, m)
-    se = sqrt.(diag(vcov_mat))
-    cc = coef(m)
-    t_stats = cc ./ se
-    p_values = 2 .* tdistccdf.(dof_residual(m), abs.(t_stats))
+    se, t_stats, p_values, _, _ = _calculate_vcov_stats(m, vcov_mat)
     vcov_copy = deepcopy_vcov(v.source)
 
     return OLSMatrixEstimator{T, P, V2}(
@@ -306,7 +285,7 @@ end
 
 Check if model has stored matrices (X, y, mu). Returns false if fit with save=:minimal.
 """
-has_matrices(m::OLSEstimator) = m.pp.X !== nothing
+has_matrices(m::OLSEstimator) = has_predictor_data(m.pp)
 
 # Property accessor for backward compatibility (iterations/converged stored in fes)
 function Base.getproperty(m::OLSEstimator, s::Symbol)
@@ -336,29 +315,27 @@ StatsAPI.coefnames(m::OLSEstimator) = m.coefnames
 StatsAPI.responsename(m::OLSEstimator) = m.rr.response_name
 
 function StatsAPI.response(m::OLSEstimator)
-    m.rr.y === nothing &&
+    has_response_data(m.rr) ||
         error("Response vector not stored. Model was fit with save=:minimal.")
     return m.rr.y
 end
 
 function StatsAPI.fitted(m::OLSEstimator)
-    m.rr.mu === nothing &&
+    has_response_data(m.rr) ||
         error("Fitted values not stored. Model was fit with save=:minimal.")
     return m.rr.mu
 end
 
 function StatsAPI.modelmatrix(m::OLSEstimator)
-    m.pp.X === nothing &&
+    has_predictor_data(m.pp) ||
         error("Model matrix not stored. Model was fit with save=:minimal.")
     return m.pp.X
 end
 
 # Residuals (compute from y - mu, unweighted)
 function StatsAPI.residuals(m::OLSEstimator)
-    m.rr.y === nothing &&
+    has_response_data(m.rr) ||
         error("Response vector not stored. Model was fit with save=:minimal. Cannot compute residuals.")
-    m.rr.mu === nothing &&
-        error("Fitted values not stored. Model was fit with save=:minimal. Cannot compute residuals.")
     resid = m.rr.y .- m.rr.mu
     # Unweight residuals if model was estimated with weights
     if isweighted(m.rr)
@@ -377,9 +354,7 @@ StatsAPI.dof_residual(m::OLSEstimator) = m.dof_residual
 StatsAPI.deviance(m::OLSEstimator) = m.rss
 StatsAPI.nulldeviance(m::OLSEstimator) = m.tss_total
 StatsAPI.rss(m::OLSEstimator) = m.rss
-StatsAPI.mss(m::OLSEstimator) = m.tss_total - m.rss
 StatsAPI.r2(m::OLSEstimator) = m.r2
-StatsAPI.islinear(m::OLSEstimator) = true
 
 # Variance-covariance (returns precomputed matrix)
 StatsAPI.vcov(m::OLSEstimator) = m.vcov_matrix
@@ -389,61 +364,6 @@ StatsAPI.stderror(m::OLSEstimator) = m.se
 
 # Formula
 StatsModels.formula(m::OLSEstimator) = m.formula_schema
-
-##############################################################################
-##
-## Additional Methods
-##
-##############################################################################
-
-function StatsAPI.loglikelihood(m::OLSEstimator)
-    n = nobs(m)
-    σ² = deviance(m) / n
-    return -n/2 * (log(2π) + log(σ²) + 1)
-end
-
-function StatsAPI.nullloglikelihood(m::OLSEstimator)
-    n = nobs(m)
-    σ² = nulldeviance(m) / n
-    return -n/2 * (log(2π) + log(σ²) + 1)
-end
-
-function nullloglikelihood_within(m::OLSEstimator)
-    n = nobs(m)
-    tss_within = deviance(m) / (1 - m.r2_within)
-    return -n/2 * (log(2π * tss_within / n) + 1)
-end
-
-function StatsAPI.adjr2(model::OLSEstimator, variant::Symbol = :devianceratio)
-    has_int = hasintercept(formula(model))
-    k = dof(model) + dof_fes(model) + has_int
-    if variant == :McFadden
-        k = k - has_int - has_fe(model)
-        ll = loglikelihood(model)
-        ll0 = nullloglikelihood(model)
-        1 - (ll - k)/ll0
-    elseif variant == :devianceratio
-        n = nobs(model)
-        dev = deviance(model)
-        dev0 = nulldeviance(model)
-        1 - (dev*(n - (has_int | has_fe(model)))) / (dev0 * max(n - k, 1))
-    else
-        throw(ArgumentError("variant must be one of :McFadden or :devianceratio"))
-    end
-end
-
-function StatsAPI.confint(ve::CovarianceMatrices.AbstractAsymptoticVarianceEstimator,
-        m::OLSEstimator; level::Real = 0.95)
-    scale = tdistinvcdf(StatsAPI.dof_residual(m), 1 - (1 - level) / 2)
-    se = CovarianceMatrices.stderror(ve, m)
-    hcat(coef(m) - scale * se, coef(m) + scale * se)
-end
-
-# Default confint uses precomputed standard errors
-function StatsAPI.confint(m::OLSEstimator; level::Real = 0.95)
-    scale = tdistinvcdf(dof_residual(m), 1 - (1 - level) / 2)
-    hcat(coef(m) .- scale .* m.se, coef(m) .+ scale .* m.se)
-end
 
 ##############################################################################
 ##
@@ -579,18 +499,22 @@ end
 ##############################################################################
 
 function top(m::OLSEstimator)
-    out = ["Number of obs" sprint(show, nobs(m), context = :compact => true);
-           "Converged" m.fes.converged;
-           "dof (model)" sprint(show, dof(m), context = :compact => true);
-           "dof (residuals)" sprint(show, dof_residual(m), context = :compact => true);
-           "R²" @sprintf("%.3f", r2(m));
-           "R² adjusted" @sprintf("%.3f", adjr2(m));
-           "F-statistic" sprint(show, m.F, context = :compact => true);
-           "P-value" @sprintf("%.3f", m.p);]
+    # Use shared summary plus OLS specific fields
+    out_common = _summary_table_common(m) # Matrix
+    
+    # We need to insert "Converged" at index 2
+    # "Converged" row
+    row_converged = ["Converged" m.fes.converged]
+    
+    # Reconstruct matrix
+    part1 = out_common[1:1, :]
+    part2 = out_common[2:end, :]
+    out = vcat(part1, row_converged, part2)
+    
+    # Add Iterations if FE
     if has_fe(m)
-        out = vcat(out,
-            ["R² within" @sprintf("%.3f", m.r2_within);
-             "Iterations" sprint(show, m.fes.iterations, context = :compact => true);])
+        row_iter = ["Iterations" sprint(show, m.fes.iterations, context = :compact => true)]
+        out = vcat(out, row_iter)
     end
     return out
 end
@@ -664,9 +588,9 @@ end
 
 function Base.show(io::IO, ::MIME"text/html", m::OLSEstimator)
     ct = coeftable(m)
-    cols = ct.cols
-    rownms = ct.rownms
-    colnms = ct.colnms
+    cols = ct.cols;
+    rownms = ct.rownms;
+    colnms = ct.colnms;
 
     # Start table with "OLS" as caption
     html_table_start(io; class = "regress-table regress-ols", caption = "OLS")
@@ -759,17 +683,8 @@ function Base.:+(m::OLSEstimator{T, P, V1}, v::VcovSpec{V2}) where {T, P, V1, V2
     # Compute vcov matrix using StatsBase.vcov (which dispatches to covariance.jl methods)
     vcov_mat = StatsBase.vcov(v.source, m)
 
-    # Compute standard errors
-    se = sqrt.(diag(vcov_mat))
-
-    # Compute t-statistics and p-values
-    cc = coef(m)
-    t_stats = cc ./ se
-    p_values = 2 .* tdistccdf.(dof_residual(m), abs.(t_stats))
-
-    # Compute robust F-statistic (Wald test)
-    has_int = hasintercept(formula(m))
-    F_stat, p_val = compute_robust_fstat(cc, vcov_mat, has_int, dof_residual(m))
+    # Use shared helper for stats
+    se, t_stats, p_values, F_stat, p_val = _calculate_vcov_stats(m, vcov_mat)
 
     # Deep copy the vcov estimator to avoid aliasing
     vcov_copy = deepcopy_vcov(v.source)
