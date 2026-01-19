@@ -122,7 +122,7 @@ function run_fixest_benchmarks(nthreads::Int; script_dir::String = @__DIR__)
     println("Requested threads: $nthreads")
     println("=" ^ 70)
 
-    script_path = joinpath(dirname(script_dir), "benchmark_fixest.R")
+    script_path = joinpath(script_dir, "benchmark_fixest.R")
     results_path = joinpath(script_dir, "fixest_results.csv")
 
     cmd = `Rscript $script_path $nthreads $results_path`

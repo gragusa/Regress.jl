@@ -136,7 +136,7 @@ cat("\n======================================================================\n"
 cat("Creating dataset 3: fixest-style (10M observations)\n")
 cat("======================================================================\n")
 
-set.seed(42)
+set.seed(9876)
 n <- 10000000
 nb_dum <- c(n %/% 20, floor(sqrt(n)), floor(n^0.33))
 id1 <- sample(1:nb_dum[1], n, replace = TRUE)
