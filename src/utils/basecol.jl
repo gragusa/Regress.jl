@@ -230,3 +230,124 @@ function ls_solve!(Xy::Symmetric, nx)
         return zeros(Float64, 0, size(Xy, 2) - nx)
     end
 end
+
+#=============================================================================
+# Unified Sweep Solver with Collinearity Detection
+=============================================================================#
+
+"""
+    sweep_solve!(XX::Matrix{T}, Xy::Vector{T}, has_intercept::Bool; tol)
+        -> (basis, invXX, beta)
+
+Solve OLS via sweep operator with integrated collinearity detection.
+Builds augmented matrix [X'X, X'y; y'X, y'y] and sweeps to get both
+-(X'X)^(-1) and coefficients in one pass.
+
+This matches FixedEffectModels.jl's approach for maximum performance.
+
+# Arguments
+- `XX::Matrix{T}`: Upper triangular X'X (modified in-place)
+- `Xy::Vector{T}`: X'y vector
+- `has_intercept::Bool`: Whether first column is intercept (affects tolerance)
+- `tol::Real`: Tolerance for detecting collinearity
+
+# Returns
+- `basis::BitVector`: Indicator of non-collinear columns
+- `invXX::Symmetric{T}`: (X'X)^(-1) for the reduced (non-collinear) columns
+- `beta::Vector{T}`: Full coefficient vector (0 for collinear columns)
+"""
+function sweep_solve!(XX::Matrix{T}, Xy::Vector{T}, has_intercept::Bool;
+                      tol::Real = sqrt(eps(T))) where {T <: AbstractFloat}
+    k = size(XX, 1)
+    @assert size(XX, 2) == k "XX must be square"
+    @assert length(Xy) == k "Xy must have length k"
+
+    # Build augmented matrix [X'X, X'y; y'X, y'y] as Symmetric (FEM-style)
+    # Only the upper triangle is used
+    aug_data = Matrix{T}(undef, k + 1, k + 1)
+
+    # Copy XX to upper-left block (upper triangle only)
+    @inbounds for j in 1:k
+        for i in 1:j
+            aug_data[i, j] = XX[i, j]
+        end
+    end
+
+    # Copy Xy to last column
+    @inbounds for i in 1:k
+        aug_data[i, k + 1] = Xy[i]
+    end
+    aug_data[k + 1, k + 1] = zero(T)  # y'y placeholder (not used)
+
+    # Wrap as Symmetric for FEM-style invsym!
+    aug = Symmetric(aug_data, :U)
+
+    # Use FEM-style sweep with collinearity detection
+    tols = Vector{T}(undef, k)
+    @inbounds for j in 1:k
+        tols[j] = max(aug[j, j], one(T))
+    end
+
+    basis = trues(k)
+    buffer = Vector{T}(undef, k + 1)
+
+    @inbounds for j in 1:k
+        d = aug[j, j]
+
+        # Check for collinearity
+        if abs(d) < tols[j] * tol
+            # Column j is collinear - zero it out
+            basis[j] = false
+            aug_data[1:j, j] .= zero(T)
+            aug_data[j, (j + 1):(k + 1)] .= zero(T)
+        else
+            # FEM-style sweep using BLAS.syrk!
+            copy!(buffer, view(aug, :, j))
+            Symmetric(BLAS.syrk!('U', 'N', -one(T) / d, buffer, one(T), aug_data))
+            rmul!(buffer, one(T) / d)
+            @views copy!(aug_data[1:(j - 1), j], buffer[1:(j - 1)])
+            @views copy!(aug_data[j, (j + 1):(k + 1)], buffer[(j + 1):(k + 1)])
+            aug_data[j, j] = -one(T) / d
+        end
+
+        # Update tolerances after intercept if needed
+        if has_intercept && j == 1
+            @inbounds for i in 1:k
+                tols[i] = max(aug[i, i], one(T))
+            end
+        end
+    end
+
+    # Extract results
+    # Beta is in the last column (positions 1:k)
+    beta = Vector{T}(undef, k)
+    @inbounds for i in 1:k
+        beta[i] = aug[i, k + 1]
+    end
+
+    # Build invXX for the reduced matrix (negative of upper-left k×k block)
+    rank = sum(basis)
+    if rank == 0
+        invXX = Symmetric(Matrix{T}(undef, 0, 0))
+    else
+        # Extract the reduced invXX (only non-collinear rows/cols)
+        invXX_reduced = Matrix{T}(undef, rank, rank)
+        ii = 0
+        @inbounds for i in 1:k
+            if basis[i]
+                ii += 1
+                jj = 0
+                for j in 1:k
+                    if basis[j]
+                        jj += 1
+                        # invXX = -aug (after sweep)
+                        invXX_reduced[ii, jj] = -aug[i, j]
+                    end
+                end
+            end
+        end
+        invXX = Symmetric(invXX_reduced, :U)
+    end
+
+    return basis, invXX, beta
+end

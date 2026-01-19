@@ -115,3 +115,43 @@ function coefmatrix(pp::OLSPredictorQR{T}) where {T}
     R = pp.qr.R
     return R' * R
 end
+
+"""
+    OLSPredictorSweep{T}
+
+OLS predictor using sweep operator on X'X.
+Fastest option - matches FixedEffectModels.jl approach.
+Computes (X'X)^(-1) and coefficients in a single pass.
+
+Fields:
+- `X`: Full model matrix (for public API / post-estimation), empty if save=:minimal
+- `X_reduced`: Non-collinear columns only, empty if save=:minimal
+- `beta`: Full coefficient vector (with 0/NaN for collinear)
+- `invXX`: (X'X)^(-1) for reduced columns (computed during sweep)
+"""
+mutable struct OLSPredictorSweep{T <: AbstractFloat} <: OLSLinearPredictor{T}
+    X::Matrix{T}                            # Full model matrix (empty if save=:minimal)
+    X_reduced::Matrix{T}                    # Non-collinear columns only (empty if save=:minimal)
+    beta::Vector{T}                         # Coefficient estimates (full, with NaN for collinear)
+    invXX::Symmetric{T, Matrix{T}}          # (X'X)^(-1) for reduced columns
+end
+
+function clear_predictor_data!(pp::OLSPredictorSweep{T}) where {T}
+    pp.X = Matrix{T}(undef, 0, 0)
+    pp.X_reduced = Matrix{T}(undef, 0, 0)
+    return pp
+end
+
+"""
+    invchol(pp::OLSPredictorSweep) -> Symmetric
+
+Return (X'X)^(-1) directly - already computed during sweep.
+"""
+function invchol(pp::OLSPredictorSweep{T}) where {T}
+    return pp.invXX
+end
+
+function coefmatrix(pp::OLSPredictorSweep{T}) where {T}
+    # Invert invXX to get X'X
+    return Symmetric(inv(pp.invXX))
+end

@@ -17,6 +17,8 @@ Supports fixed effects but NOT instrumental variables.
   - `:auto`: Cholesky for k < 100, QR for k >= 100
   - `:chol`: Faster but less stable (uses Cholesky decomposition)
   - `:qr`: More stable but ~2x slower (uses QR decomposition)
+- `lazy_vcov::Bool`: If `true`, defer vcov computation until accessed (faster fitting).
+  Default is `true`. Set to `false` to precompute vcov at fit time.
 """
 function fit_ols(@nospecialize(df),
         formula::FormulaTerm;
@@ -34,15 +36,16 @@ function fit_ols(@nospecialize(df),
         maxiter::Integer = 10000,
         drop_singletons::Bool = true,
         progress_bar::Bool = true,
-        subset::Union{Nothing, AbstractVector} = nothing)
+        subset::Union{Nothing, AbstractVector} = nothing,
+        lazy_vcov::Bool = true)  # Defer vcov computation (saves time when using custom vcov)
 
     # Validate keywords
     save, save_residuals = validate_save_keyword(save)
     nthreads = validate_nthreads(method, nthreads)
 
     # Validate factorization choice
-    factorization in (:auto, :chol, :qr) ||
-        throw(ArgumentError("factorization must be :auto, :chol, or :qr, got :$factorization"))
+    factorization in (:auto, :chol, :qr, :sweep) ||
+        throw(ArgumentError("factorization must be :auto, :chol, :qr, or :sweep, got :$factorization"))
 
     # Validate collinearity method
     collinearity in (:qr, :sweep) ||
@@ -155,9 +158,9 @@ function fit_ols(@nospecialize(df),
 
     if factorization == :auto
         k = size(X, 2)
-        # Heuristic: Cholesky is 2x faster but less stable
-        # For k < 100, use Cholesky; for k >= 100, use QR for stability
-        factorization = k < 100 ? :chol : :qr
+        # Sweep is fastest (matches FEM) for small k
+        # For k >= 100, use QR for numerical stability
+        factorization = k < 100 ? :sweep : :qr
     end
 
     ##############################################################################
@@ -173,7 +176,8 @@ function fit_ols(@nospecialize(df),
     pp, basis_coef,
     _ = fit_ols_core!(rr, X, factorization;
         save_matrices = save_matrices,
-        collinearity = collinearity)
+        collinearity = collinearity,
+        has_intercept = data_prep.has_intercept)
 
     ##############################################################################
     ## Compute RSS (without allocating residuals vector)
@@ -259,46 +263,59 @@ function fit_ols(@nospecialize(df),
 
     ##############################################################################
     ## Compute Default Vcov (HC1) and Related Statistics
-    ## (Must be done before clearing y/mu for minimal mode)
+    ## (Must be done before clearing y/mu for minimal mode, unless lazy_vcov=true)
     ##############################################################################
-
-    # Compute residuals for vcov (weighted: y - mu)
-    residuals_vcov = rr.y .- rr.mu
-
-    # Get invXX from the predictor
-    invXX = invchol(pp)
-
-    # Compute HC1 vcov matrix directly from components
-    # Note: X and residuals are weighted if model has weights
-    vcov_matrix = if save_matrices
-        compute_hc1_vcov_direct(
-            pp.X, residuals_vcov, invXX, basis_coef,
-            data_prep.nobs, dof_model, dof_fes, dof_residual
-        )
-    else
-        # Minimal mode: can't compute vcov without X
-        # Create a placeholder zero matrix
-        Symmetric(zeros(T, length(basis_coef), length(basis_coef)))
-    end
-
-    # Compute standard errors
-    se = sqrt.(diag(vcov_matrix))
-
-    # Compute t-statistics and p-values
-    coef_vec = copy(pp.beta)
-    coef_vec[.!basis_coef] .= zero(T)
-    t_stats = coef_vec ./ se
-    p_values = 2 .* tdistccdf.(dof_residual, abs.(t_stats))
-
-    # Compute robust F-statistic (Wald test) using vcov
-    has_int = data_prep.has_intercept
-    F_stat_robust,
-    p_val_robust = compute_robust_fstat(
-        coef_vec, vcov_matrix, has_int, dof_residual
-    )
 
     # Default vcov estimator (HC1)
     default_vcov = CovarianceMatrices.HC1()
+
+    # Lazy vcov: defer computation until accessed
+    # This speeds up fitting when the user will call vcov(CR1(...), m) separately
+    if lazy_vcov && save_matrices
+        # Store nothing for lazy fields - will be computed on first access
+        vcov_matrix = nothing
+        se = nothing
+        t_stats_val = nothing
+        p_values_val = nothing
+        F_stat_robust = nothing
+        p_val_robust = nothing
+    else
+        # Eager vcov computation (original behavior)
+        # Compute residuals for vcov (weighted: y - mu)
+        residuals_vcov = rr.y .- rr.mu
+
+        # Get invXX from the predictor
+        invXX = invchol(pp)
+
+        # Compute HC1 vcov matrix directly from components
+        # Note: X and residuals are weighted if model has weights
+        vcov_matrix = if save_matrices
+            compute_hc1_vcov_direct(
+                pp.X, residuals_vcov, invXX, basis_coef,
+                data_prep.nobs, dof_model, dof_fes, dof_residual
+            )
+        else
+            # Minimal mode: can't compute vcov without X
+            # Create a placeholder zero matrix
+            Symmetric(zeros(T, length(basis_coef), length(basis_coef)))
+        end
+
+        # Compute standard errors
+        se = sqrt.(diag(vcov_matrix))
+
+        # Compute t-statistics and p-values
+        coef_vec = copy(pp.beta)
+        coef_vec[.!basis_coef] .= zero(T)
+        t_stats_val = coef_vec ./ se
+        p_values_val = 2 .* tdistccdf.(dof_residual, abs.(t_stats_val))
+
+        # Compute robust F-statistic (Wald test) using vcov
+        has_int = data_prep.has_intercept
+        F_stat_robust,
+        p_val_robust = compute_robust_fstat(
+            coef_vec, vcov_matrix, has_int, dof_residual
+        )
+    end
 
     ##############################################################################
     ## Clear y/mu if minimal mode (to save memory)
@@ -315,6 +332,7 @@ function fit_ols(@nospecialize(df),
     ##############################################################################
 
     # Ensure all statistics are of type T for type stability
+    # Note: F_stat_robust and p_val_robust may be Nothing (lazy) or T (eager)
     return OLSEstimator{T, typeof(pp), typeof(default_vcov)}(
         rr, pp, fes,
         data_prep.formula_origin, formula_schema, contrasts,
@@ -324,7 +342,8 @@ function fit_ols(@nospecialize(df),
         T(tss_total), T(tss_partial), T(rss),
         T(r2), T(r2_within),
         data_prep.has_intercept,
-        default_vcov, vcov_matrix, se, t_stats, p_values,
-        T(F_stat_robust), T(p_val_robust)
+        default_vcov, vcov_matrix, se, t_stats_val, p_values_val,
+        F_stat_robust === nothing ? nothing : T(F_stat_robust),
+        p_val_robust === nothing ? nothing : T(p_val_robust)
     )
 end

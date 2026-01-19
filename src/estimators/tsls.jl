@@ -244,16 +244,25 @@ function _iv_first_stage_fstats_standard(
         X::Matrix{T}, nobs::Int, dof_fes::Int,
         endo_names::Vector{String}, k_exo::Int, has_intercept::Bool
 ) where {T}
+    n = size(Xendo, 1)
+    k_endo = size(Xendo, 2)
     k_z = size(ZZ, 1)
 
-    # Compute residuals for first-stage F-stat
-    Xendo_res = BLAS.gemm!('N', 'N', -one(T), newZ, Pi, one(T), copy(Xendo))
+    # Compute residuals for first-stage F-stat: Xendo_res = Xendo - newZ * Pi
+    # Pre-allocate and compute in one step
+    Xendo_res = copy(Xendo)
+    BLAS.gemm!('N', 'N', -one(T), newZ, Pi, one(T), Xendo_res)
 
-    # Partial out Z w.r.t. Xexo
+    # Partial out Z w.r.t. Xexo: Z_res = Z - Xexo * Pi2
     XexoZ_aug = build_block_symmetric([XexoXexo.data, XexoZ, ZZ.data], [k_exo, k_z])
     Pi2 = ls_solve!(XexoZ_aug, k_exo)
-    Z_res = BLAS.gemm!(
-        'N', 'N', -one(T), newZ[:, 1:k_exo], Pi2, one(T), copy(newZ[:, (k_exo + 1):end]))
+
+    # Extract Z from newZ without allocating a new matrix
+    # newZ = [Xexo, Z], so Z = newZ[:, (k_exo+1):end]
+    # Compute Z_res = Z - Xexo * Pi2 using views where possible
+    Xexo_view = view(newZ, :, 1:k_exo)
+    Z_res = newZ[:, (k_exo + 1):end]  # This creates a copy (needed for gemm!)
+    BLAS.gemm!('N', 'N', -one(T), Xexo_view, Pi2, one(T), Z_res)
 
     # Extract the relevant part of Pi (instruments only)
     Pip = Pi[(k_exo + 1):end, :]
@@ -275,9 +284,12 @@ function _iv_first_stage_fstats_standard(
         Xendo_orig = Xendo, newZ = newZ
     )
 
+    # Store first-stage data - reuse existing matrices where possible
+    # Pip, Xendo_res, Z_res are already computed and not needed elsewhere
+    # Xendo and newZ are passed by reference, only copy if we must preserve them
     first_stage_data = FirstStageData{T}(
-        copy(Pip), copy(Xendo_res), copy(Z_res),
-        endo_names, k_exo, copy(Xendo), copy(newZ), has_intercept
+        Pip, Xendo_res, Z_res,
+        endo_names, k_exo, Xendo, newZ, has_intercept
     )
 
     return (F_kp = F_kp, p_kp = p_kp,
@@ -332,9 +344,10 @@ function _iv_first_stage_fstats_fe(
         p_kp = fdistccdf(df1, df2, F_kp)
     end
 
+    # Reuse existing matrices - Xendo_res is already a copy, Xendo and newZ can be shared
     first_stage_data = FirstStageData{T}(
-        zeros(T, 0, k_endo), copy(Xendo_res), zeros(T, nobs, 0),
-        endo_names, k_exo, copy(Xendo), copy(newZ), has_intercept
+        zeros(T, 0, k_endo), Xendo_res, zeros(T, nobs, 0),
+        endo_names, k_exo, Xendo, newZ, has_intercept
     )
 
     return (F_kp = F_kp, p_kp = p_kp,

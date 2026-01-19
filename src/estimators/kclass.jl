@@ -381,14 +381,15 @@ function fit_kclass_estimator(
             [String(coefnames_endo[i]) for i in endo_idx]
         end
 
+        # Reuse existing matrices where possible - avoid unnecessary copies
         first_stage_data = FirstStageData{T}(
-            copy(Pip),
-            copy(Xendo_res),
-            copy(Z_res),
+            Pip,           # Already computed, not modified later
+            Xendo_res,     # Already a copy from gemm!
+            Z_res,         # Already a copy from gemm!
             endo_names_final,
             k_exo_final,
-            copy(Xendo),          # Original endogenous variables
-            copy(newZ),           # Full first-stage design [Xexo, Z]
+            Xendo,         # Share reference - not modified after this
+            newZ,          # Share reference - not modified after this
             data_prep.has_intercept
         )
     end

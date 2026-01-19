@@ -26,6 +26,86 @@ end
 
 ##############################################################################
 ##
+## Direct Cluster Aggregation (fused moment + clustering)
+##
+## This avoids allocating the full n×k moment matrix by computing
+## cluster sums directly.
+##
+##############################################################################
+
+"""
+    cluster_aggregate_direct!(X2, X, y, mu, groups) -> X2
+
+Fused moment matrix computation and cluster aggregation.
+Computes X2[g, :] = sum over i in cluster g of X[i, :] * (y[i] - mu[i])
+
+This avoids allocating an n×k moment matrix, only allocating G×k.
+
+# Arguments
+- `X2::Matrix{T}`: Output buffer of size (ngroups, k), will be zeroed and filled
+- `X::Matrix{T}`: Model matrix (n × k)
+- `y::Vector{T}`: Response vector (weighted)
+- `mu::Vector{T}`: Fitted values (weighted)
+- `groups::Vector{Int}`: Cluster assignments (length n)
+
+# Returns
+- `X2`: The filled cluster aggregation matrix
+"""
+function cluster_aggregate_direct!(X2::Matrix{T}, X::Matrix{T},
+        y::AbstractVector{T}, mu::AbstractVector{T},
+        groups::Vector{Int}) where {T <: AbstractFloat}
+    n, k = size(X)
+    ngroups = size(X2, 1)
+
+    # Zero the output buffer
+    fill!(X2, zero(T))
+
+    # Aggregate: X2[g, j] = sum over i in cluster g of X[i,j] * (y[i] - mu[i])
+    @inbounds for j in 1:k
+        @simd for i in 1:n
+            g = groups[i]
+            r = y[i] - mu[i]
+            X2[g, j] += X[i, j] * r
+        end
+    end
+
+    return X2
+end
+
+"""
+    cluster_aVar_direct(X, y, mu, clustering; scale=true) -> Matrix
+
+Compute cluster-robust asymptotic variance directly without moment matrix allocation.
+
+Returns X2'X2 / n where X2 is the G×k cluster-aggregated moment matrix.
+When scale=true (default), divides by n to match CovarianceMatrices.aVar behavior.
+"""
+function cluster_aVar_direct(X::Matrix{T}, y::AbstractVector{T}, mu::AbstractVector{T},
+        clustering::CM.Clustering; scale::Bool = true) where {T <: AbstractFloat}
+    n, k = size(X)
+    ngroups = clustering.ngroups
+    groups = clustering.groups
+
+    # Allocate G×k buffer (much smaller than n×k for typical cluster scenarios)
+    X2 = Matrix{T}(undef, ngroups, k)
+
+    # Fused aggregation
+    cluster_aggregate_direct!(X2, X, y, mu, groups)
+
+    # Compute X2'X2 using BLAS syrk (symmetric rank-k update)
+    aVar_buf = Matrix{T}(undef, k, k)
+    BLAS.syrk!('U', 'T', one(T), X2, zero(T), aVar_buf)
+
+    # Scale by n if requested (matches CovarianceMatrices.aVar behavior)
+    if scale
+        aVar_buf ./= n
+    end
+
+    return Symmetric(aVar_buf, :U)
+end
+
+##############################################################################
+##
 ## Helper: Mask vcov matrix with NaN for collinear entries
 ##
 ##############################################################################
@@ -254,14 +334,26 @@ function CM.aVar(
         scale = true,
         kwargs...
 ) where {K <: CM.CR}
-    # Compute moment matrix directly: X .* (y - mu) .* u in single fused broadcast
-    # This avoids separate allocation for residuals vector
-    u = residualadjustment(k, m)
     X = modelmatrix(m)
     y = m.rr.y
     mu = m.rr.mu
-    mm = @. X * (y - mu) * u
     basis_coef = m.basis_coef
+
+    # Optimization: For single-cluster CR0/CR1, use direct aggregation
+    # This avoids allocating an n×k moment matrix
+    if length(k.g) == 1 && (K <: Union{CM.CR0, CM.CR1})
+        clustering = k.g[1]
+        # Direct aggregation: only allocate G×k instead of n×k
+        # Pass scale parameter to match CovarianceMatrices.aVar behavior
+        Σ = cluster_aVar_direct(X, y, mu, clustering; scale = scale)
+
+        all(basis_coef) && return Σ
+        return mask_vcov_collinear(Σ, basis_coef)
+    end
+
+    # Fallback: standard moment matrix computation for multi-way or CR2/CR3
+    u = residualadjustment(k, m)
+    mm = @. X * (y - mu) * u
     Σ = aVar(k, mm; demean = demean, prewhite = prewhite, scale = scale)
 
     all(basis_coef) && return Σ
@@ -592,6 +684,18 @@ function leverage(m::OLSEstimator{T, <:OLSPredictorQR}) where {T}
     # Solve X / R using forward substitution: O(nk²) vs O(n²k) for full Q
     XRinv = X / UpperTriangular(R)
     return vec(sum(abs2, XRinv, dims = 2))
+end
+
+function leverage(m::OLSEstimator{T, <:OLSPredictorSweep}) where {T}
+    # For Sweep: (X'X)^(-1) is stored directly in pp.invXX
+    # h_i = X_i * (X'X)^(-1) * X_i'
+    # Compute via Cholesky of invXX: invXX = L * L', then h_i = ||X_i * L||^2
+    X_reduced = m.pp.X_reduced
+    invXX = m.pp.invXX
+    # Cholesky factorization of invXX for efficient computation
+    L = cholesky(invXX).L
+    XL = X_reduced * L
+    return vec(sum(abs2, XL, dims = 2))
 end
 
 @noinline residualadjustment(k::CM.HR0, r::OLSEstimator) = 1.0
@@ -969,6 +1073,15 @@ function leverage(m::OLSMatrixEstimator{T, <:OLSPredictorQR}) where {T}
     return vec(sum(abs2, XRinv, dims = 2))
 end
 
+function leverage(m::OLSMatrixEstimator{T, <:OLSPredictorSweep}) where {T}
+    # For Sweep: (X'X)^(-1) is stored directly
+    X_reduced = m.pp.X_reduced
+    invXX = m.pp.invXX
+    L = cholesky(invXX).L
+    XL = X_reduced * L
+    return vec(sum(abs2, XL, dims = 2))
+end
+
 # Residual adjustment functions for OLSMatrixEstimator
 @noinline residualadjustment(k::CM.HR0, r::OLSMatrixEstimator) = 1.0
 @noinline residualadjustment(k::CM.HR1, r::OLSMatrixEstimator) = sqrt(nobs(r) /
@@ -1048,13 +1161,26 @@ function CM.aVar(
         scale = true,
         kwargs...
 ) where {K <: CM.CR}
-    # Compute moment matrix directly: X .* (y - mu) .* u in single fused broadcast
-    u = residualadjustment(k, m)
     X = modelmatrix(m)
     y = m.rr.y
     mu = m.rr.mu
-    mm = @. X * (y - mu) * u
     basis_coef = m.basis_coef
+
+    # Optimization: For single-cluster CR0/CR1, use direct aggregation
+    # This avoids allocating an n×k moment matrix
+    if length(k.g) == 1 && (K <: Union{CM.CR0, CM.CR1})
+        clustering = k.g[1]
+        # Direct aggregation: only allocate G×k instead of n×k
+        # Pass scale parameter to match CovarianceMatrices.aVar behavior
+        Σ = cluster_aVar_direct(X, y, mu, clustering; scale = scale)
+
+        all(basis_coef) && return Σ
+        return mask_vcov_collinear(Σ, basis_coef)
+    end
+
+    # Fallback: standard moment matrix computation for multi-way or CR2/CR3
+    u = residualadjustment(k, m)
+    mm = @. X * (y - mu) * u
     Σ = aVar(k, mm; demean = demean, prewhite = prewhite, scale = scale)
 
     all(basis_coef) && return Σ

@@ -85,15 +85,17 @@ struct OLSEstimator{T <: AbstractFloat, P <: OLSLinearPredictor{T}, V} <:
     has_intercept::Bool
 
     # Variance-covariance estimator and precomputed statistics
-    vcov_estimator::V                        # Deep copy of the estimator
-    vcov_matrix::Symmetric{T, Matrix{T}}    # Precomputed vcov matrix
-    se::Vector{T}                            # Standard errors
-    t_stats::Vector{T}                       # t-statistics
-    p_values::Vector{T}                      # p-values
+    # NOTE: These can be Nothing for lazy computation (deferred until accessed).
+    # When lazy=true at fit time, vcov is computed on first access via StatsAPI.vcov(m).
+    vcov_estimator::V                                           # Deep copy of the estimator
+    vcov_matrix::Union{Nothing, Symmetric{T, Matrix{T}}}       # Precomputed vcov (or Nothing for lazy)
+    se::Union{Nothing, Vector{T}}                              # Standard errors (or Nothing for lazy)
+    t_stats::Union{Nothing, Vector{T}}                         # t-statistics (or Nothing for lazy)
+    p_values::Union{Nothing, Vector{T}}                        # p-values (or Nothing for lazy)
 
     # Test statistics (computed with vcov_estimator)
-    F::T                            # F-statistic
-    p::T                            # P-value of F-stat
+    F::Union{Nothing, T}            # F-statistic (or Nothing for lazy)
+    p::Union{Nothing, T}            # P-value of F-stat (or Nothing for lazy)
 end
 
 has_iv(::OLSEstimator) = false
@@ -287,12 +289,22 @@ Check if model has stored matrices (X, y, mu). Returns false if fit with save=:m
 """
 has_matrices(m::OLSEstimator) = has_predictor_data(m.pp)
 
-# Property accessor for backward compatibility (iterations/converged stored in fes)
+# Property accessor for backward compatibility and lazy vcov support
 function Base.getproperty(m::OLSEstimator, s::Symbol)
     if s === :iterations
         return getfield(m, :fes).iterations
     elseif s === :converged
         return getfield(m, :fes).converged
+    elseif s === :F
+        # Lazy F-stat: compute on demand if nothing
+        F_val = getfield(m, :F)
+        F_val !== nothing && return F_val
+        return _get_fstat(m)
+    elseif s === :p
+        # Lazy p-value: compute on demand if nothing
+        p_val = getfield(m, :p)
+        p_val !== nothing && return p_val
+        return _get_pval(m)
     else
         return getfield(m, s)
     end
@@ -356,11 +368,64 @@ StatsAPI.nulldeviance(m::OLSEstimator) = m.tss_total
 StatsAPI.rss(m::OLSEstimator) = m.rss
 StatsAPI.r2(m::OLSEstimator) = m.r2
 
-# Variance-covariance (returns precomputed matrix)
-StatsAPI.vcov(m::OLSEstimator) = m.vcov_matrix
+# Variance-covariance (returns precomputed matrix or computes on-demand)
+function StatsAPI.vcov(m::OLSEstimator)
+    m.vcov_matrix !== nothing && return m.vcov_matrix
+    # Lazy computation: compute vcov using the stored estimator
+    return _compute_vcov_lazy(m)
+end
 
-# Standard errors (returns precomputed values)
-StatsAPI.stderror(m::OLSEstimator) = m.se
+# Standard errors (returns precomputed values or computes on-demand)
+function StatsAPI.stderror(m::OLSEstimator)
+    m.se !== nothing && return m.se
+    # Lazy computation: compute from vcov
+    return sqrt.(diag(vcov(m)))
+end
+
+# t-statistics (returns precomputed values or computes on-demand)
+function t_stats(m::OLSEstimator)
+    m.t_stats !== nothing && return m.t_stats
+    # Lazy computation: compute from coef and se
+    return coef(m) ./ stderror(m)
+end
+
+# p-values (returns precomputed values or computes on-demand)
+function p_values(m::OLSEstimator)
+    m.p_values !== nothing && return m.p_values
+    # Lazy computation: compute from t-stats
+    return 2 .* tdistccdf.(dof_residual(m), abs.(t_stats(m)))
+end
+
+"""
+    _compute_vcov_lazy(m::OLSEstimator)
+
+Compute vcov matrix on-demand for models created with lazy vcov.
+Uses the stored vcov_estimator (typically HC1).
+"""
+function _compute_vcov_lazy(m::OLSEstimator{T}) where {T}
+    # Compute vcov using the stored estimator via CovarianceMatrices.vcov
+    return Symmetric(CovarianceMatrices.vcov(m.vcov_estimator, m))
+end
+
+# Override for lazy F-stat computation
+# Use getfield to avoid infinite recursion through getproperty
+function _get_fstat(m::OLSEstimator)
+    F_val = getfield(m, :F)
+    F_val !== nothing && return F_val
+    # Lazy computation: compute F-stat from vcov
+    has_int = getfield(m, :has_intercept)
+    F, _ = compute_robust_fstat(coef(m), vcov(m), has_int, dof_residual(m))
+    return F
+end
+
+function _get_pval(m::OLSEstimator)
+    p_val = getfield(m, :p)
+    p_val !== nothing && return p_val
+    # Lazy computation: compute p-val from vcov
+    has_int = getfield(m, :has_intercept)
+    _, p = compute_robust_fstat(coef(m), vcov(m), has_int, dof_residual(m))
+    return p
+end
 
 # Formula
 StatsModels.formula(m::OLSEstimator) = m.formula_schema
@@ -465,9 +530,9 @@ end
 
 function StatsAPI.coeftable(m::OLSEstimator; level = 0.95)
     cc = coef(m)
-    se = m.se
-    tt = m.t_stats
-    pv = m.p_values
+    se = stderror(m)      # Use accessor for lazy support
+    tt = t_stats(m)       # Use accessor for lazy support
+    pv = p_values(m)      # Use accessor for lazy support
     coefnms = coefnames(m)
 
     # Compute confidence intervals using precomputed se

@@ -178,19 +178,27 @@ end
 
 # Helper for top summary
 function _summary_table_common(m::AbstractRegressModel)
+    # Handle lazy F-stat: compute on demand if nothing
+    F_val = _get_fstat(m)
+    p_val = _get_pval(m)
+
     out = ["Number of obs" sprint(show, nobs(m), context = :compact => true);
            "dof (model)" sprint(show, dof(m), context = :compact => true);
            "dof (residuals)" sprint(show, dof_residual(m), context = :compact => true);
            "R²" @sprintf("%.3f", r2(m));
            "R² adjusted" @sprintf("%.3f", adjr2(m));
-           "F-statistic" sprint(show, m.F, context = :compact => true);
-           "P-value" @sprintf("%.3f", m.p);]
+           "F-statistic" sprint(show, F_val, context = :compact => true);
+           "P-value" @sprintf("%.3f", p_val);]
 
     if has_fe(m)
         out = vcat(out, ["R² within" @sprintf("%.3f", m.r2_within)])
     end
     return out
 end
+
+# Default: directly access field
+_get_fstat(m::AbstractRegressModel) = m.F
+_get_pval(m::AbstractRegressModel) = m.p
 
 # We can't fully unify show() yet because OLS and IV have different "top" sections 
 # (IV has First Stage stats, OLS has converged/iterations for FE).

@@ -160,7 +160,13 @@ function fit_ols_core!(rr::OLSResponse{T}, X::Matrix{T},
         factorization::Symbol;
         tol::Real = 1e-8,
         save_matrices::Bool = true,
-        collinearity::Symbol = :qr) where {T <: AbstractFloat}
+        collinearity::Symbol = :qr,
+        has_intercept::Bool = false) where {T <: AbstractFloat}
+
+    # Use sweep factorization (fastest, matches FEM)
+    if factorization == :sweep
+        return _fit_sweep!(rr, X, save_matrices, has_intercept, tol)
+    end
 
     # Step 1: Detect collinearity and get reduced X (done once)
     basis_coef, X_reduced = detect_collinearity(X; tol = tol, method = collinearity)
@@ -171,7 +177,7 @@ function fit_ols_core!(rr::OLSResponse{T}, X::Matrix{T},
     elseif factorization == :qr
         pp, beta_reduced = _fit_qr!(rr, X, X_reduced, basis_coef, save_matrices)
     else
-        error("factorization must be :chol or :qr, got :$factorization")
+        error("factorization must be :chol, :qr, or :sweep, got :$factorization")
     end
 
     return pp, basis_coef, beta_reduced
@@ -235,6 +241,49 @@ function _fit_qr!(rr::OLSResponse{T}, X::Matrix{T},
     end
 
     return pp, beta_reduced
+end
+
+"""
+Internal Sweep-based OLS solver.
+Matches FixedEffectModels.jl approach - collinearity detection, inverse,
+and coefficients all computed in one sweep pass.
+"""
+function _fit_sweep!(rr::OLSResponse{T}, X::Matrix{T},
+        save_matrices::Bool, has_intercept::Bool,
+        tol::Real) where {T}
+    n, k = size(X)
+
+    # Compute X'X using BLAS syrk (only upper triangle)
+    XX = Matrix{T}(undef, k, k)
+    BLAS.syrk!('U', 'T', one(T), X, zero(T), XX)
+
+    # Compute X'y
+    Xy = X' * rr.y
+
+    # Unified sweep: detect collinearity, compute (X'X)^(-1), solve for beta
+    basis_coef, invXX, beta = sweep_solve!(XX, Xy, has_intercept; tol = T(tol))
+
+    # For collinear columns, set coefficients to NaN (not 0, for consistency)
+    @inbounds for i in 1:k
+        if !basis_coef[i]
+            beta[i] = T(NaN)
+        end
+    end
+
+    # Compute fitted values: mu = X * beta (using non-NaN coefficients)
+    # Create reduced beta for multiplication
+    beta_reduced = beta[basis_coef]
+    X_reduced = X[:, basis_coef]
+    mul!(rr.mu, X_reduced, beta_reduced)
+
+    # Build predictor
+    if save_matrices
+        pp = OLSPredictorSweep(X, X_reduced, beta, invXX)
+    else
+        pp = OLSPredictorSweep(Matrix{T}(undef, 0, 0), Matrix{T}(undef, 0, 0), beta, invXX)
+    end
+
+    return pp, basis_coef, beta_reduced
 end
 
 #=============================================================================

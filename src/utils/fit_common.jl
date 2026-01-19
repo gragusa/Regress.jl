@@ -197,7 +197,7 @@ end
     _create_subdf(df, all_vars, esample) -> DataFrame
 
 Create a subsetted DataFrame with only the necessary columns.
-Optimized to avoid unnecessary disallowmissing calls when column already non-missing.
+Optimized to avoid unnecessary copies when esample is Colon and column is non-missing.
 """
 function _create_subdf(df::DataFrame,
         all_vars::Vector{Symbol},
@@ -207,14 +207,23 @@ function _create_subdf(df::DataFrame,
 
     @inbounds for (i, x) in enumerate(all_vars)
         col = df[!, x]
-        # Subset if needed
-        subcol = esample isa Colon ? col : view(col, esample)
-        # Only call disallowmissing if column type includes Missing
-        if eltype(subcol) >: Missing
-            cols[i] = disallowmissing(subcol)
+        if esample isa Colon
+            # No subsetting needed
+            if eltype(col) >: Missing
+                cols[i] = disallowmissing(col)
+            else
+                # Already non-missing, use direct reference (no copy!)
+                cols[i] = col
+            end
         else
-            # Already non-missing, just materialize the view
-            cols[i] = collect(subcol)
+            # Subset needed
+            subcol = view(col, esample)
+            if eltype(subcol) >: Missing
+                cols[i] = disallowmissing(subcol)
+            else
+                # Materialize the view (copy needed for subset)
+                cols[i] = collect(subcol)
+            end
         end
     end
 
