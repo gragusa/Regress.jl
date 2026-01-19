@@ -41,7 +41,9 @@ end
 # ------------------------------------------------------------------------------
 
 fmt(x::Float64) = isnan(x) ? "N/A" : @sprintf("%.3f", x)
-format_n(n::Int) = n >= 1_000_000 ? "$(div(n, 1_000_000))M" : n >= 1_000 ? "$(div(n, 1_000))K" : string(n)
+function format_n(n::Int)
+    n >= 1_000_000 ? "$(div(n, 1_000_000))M" : n >= 1_000 ? "$(div(n, 1_000))K" : string(n)
+end
 
 # ------------------------------------------------------------------------------
 # Markdown Generation
@@ -53,7 +55,7 @@ function generate_markdown_header(title::String, config::Dict{String, Any})
     push!(lines, "")
     push!(lines, "## Configuration")
     push!(lines, "")
-    for (key, value) in sort(collect(config), by=first)
+    for (key, value) in sort(collect(config), by = first)
         push!(lines, "- **$key:** $value")
     end
     push!(lines, "- **Date:** $(Dates.now())")
@@ -94,7 +96,8 @@ function generate_cuda_table(results::Vector{CudaBenchmarkResult})
     push!(lines, "|----------|---|------------------|---------------------|-------------|")
 
     for r in results
-        ratio = r.fixest_threaded_time > 0 ? r.regress_cuda_time / r.fixest_threaded_time : NaN
+        ratio = r.fixest_threaded_time > 0 ? r.regress_cuda_time / r.fixest_threaded_time :
+                NaN
         scenario_escaped = replace(r.scenario, "|" => "\\|")
         line = "| $(scenario_escaped) | $(format_n(r.n)) | $(fmt(r.regress_cuda_time)) | $(fmt(r.fixest_threaded_time)) | $(fmt(ratio)) |"
         push!(lines, line)
@@ -113,7 +116,7 @@ end
 # R fixest benchmarks runner
 # ------------------------------------------------------------------------------
 
-function run_fixest_benchmarks(nthreads::Int; script_dir::String=@__DIR__)
+function run_fixest_benchmarks(nthreads::Int; script_dir::String = @__DIR__)
     println("\n" * "=" ^ 70)
     println("Running fixest (R) benchmarks via shell...")
     println("Requested threads: $nthreads")
@@ -138,7 +141,7 @@ end
 # Dataset Generation
 # ------------------------------------------------------------------------------
 
-function generate_dataset1(; seed::Int=42)
+function generate_dataset1(; seed::Int = 42)
     Random.seed!(seed)
     N = 10_000_000
     K = 100
@@ -146,24 +149,24 @@ function generate_dataset1(; seed::Int=42)
     id2 = rand(1:K, N)
     x1 = 5 .* cos.(id1) .+ 5 .* sin.(id2) .+ randn(N)
     x2 = cos.(id1) .+ sin.(id2) .+ randn(N)
-    y = 3 .* x1 .+ 5 .* x2 .+ cos.(id1) .+ cos.(id2).^2 .+ randn(N)
-    return DataFrame(id1=id1, id2=id2, x1=x1, x2=x2, y=y), N
+    y = 3 .* x1 .+ 5 .* x2 .+ cos.(id1) .+ cos.(id2) .^ 2 .+ randn(N)
+    return DataFrame(id1 = id1, id2 = id2, x1 = x1, x2 = x2, y = y), N
 end
 
-function generate_dataset2(; seed::Int=42)
+function generate_dataset2(; seed::Int = 42)
     Random.seed!(seed)
     N = 800_000
     M = 40_000  # workers
     O = 5_000   # firms
     id1 = rand(1:M, N)
-    id2 = [rand(max(1, div(x, 8)-10):min(O, div(x, 8)+10)) for x in id1]
+    id2 = [rand(max(1, div(x, 8) - 10):min(O, div(x, 8) + 10)) for x in id1]
     x1 = 5 .* cos.(id1) .+ 5 .* sin.(id2) .+ randn(N)
     x2 = cos.(id1) .+ sin.(id2) .+ randn(N)
-    y = 3 .* x1 .+ 5 .* x2 .+ cos.(id1) .+ cos.(id2).^2 .+ randn(N)
-    return DataFrame(id1=id1, id2=id2, x1=x1, x2=x2, y=y), N
+    y = 3 .* x1 .+ 5 .* x2 .+ cos.(id1) .+ cos.(id2) .^ 2 .+ randn(N)
+    return DataFrame(id1 = id1, id2 = id2, x1 = x1, x2 = x2, y = y), N
 end
 
-function generate_dataset3(; seed::Int=42)
+function generate_dataset3(; seed::Int = 42)
     Random.seed!(seed)
     n = 10_000_000
     nb_dum = [div(n, 20), floor(Int, sqrt(n)), floor(Int, n^0.33)]
@@ -172,7 +175,7 @@ function generate_dataset3(; seed::Int=42)
     id3 = rand(1:nb_dum[3], n)
     X1 = rand(n)
     ln_y = 3 .* X1 .+ rand(n)
-    return DataFrame(X1=X1, ln_y=ln_y, id1=id1, id2=id2, id3=id3), n
+    return DataFrame(X1 = X1, ln_y = ln_y, id1 = id1, id2 = id2, id3 = id3), n
 end
 
 # ------------------------------------------------------------------------------
@@ -180,8 +183,8 @@ end
 # ------------------------------------------------------------------------------
 
 function run_julia_benchmarks(fixest_times::Dict{String, Float64};
-                              method::Symbol=:cpu,
-                              nthreads::Int=1)
+        method::Symbol = :cpu,
+        nthreads::Int = 1)
     results = BenchmarkResult[]
 
     # Dataset 1: 10M observations
@@ -203,8 +206,8 @@ function run_julia_benchmarks(fixest_times::Dict{String, Float64};
     fem_t = median(t_fem).time / 1e9
     println("    FEM: $(fmt(fem_t))s")
 
-    REG.ols(df1, formula_reg; method=method, nthreads=nthreads)
-    t_reg = @benchmark REG.ols($df1, $formula_reg; method=$method, nthreads=$nthreads) samples=5 evals=1
+    REG.ols(df1, formula_reg; method = method, nthreads = nthreads)
+    t_reg = @benchmark REG.ols($df1, $formula_reg; method = $method, nthreads = $nthreads) samples=5 evals=1
     reg_t = median(t_reg).time / 1e9
     println("    Regress: $(fmt(reg_t))s")
 
@@ -222,10 +225,10 @@ function run_julia_benchmarks(fixest_times::Dict{String, Float64};
     println("    FEM: $(fmt(fem_t))s")
 
     cluster_vec = df1.id2
-    m = REG.ols(df1, formula_reg; method=method, nthreads=nthreads)
+    m = REG.ols(df1, formula_reg; method = method, nthreads = nthreads)
     vcov(CR1(cluster_vec), m)
     t_reg = @benchmark begin
-        m = REG.ols($df1, $formula_reg; method=$method, nthreads=$nthreads)
+        m=REG.ols($df1, $formula_reg; method = $method, nthreads = $nthreads)
         vcov(CR1($cluster_vec), m)
     end samples=5 evals=1
     reg_t = median(t_reg).time / 1e9
@@ -247,8 +250,8 @@ function run_julia_benchmarks(fixest_times::Dict{String, Float64};
     fem_t = median(t_fem).time / 1e9
     println("    FEM: $(fmt(fem_t))s")
 
-    REG.ols(df1, formula_reg_fe; method=method, nthreads=nthreads)
-    t_reg = @benchmark REG.ols($df1, $formula_reg_fe; method=$method, nthreads=$nthreads) samples=5 evals=1
+    REG.ols(df1, formula_reg_fe; method = method, nthreads = nthreads)
+    t_reg = @benchmark REG.ols($df1, $formula_reg_fe; method = $method, nthreads = $nthreads) samples=5 evals=1
     reg_t = median(t_reg).time / 1e9
     println("    Regress: $(fmt(reg_t))s")
 
@@ -265,10 +268,12 @@ function run_julia_benchmarks(fixest_times::Dict{String, Float64};
     fem_t = median(t_fem).time / 1e9
     println("    FEM: $(fmt(fem_t))s")
 
-    m = REG.ols(df1, formula_reg_fe, save_cluster=:id1; method=method, nthreads=nthreads)
+    m = REG.ols(
+        df1, formula_reg_fe, save_cluster = :id1; method = method, nthreads = nthreads)
     vcov(CR1(:id1), m)
     t_reg = @benchmark begin
-        m = REG.ols($df1, $formula_reg_fe, save_cluster=:id1; method=$method, nthreads=$nthreads)
+        m=REG.ols($df1, $formula_reg_fe, save_cluster = :id1;
+            method = $method, nthreads = $nthreads)
         vcov(CR1(:id1), m)
     end samples=5 evals=1
     reg_t = median(t_reg).time / 1e9
@@ -290,8 +295,8 @@ function run_julia_benchmarks(fixest_times::Dict{String, Float64};
     fem_t = median(t_fem).time / 1e9
     println("    FEM: $(fmt(fem_t))s")
 
-    REG.ols(df1, formula_reg_2fe; method=method, nthreads=nthreads)
-    t_reg = @benchmark REG.ols($df1, $formula_reg_2fe; method=$method, nthreads=$nthreads) samples=5 evals=1
+    REG.ols(df1, formula_reg_2fe; method = method, nthreads = nthreads)
+    t_reg = @benchmark REG.ols($df1, $formula_reg_2fe; method = $method, nthreads = $nthreads) samples=5 evals=1
     reg_t = median(t_reg).time / 1e9
     println("    Regress: $(fmt(reg_t))s")
 
@@ -320,8 +325,8 @@ function run_julia_benchmarks(fixest_times::Dict{String, Float64};
     fem_t = median(t_fem).time / 1e9
     println("    FEM: $(fmt(fem_t))s")
 
-    REG.ols(df2, formula_reg_2fe; method=method, nthreads=nthreads)
-    t_reg = @benchmark REG.ols($df2, $formula_reg_2fe; method=$method, nthreads=$nthreads) samples=5 evals=1
+    REG.ols(df2, formula_reg_2fe; method = method, nthreads = nthreads)
+    t_reg = @benchmark REG.ols($df2, $formula_reg_2fe; method = $method, nthreads = $nthreads) samples=5 evals=1
     reg_t = median(t_reg).time / 1e9
     println("    Regress: $(fmt(reg_t))s")
 
@@ -351,10 +356,12 @@ function run_julia_benchmarks(fixest_times::Dict{String, Float64};
     fem_t = median(t_fem).time / 1e9
     println("    FEM: $(fmt(fem_t))s")
 
-    m = REG.ols(df3, formula_reg_1fe, save_cluster=:id1; method=method, nthreads=nthreads)
+    m = REG.ols(
+        df3, formula_reg_1fe, save_cluster = :id1; method = method, nthreads = nthreads)
     vcov(CR1(:id1), m)
     t_reg = @benchmark begin
-        m = REG.ols($df3, $formula_reg_1fe, save_cluster=:id1; method=$method, nthreads=$nthreads)
+        m=REG.ols($df3, $formula_reg_1fe, save_cluster = :id1;
+            method = $method, nthreads = $nthreads)
         vcov(CR1(:id1), m)
     end samples=5 evals=1
     reg_t = median(t_reg).time / 1e9
@@ -376,10 +383,12 @@ function run_julia_benchmarks(fixest_times::Dict{String, Float64};
     fem_t = median(t_fem).time / 1e9
     println("    FEM: $(fmt(fem_t))s")
 
-    m = REG.ols(df3, formula_reg_2fe, save_cluster=:id1; method=method, nthreads=nthreads)
+    m = REG.ols(
+        df3, formula_reg_2fe, save_cluster = :id1; method = method, nthreads = nthreads)
     vcov(CR1(:id1), m)
     t_reg = @benchmark begin
-        m = REG.ols($df3, $formula_reg_2fe, save_cluster=:id1; method=$method, nthreads=$nthreads)
+        m=REG.ols($df3, $formula_reg_2fe, save_cluster = :id1;
+            method = $method, nthreads = $nthreads)
         vcov(CR1(:id1), m)
     end samples=5 evals=1
     reg_t = median(t_reg).time / 1e9
@@ -401,10 +410,12 @@ function run_julia_benchmarks(fixest_times::Dict{String, Float64};
     fem_t = median(t_fem).time / 1e9
     println("    FEM: $(fmt(fem_t))s")
 
-    m = REG.ols(df3, formula_reg_3fe, save_cluster=:id1; method=method, nthreads=nthreads)
+    m = REG.ols(
+        df3, formula_reg_3fe, save_cluster = :id1; method = method, nthreads = nthreads)
     vcov(CR1(:id1), m)
     t_reg = @benchmark begin
-        m = REG.ols($df3, $formula_reg_3fe, save_cluster=:id1; method=$method, nthreads=$nthreads)
+        m=REG.ols($df3, $formula_reg_3fe, save_cluster = :id1;
+            method = $method, nthreads = $nthreads)
         vcov(CR1(:id1), m)
     end samples=5 evals=1
     reg_t = median(t_reg).time / 1e9
