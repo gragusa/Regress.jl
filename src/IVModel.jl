@@ -153,7 +153,8 @@ iv(TSLS(), df, @formula(y ~ x + (endo ~ instrument)))
 ```
 """
 struct IVEstimator{
-    T, E <: AbstractIVEstimator, V, P <: Union{PostEstimationDataIV{T}, Nothing}} <: AbstractRegressModel
+    T, E <: AbstractIVEstimator, V, P <: Union{PostEstimationDataIV{T}, Nothing}} <:
+       AbstractRegressModel
     estimator::E  # Which IV estimator was used
 
     coef::Vector{T}   # Vector of coefficients
@@ -871,7 +872,8 @@ See also: [`FirstStageResult`](@ref)
 function first_stage(m::IVEstimator{T}) where {T}
     isnothing(m.postestimation) &&
         error("Model does not have post-estimation data stored. Fit with save=true.")
-    !has_first_stage_data(m.postestimation.first_stage_data) && error("First-stage data not available.")
+    !has_first_stage_data(m.postestimation.first_stage_data) &&
+        error("First-stage data not available.")
 
     fsd = m.postestimation.first_stage_data
 
@@ -998,13 +1000,13 @@ end
 function top(m::IVEstimator)
     # Use shared summary
     out_common = _summary_table_common(m) # Matrix
-    
+
     # Add IV specific fields
-    
+
     # Add Converged status (IV also uses FE solver logic for convergence if FE present)
     # Insert at index 2
     row_converged = ["Converged" m.converged]
-    
+
     # Split
     part1 = out_common[1:1, :]
     part2 = out_common[2:end, :]
@@ -1019,7 +1021,7 @@ function top(m::IVEstimator)
     out = vcat(out,
         ["F (1st stage, joint)" sprint(show, m.F_kp, context = :compact => true);
          "P (1st stage, joint)" @sprintf("%.3f", m.p_kp);])
-    
+
     # Add Iterations if FE
     if has_fe(m)
         out = vcat(out,
@@ -1063,7 +1065,7 @@ function _predict_iv_impl(
 
         df = DataFrame(data; copycols = false)
         fes = leftjoin(select(df, m.fekeys), dropmissing(unique(m.fe)); on = m.fekeys,
-          makeunique = true, matchmissing = :equal, order = :left)
+            makeunique = true, matchmissing = :equal, order = :left)
         fes = combine(fes, AsTable(Not(m.fekeys)) => sum)
 
         @views out[nonmissings] .+= fes[nonmissings, 1]
