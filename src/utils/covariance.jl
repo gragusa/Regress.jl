@@ -14,7 +14,7 @@ Compute M = X .* (residuals * adjustment) in-place.
 This is the fallback using @simd; RegressLVExt overrides with @turbo.
 """
 function compute_moment_matrix!(M::Matrix{T}, X::Matrix{T},
-                                residuals::Vector{T}, adjustment::T) where {T <: AbstractFloat}
+        residuals::Vector{T}, adjustment::T) where {T <: AbstractFloat}
     n, k = size(X)
     @inbounds for j in 1:k
         @simd for i in 1:n

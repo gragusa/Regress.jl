@@ -24,7 +24,8 @@ using StatsBase: AbstractWeights, Weights, UnitWeights
 
 Compute residual sum of squares using @turbo.
 """
-function Regress.compute_rss(y::Vector{T}, mu::Vector{T}) where {T <: Union{Float32, Float64}}
+function Regress.compute_rss(y::Vector{T}, mu::Vector{T}) where {T <:
+                                                                 Union{Float32, Float64}}
     rss = zero(T)
     @turbo for i in eachindex(y, mu)
         rss += (y[i] - mu[i])^2
@@ -39,7 +40,8 @@ end
 """
     _tss_centered with @turbo optimization for Weights (has .values field).
 """
-function Regress._tss_centered(y::Vector{T}, m::T, weights::Weights) where {T <: Union{Float32, Float64}}
+function Regress._tss_centered(y::Vector{T}, m::T, weights::Weights) where {T <: Union{
+        Float32, Float64}}
     s = zero(T)
     w = weights.values
     @turbo for i in eachindex(y, w)
@@ -51,7 +53,8 @@ end
 """
     _tss_centered with @turbo optimization for UnitWeights (no .values field).
 """
-function Regress._tss_centered(y::Vector{T}, m::T, weights::UnitWeights) where {T <: Union{Float32, Float64}}
+function Regress._tss_centered(y::Vector{T}, m::T, weights::UnitWeights) where {T <: Union{
+        Float32, Float64}}
     s = zero(T)
     @turbo for i in eachindex(y)
         s += (y[i] - m)^2
@@ -62,7 +65,8 @@ end
 """
     _tss_uncentered with @turbo optimization for Weights.
 """
-function Regress._tss_uncentered(y::Vector{T}, weights::Weights) where {T <: Union{Float32, Float64}}
+function Regress._tss_uncentered(y::Vector{T}, weights::Weights) where {T <: Union{
+        Float32, Float64}}
     s = zero(T)
     w = weights.values
     @turbo for i in eachindex(y, w)
@@ -74,7 +78,8 @@ end
 """
     _tss_uncentered with @turbo optimization for UnitWeights.
 """
-function Regress._tss_uncentered(y::Vector{T}, weights::UnitWeights) where {T <: Union{Float32, Float64}}
+function Regress._tss_uncentered(y::Vector{T}, weights::UnitWeights) where {T <: Union{
+        Float32, Float64}}
     s = zero(T)
     @turbo for i in eachindex(y)
         s += y[i]^2
@@ -93,7 +98,7 @@ Compute M = X .* (residuals * adjustment) in-place using @turbo.
 This is used in HC1 variance computation.
 """
 function Regress.compute_moment_matrix!(M::Matrix{T}, X::Matrix{T},
-                                        residuals::Vector{T}, adjustment::T) where {T <: Union{Float32, Float64}}
+        residuals::Vector{T}, adjustment::T) where {T <: Union{Float32, Float64}}
     n, k = size(X)
     @turbo for j in 1:k
         for i in 1:n

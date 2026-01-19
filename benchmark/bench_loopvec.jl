@@ -33,7 +33,8 @@ df = DataFrame(
     x3 = randn(N),
     x4 = randn(N)
 )
-df.y .= 1.0 .+ 2.0 .* df.x1 .+ 0.5 .* df.x2 .- 1.0 .* df.x3 .+ 0.3 .* df.x4 .+ 0.1 .* randn(N)
+df.y .= 1.0 .+ 2.0 .* df.x1 .+ 0.5 .* df.x2 .- 1.0 .* df.x3 .+ 0.3 .* df.x4 .+
+        0.1 .* randn(N)
 println("Data generated.")
 println()
 
@@ -124,11 +125,11 @@ println("┌──────────────────────�
 println("│ Function                    │   @simd   │  @turbo   │ Speedup │")
 println("├─────────────────────────────┼───────────┼───────────┼─────────┤")
 @printf("│ Full OLS fit                │ %7.3f s │ %7.3f s │  %5.2fx │\n",
-        time_full_simd, time_full_turbo, time_full_simd / time_full_turbo)
+    time_full_simd, time_full_turbo, time_full_simd / time_full_turbo)
 @printf("│ compute_rss                 │ %7.2f ms│ %7.2f ms│  %5.2fx │\n",
-        time_rss_simd, time_rss_turbo, time_rss_simd / time_rss_turbo)
+    time_rss_simd, time_rss_turbo, time_rss_simd / time_rss_turbo)
 @printf("│ _tss_centered               │ %7.2f ms│ %7.2f ms│  %5.2fx │\n",
-        time_tss_simd, time_tss_turbo, time_tss_simd / time_tss_turbo)
+    time_tss_simd, time_tss_turbo, time_tss_simd / time_tss_turbo)
 println("└─────────────────────────────┴───────────┴───────────┴─────────┘")
 println()
 println("Note: Full OLS includes StatsModels overhead (~66%) not optimizable by LV.")
