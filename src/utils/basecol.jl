@@ -257,7 +257,7 @@ This matches FixedEffectModels.jl's approach for maximum performance.
 - `beta::Vector{T}`: Full coefficient vector (0 for collinear columns)
 """
 function sweep_solve!(XX::Matrix{T}, Xy::Vector{T}, has_intercept::Bool;
-                      tol::Real = sqrt(eps(T))) where {T <: AbstractFloat}
+        tol::Real = sqrt(eps(T))) where {T <: AbstractFloat}
     k = size(XX, 1)
     @assert size(XX, 2) == k "XX must be square"
     @assert length(Xy) == k "Xy must have length k"

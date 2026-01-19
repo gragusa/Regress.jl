@@ -532,6 +532,7 @@ function _compute_meat_inplace!(
         BLAS.syrk!('U', 'T', one(T), moment_matrix, zero(T), dest)
         # Copy upper to lower
         @inbounds for j in 1:size(dest, 2), i in (j + 1):size(dest, 1)
+
             dest[i, j] = dest[j, i]
         end
     elseif vcov_type isa CovarianceMatrices.HR1
@@ -540,6 +541,7 @@ function _compute_meat_inplace!(
         scale = T(n) / T(dof_residual)
         BLAS.syrk!('U', 'T', scale, moment_matrix, zero(T), dest)
         @inbounds for j in 1:size(dest, 2), i in (j + 1):size(dest, 1)
+
             dest[i, j] = dest[j, i]
         end
     elseif vcov_type isa Union{CovarianceMatrices.CR0, CovarianceMatrices.CR1}
@@ -552,6 +554,7 @@ function _compute_meat_inplace!(
         scale = T(n) / T(dof_residual)
         BLAS.syrk!('U', 'T', scale, moment_matrix, zero(T), dest)
         @inbounds for j in 1:size(dest, 2), i in (j + 1):size(dest, 1)
+
             dest[i, j] = dest[j, i]
         end
     end
