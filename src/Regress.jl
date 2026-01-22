@@ -20,11 +20,12 @@ using Printf: Printf, @printf, @sprintf
 using Reexport: Reexport, @reexport
 using StableRNGs: StableRNGs
 using Statistics: Statistics
-using StatsAPI: StatsAPI
+using StatsAPI: StatsAPI, adjr2, coef, coefnames, coeftable, confint, deviance,
+                dof, dof_residual, fitted, islinear, leverage, loglikelihood,
+                modelmatrix, nobs, nulldeviance, nullloglikelihood, predict,
+                r2, residuals, response, responsename, rss, stderror, vcov, weights
 using StatsBase: StatsBase, AbstractWeights, CoefTable, UnitWeights, Weights,
-                 adjr2, coef, coeftable, deviance, dof, dof_residual,
-                 loglikelihood, mean, nobs, nulldeviance, nullloglikelihood,
-                 r2, residuals, rss, uweights, weights
+                 mean, uweights
 using StatsFuns: StatsFuns, chisqccdf, fdistccdf, tdistccdf, tdistinvcdf
 @reexport using StatsModels
 using StatsModels: StatsModels, @formula, AbstractTerm, ConstantTerm,
@@ -72,9 +73,6 @@ include("estimators/kclass.jl")  # K-class estimators: LIML, Fuller, KClass
 include("fit_ols.jl")  # NEW: Pure OLS implementation
 include("fit.jl")      # REFACTORED: Just thin wrappers now
 include("partial_out.jl")
-# Export from StatsBase
-# export coef, coefnames, coeftable, responsename, vcov, stderror, nobs, dof, dof_residual, r2,  r², adjr2, adjr², islinear, deviance, nulldeviance, rss, mss, confint, predict, residuals, fit,
-#     loglikelihood, nullloglikelihood, dof_fes
 
 # Main estimation functions
 export ols, iv, fe
@@ -96,13 +94,13 @@ export FirstStageResult, first_stage
 
 # Utility functions
 export partial_out
-# fe,
-# has_iv,
-# has_fe,
-# Vcov,
-# esample  # Helper for subsetting vectors to estimation sample
 
-# Re-export commonly used CovarianceMatrices.jl estimators
+# Re-export StatsAPI functions for user convenience
+export coef, coefnames, coeftable, confint, stderror, vcov
+export nobs, dof, dof_residual
+export r2, adjr2, deviance, nulldeviance, loglikelihood, nullloglikelihood, rss
+export residuals, fitted, response, predict, modelmatrix, weights
+export islinear, responsename, leverage
 
 ##############################################################################
 ##

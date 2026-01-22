@@ -664,7 +664,7 @@ bread(m::OLSEstimator) = invchol(m.pp)
 Compute leverage values (diagonal of hat matrix H = X(X'X)^(-1)X').
 Uses h_i = ||X_i * U^(-1)||^2 where X'X = U'U for efficiency.
 """
-function leverage(m::OLSEstimator{T, <:OLSPredictorChol}) where {T}
+function StatsAPI.leverage(m::OLSEstimator{T, <:OLSPredictorChol}) where {T}
     # For Cholesky: X'X = U'U, so (X'X)^(-1) = U^(-1) * U^(-T)
     # h_i = X_i * U^(-1) * U^(-T) * X_i' = ||X_i * U^(-1)||^2
     X = modelmatrix(m)
@@ -675,7 +675,7 @@ function leverage(m::OLSEstimator{T, <:OLSPredictorChol}) where {T}
     return vec(sum(abs2, XU', dims = 1))
 end
 
-function leverage(m::OLSEstimator{T, <:OLSPredictorQR}) where {T}
+function StatsAPI.leverage(m::OLSEstimator{T, <:OLSPredictorQR}) where {T}
     # For QR: X = QR, so (X'X)^(-1) = R^(-1) R^(-T)
     # H = X(X'X)^(-1)X' and h_i = X_i (X'X)^(-1) X_i' = ||X_i R^(-1)||^2
     # Using R-factor directly avoids materializing full n×n Q matrix
@@ -686,7 +686,7 @@ function leverage(m::OLSEstimator{T, <:OLSPredictorQR}) where {T}
     return vec(sum(abs2, XRinv, dims = 2))
 end
 
-function leverage(m::OLSEstimator{T, <:OLSPredictorSweep}) where {T}
+function StatsAPI.leverage(m::OLSEstimator{T, <:OLSPredictorSweep}) where {T}
     # For Sweep: (X'X)^(-1) is stored directly in pp.invXX
     # h_i = X_i * (X'X)^(-1) * X_i'
     # Compute via Cholesky of invXX: invXX = L * L', then h_i = ||X_i * L||^2
@@ -888,7 +888,12 @@ function _cluster_robust_scale(k::CM.CR, m::OLSEstimator, n::Int)
     # For CR0, we still apply the (n-1)/(n-K) adjustment for consistency
     k_params = dof(m)
     k_fe_nonnested = _compute_nonnested_fe_dof(m, cluster_groups)
-    K = k_params + k_fe_nonnested
+
+    # Account for intercept absorbed by FE (Stata/fixest behavior)
+    # When FE absorbs an intercept, it should be counted in K
+    k_fe_intercept = (has_fe(m) && !model_hasintercept(m)) ? 1 : 0
+
+    K = k_params + k_fe_nonnested + k_fe_intercept
 
     # (n-1)/(n-K) adjustment (parameter DOF correction)
     # For CR0, this is the only adjustment applied
@@ -905,10 +910,11 @@ end
 Compute the DOF for fixed effects that are NOT nested in the cluster variable(s).
 
 A fixed effect is "nested" in a cluster if every FE group is contained within
-exactly one cluster group. When FE is nested, it doesn't add information beyond
-the clustering and shouldn't be counted in the K adjustment.
+exactly one cluster group (fixest behavior). When FE is nested, it doesn't add
+information beyond the clustering and shouldn't be counted in the K adjustment.
 
-Returns 0 if all FE are nested in the clustering, or the full k_fe if none are nested.
+Returns 0 if all FE are nested in the clustering, or the sum of ngroups for
+non-nested FEs.
 """
 function _compute_nonnested_fe_dof(m::OLSEstimator, cluster_groups)
     # If no fixed effects, return 0
@@ -918,25 +924,24 @@ function _compute_nonnested_fe_dof(m::OLSEstimator, cluster_groups)
     fe_names = m.fes.fe_names
     isempty(fe_names) && return 0
 
-    # Get cluster variable names from the stored clusters
-    cluster_names = keys(m.fes.clusters)
+    fe_groups = m.fes.fe_groups
+    ngroups = m.fes.ngroups
 
-    # Check if each FE is nested in at least one cluster
-    # For simplicity, we use a name-matching heuristic:
-    # FE is nested if its name matches one of the cluster names
-    # This is a reasonable approximation for most use cases
+    # Fallback for :minimal mode (no fe_groups stored)
+    if isempty(fe_groups)
+        return _compute_nonnested_fe_dof_by_name(m, cluster_groups)
+    end
+
+    # Extract cluster refs from the CR estimator's grouping objects
+    cluster_refs_list = [g.groups for g in cluster_groups]
+
     k_fe_nonnested = 0
-
-    # For now, use a simple approach: if FE name == cluster name, it's nested
-    # A more sophisticated approach would check actual nesting of the groupings
-    for fe_name in fe_names
-        is_nested = fe_name in cluster_names
+    for (i, fe_name) in enumerate(fe_names)
+        # A FE is nested if it's nested in ANY cluster dimension
+        is_nested = any(crefs -> _isnested_groups(fe_groups[i], crefs, ngroups[i]),
+            cluster_refs_list)
         if !is_nested
-            # This FE is not nested in any cluster - count its DOF
-            # We need to compute the DOF for just this FE
-            # For simplicity, assume each FE contributes proportionally
-            # In practice, this is conservative (may overcount)
-            k_fe_nonnested += _fe_dof_for_name(m, fe_name)
+            k_fe_nonnested += ngroups[i]
         end
     end
 
@@ -944,22 +949,56 @@ function _compute_nonnested_fe_dof(m::OLSEstimator, cluster_groups)
 end
 
 """
-    _fe_dof_for_name(m::OLSEstimator, fe_name::Symbol)
+    _isnested_groups(fe_refs::Vector{Int}, cluster_refs::Vector{Int}, n_fe_groups::Int) -> Bool
 
-Get the degrees of freedom absorbed by a specific fixed effect.
-For models with a single FE, this is just dof_fes(m).
-For multiple FE, we estimate based on the number of levels.
+Check if fixed effect groups are nested within cluster groups.
+
+A FE is nested in a cluster if every FE group belongs to exactly one cluster group.
+This is the fixest definition of nesting.
+
+# Arguments
+- `fe_refs`: Vector of FE group assignments (length n, values 1:n_fe_groups)
+- `cluster_refs`: Vector of cluster group assignments (length n)
+- `n_fe_groups`: Number of unique FE groups
+
+# Returns
+- `true` if every FE group maps to exactly one cluster group
 """
-function _fe_dof_for_name(m::OLSEstimator, fe_name::Symbol)
+function _isnested_groups(fe_refs::Vector{Int}, cluster_refs::Vector{Int}, n_fe_groups::Int)
+    entries = zeros(Int, n_fe_groups)
+    @inbounds for i in eachindex(fe_refs, cluster_refs)
+        feref, cref = fe_refs[i], cluster_refs[i]
+        if entries[feref] == 0
+            entries[feref] = cref
+        elseif entries[feref] != cref
+            return false
+        end
+    end
+    return true
+end
+
+"""
+    _compute_nonnested_fe_dof_by_name(m::OLSEstimator, cluster_groups)
+
+Fallback nesting detection using name-matching heuristic.
+Used when fe_groups are not available (e.g., :minimal save mode).
+
+FE is considered nested if its name matches one of the cluster names.
+"""
+function _compute_nonnested_fe_dof_by_name(m::OLSEstimator, cluster_groups)
     fe_names = m.fes.fe_names
+    ngroups = m.fes.ngroups
+    cluster_names = keys(m.fes.clusters)
 
-    # Single FE case - return all FE DOF
-    length(fe_names) == 1 && return dof_fes(m)
+    k_fe_nonnested = 0
+    for (i, fe_name) in enumerate(fe_names)
+        is_nested = fe_name in cluster_names
+        if !is_nested
+            k_fe_nonnested += ngroups[i]
+        end
+    end
 
-    # Multiple FE case - we don't have per-FE DOF stored
-    # As an approximation, split evenly (this is conservative)
-    # A better approach would store per-FE DOF during fitting
-    return dof_fes(m) ÷ length(fe_names)
+    return k_fe_nonnested
 end
 
 function CM.vcov(k::CM.AbstractAsymptoticVarianceEstimator, m::OLSEstimator; dofadjust = true, kwargs...)
@@ -1057,14 +1096,14 @@ bread(m::OLSMatrixEstimator) = invchol(m.pp)
 
 Compute leverage values (diagonal of hat matrix H = X(X'X)^(-1)X').
 """
-function leverage(m::OLSMatrixEstimator{T, <:OLSPredictorChol}) where {T}
+function StatsAPI.leverage(m::OLSMatrixEstimator{T, <:OLSPredictorChol}) where {T}
     X = modelmatrix(m)
     # Transpose for column-major access: sum(abs2, XU', dims=1)
     XU = X / m.pp.chol.U
     return vec(sum(abs2, XU', dims = 1))
 end
 
-function leverage(m::OLSMatrixEstimator{T, <:OLSPredictorQR}) where {T}
+function StatsAPI.leverage(m::OLSMatrixEstimator{T, <:OLSPredictorQR}) where {T}
     # For QR: (X'X)^(-1) = R^(-1) R^(-T)
     # h_i = ||X_i R^(-1)||^2, using R-factor directly avoids materializing full Q
     X = modelmatrix(m)
@@ -1073,7 +1112,7 @@ function leverage(m::OLSMatrixEstimator{T, <:OLSPredictorQR}) where {T}
     return vec(sum(abs2, XRinv, dims = 2))
 end
 
-function leverage(m::OLSMatrixEstimator{T, <:OLSPredictorSweep}) where {T}
+function StatsAPI.leverage(m::OLSMatrixEstimator{T, <:OLSPredictorSweep}) where {T}
     # For Sweep: (X'X)^(-1) is stored directly
     X_reduced = m.pp.X_reduced
     invXX = m.pp.invXX

@@ -236,10 +236,18 @@ function fit_ols(@nospecialize(df),
     # Use cluster_data which was already extracted and subsetted
     cluster_vars_nt = cluster_data
 
+    # Extract FE grouping vectors for nesting detection (skip for :minimal to save memory)
+    fe_groups = if save == :minimal || isempty(subfes)
+        Vector{Int}[]
+    else
+        [Vector{Int}(fe.refs) for fe in subfes]
+    end
+
     fes = OLSFixedEffects{T}(
         augmentdf,
         data_prep.fekeys,
         cluster_vars_nt,
+        fe_groups,
         dof_fes,
         ngroups_fes,
         iterations,

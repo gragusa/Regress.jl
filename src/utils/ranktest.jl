@@ -110,17 +110,32 @@ function ranktest(
         # The meat is E[mm'] where m is the vectorized moment condition
         # For now, use a simplified approach based on the original Vcov.jl
 
-        # Compute residuals from first stage
-        residuals_fs = Xendo_res - Z_res * Pi
+        # Compute residuals from first stage: residuals_fs = Xendo_res - Z_res * Pi
+        # Use in-place computation to avoid allocating a new matrix
+        residuals_fs = copy(Xendo_res)
+        BLAS.gemm!('N', 'N', -one(T), Z_res, Pi, one(T), residuals_fs)
 
         # Build moment matrix: kron of Z with residuals columns
+        # For k=1 (single endogenous), this simplifies to Z_res .* residuals_fs
+        # For k>1, we need the full Kronecker structure
         n = nobs
         kl = k * l
-        moment_matrix = zeros(T, n, kl)
-        for j in 1:k
-            for i in 1:l
-                idx = (j - 1) * l + i
-                moment_matrix[:, idx] = Z_res[:, i] .* residuals_fs[:, j]
+        if k == 1
+            # Optimized path for single endogenous: avoid Kronecker allocation
+            # moment_matrix[:, i] = Z_res[:, i] .* residuals_fs[:, 1]
+            moment_matrix = Z_res .* residuals_fs
+        else
+            moment_matrix = Matrix{T}(undef, n, kl)
+            @inbounds for j in 1:k
+                res_j = @view residuals_fs[:, j]
+                for i in 1:l
+                    idx = (j - 1) * l + i
+                    Z_i = @view Z_res[:, i]
+                    mm_col = @view moment_matrix[:, idx]
+                    @simd for row in 1:n
+                        mm_col[row] = Z_i[row] * res_j[row]
+                    end
+                end
             end
         end
 

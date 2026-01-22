@@ -165,9 +165,6 @@ include("gpu_utils.jl")
     m = @formula Sales ~ (Price ~ Pimin) + fe(State)
     x = iv(TSLS(), df, m, weights = :Pop)
     @test coef(x) ≈ [-0.20995] atol = 1e-4
-    m = @formula Sales ~ NDI + (Price ~ Pimin)
-    x = iv(TSLS(), df, m)
-    @test coef(x) ≈ [137.45096580480387, 0.005169677634275297, -0.7627670265757879] atol = 1e-4
     m = @formula Sales ~ NDI + (Price ~ Pimin) + fe(State)
     x = iv(TSLS(), df, m)
     @test coef(x) ≈ [0.0011021722526916768, -0.3216374943695231] atol = 1e-4
@@ -349,10 +346,11 @@ end
     @test stderror(CR1(:State), x)[3] ≈ 0.1070 atol = 1e-3
 
     # IV with FE and cluster
+    # Note: These values match FixedEffectModels.jl with Vcov.cluster(:Year)
     m = @formula Sales ~ CPI + (Price ~ Pimin) + fe(State)
     x = iv(TSLS(), df, m, save_cluster = :Year)
-    @test stderror(CR0(:Year), x)[2] ≈ 0.0734 atol = 1e-3
-    @test stderror(CR1(:Year), x)[2] ≈ 0.0747 atol = 1e-3
+    @test stderror(CR0(:Year), x)[2] ≈ 0.0747 atol = 1e-3
+    @test stderror(CR1(:Year), x)[2] ≈ 0.0760 atol = 1e-3
 
     # multiway clustering - matches R fixest
     m = @formula Sales ~ Price

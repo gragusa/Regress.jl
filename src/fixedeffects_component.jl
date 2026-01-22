@@ -12,6 +12,9 @@ struct OLSFixedEffects{T <: AbstractFloat}
     # Cluster variables for robust vcov
     clusters::NamedTuple           # Cluster identifiers (subsetted to esample)
 
+    # Fixed effects grouping vectors for nesting detection
+    fe_groups::Vector{Vector{Int}} # One ref vector per FE dimension (empty for :minimal)
+
     # Fixed effects metadata
     dof_fes::Int                   # Degrees of freedom absorbed by FEs
     ngroups::Vector{Int}           # Number of groups per FE dimension
@@ -46,6 +49,7 @@ function build_empty_fes(::Type{T}) where {T <: AbstractFloat}
         DataFrame(),
         Symbol[],
         NamedTuple(),
+        Vector{Int}[],  # Empty fe_groups
         0,
         Int[],
         0,

@@ -266,8 +266,9 @@ function _iv_first_stage_fstats_standard(
 
     # Extract the relevant part of Pi (instruments only)
     Pip = Pi[(k_exo + 1):end, :]
+    k_endo = size(Xendo, 2)
 
-    # Compute joint first-stage F-statistic
+    # Compute joint first-stage F-statistic (Kleibergen-Paap)
     F_kp,
     p_kp = compute_first_stage_fstat(
         Xendo_res, Z_res, Pip,
@@ -671,11 +672,16 @@ function fit_tsls(@nospecialize(df),
     ## Create PostEstimationData
     ##########################################################################
 
+    # FE nesting detection data
+    ngroups_fes = [nunique(fe) for fe in subfes]
+    fe_groups = Vector{Int}[fe.refs for fe in subfes]
+
     postestimation_data = PostEstimationDataIV(
         convert(Matrix{T}, Xhat), convert(Matrix{T}, X),
         cholesky(Symmetric(XhatXhat)), invXhatXhat, wts, cluster_data,
         basis_coef, first_stage_data,
-        Matrix{T}(undef, 0, 0), T(NaN)
+        Matrix{T}(undef, 0, 0), T(NaN),
+        fe_groups, data_prep.fekeys, ngroups_fes
     )
 
     ##########################################################################

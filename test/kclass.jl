@@ -8,7 +8,9 @@ using Test
 using Regress
 using Regress.StableRNGs: StableRNG
 using DataFrames
-using StatsBase: coef, vcov
+using CSV
+using CategoricalArrays: categorical
+using StatsBase: coef, vcov, stderror, r2
 using CovarianceMatrices: HC1, HC3, CR1
 
 # Helper to create test data
@@ -149,4 +151,92 @@ end
 
     @test length(coef(m)) == 1  # Only x coefficient (no intercept with FE)
     @test m.postestimation.kappa !== nothing
+end
+
+##############################################################################
+##
+## Stata ivreg2 validation tests
+##
+##############################################################################
+
+@testset "LIML with state dummies - Stata ivreg2 validation" begin
+    df = DataFrame(CSV.File(joinpath(dirname(pathof(Regress)), "../test/data/iv_nested.csv")))
+    df.state_id = categorical(df.state_id)
+
+    # LIML with state as categorical (dummy variables, not absorbed FE)
+    m = iv(LIML(), df, @formula(y ~ x1 + x2 + state_id + (endo ~ z)))
+
+    # Coefficients from Stata ivreg2:
+    # . ivreg2 y (endo=z) x1 x2 i.state_id, liml
+    @test coef(m)[1] ≈ -0.1403594 atol=0.01  # intercept
+    @test coef(m)[2] ≈ 0.4484096 atol=0.01   # x1
+    @test coef(m)[3] ≈ 0.2649239 atol=0.01   # x2
+    # state_id dummies (reference = state 1)
+    @test coef(m)[4] ≈ 2.700246 atol=0.01    # state_id: 2
+    @test coef(m)[5] ≈ 2.866612 atol=0.01    # state_id: 3
+    @test coef(m)[6] ≈ 0.2536304 atol=0.01   # state_id: 4
+    @test coef(m)[7] ≈ 2.053986 atol=0.01    # state_id: 5
+    @test coef(m)[8] ≈ 2.033306 atol=0.01    # endo
+
+    # R-squared
+    @test r2(m) ≈ 0.9142 atol=0.01
+end
+
+@testset "LIML with cluster SE - Stata ivreg2 validation" begin
+    df = DataFrame(CSV.File(joinpath(dirname(pathof(Regress)), "../test/data/iv_nested.csv")))
+
+    # LIML without FE, with cluster-robust SE
+    # . ivreg2 y (endo=z) x1 x2 , liml cluster(state_id)
+    m = iv(LIML(), df, @formula(y ~ x1 + x2 + (endo ~ z)), save_cluster=:state_id)
+
+    # Coefficients
+    @test coef(m)[1] ≈ 1.448071 atol=0.01   # intercept
+    @test coef(m)[2] ≈ 0.4741162 atol=0.01  # x1
+    @test coef(m)[3] ≈ 0.3173924 atol=0.01  # x2
+    @test coef(m)[4] ≈ 2.001556 atol=0.01   # endo
+
+    # Cluster-robust SE (CR1)
+    # Note: Small differences from Stata expected due to finite-sample corrections
+    se_cr1 = stderror(CR1(:state_id), m)
+    @test se_cr1[1] ≈ 0.5667004 atol=0.10   # intercept SE (wider tolerance for cluster SE)
+    @test se_cr1[2] ≈ 0.0803681 atol=0.02   # x1 SE
+    @test se_cr1[3] ≈ 0.0642344 atol=0.02   # x2 SE
+    @test se_cr1[4] ≈ 0.0673868 atol=0.02   # endo SE
+
+    # R-squared
+    @test r2(m) ≈ 0.8554 atol=0.01
+end
+
+##############################################################################
+##
+## Nested FE + Cluster SE tests
+##
+##############################################################################
+
+@testset "Nested FE with cluster at parent level" begin
+    df = DataFrame(CSV.File(joinpath(dirname(pathof(Regress)), "../test/data/iv_nested.csv")))
+
+    # County FE is nested in state_id cluster
+    # When FE is nested in cluster, DOF adjustment should account for nesting
+    m = ols(df, @formula(y ~ x1 + x2 + endo + fe(county_id)), save_cluster=:state_id)
+
+    se_cr1 = stderror(CR1(:state_id), m)
+    @test all(isfinite, se_cr1)
+
+    # Compare with state FE (non-nested - state is the cluster level)
+    m2 = ols(df, @formula(y ~ x1 + x2 + endo + fe(state_id)), save_cluster=:state_id)
+    se_cr1_state = stderror(CR1(:state_id), m2)
+    @test all(isfinite, se_cr1_state)
+end
+
+@testset "LIML with nested FE and cluster" begin
+    df = DataFrame(CSV.File(joinpath(dirname(pathof(Regress)), "../test/data/iv_nested.csv")))
+
+    # LIML with state FE (absorbed), cluster at state level
+    m = iv(LIML(), df, @formula(y ~ x1 + x2 + (endo ~ z) + fe(state_id)), save_cluster=:state_id)
+
+    se_cr1 = stderror(CR1(:state_id), m)
+    @test all(isfinite, se_cr1)
+    # LIML kappa should be >= 1, allowing for floating point tolerance
+    @test m.postestimation.kappa >= 1.0 - 1e-10
 end

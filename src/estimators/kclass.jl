@@ -472,6 +472,10 @@ function fit_kclass_estimator(
     # - Adj: the adjustment matrix
     # - kappa: the K-class parameter
 
+    # FE nesting detection data
+    ngroups_fes = [nunique(fe) for fe in subfes]
+    fe_groups = Vector{Int}[fe.refs for fe in subfes]
+
     postestimation_data = PostEstimationDataIV(
         convert(Matrix{T}, Adj_reordered),  # X: use Adj for vcov moment matrix
         convert(Matrix{T}, X),               # Xhat: original X
@@ -482,7 +486,8 @@ function fit_kclass_estimator(
         basis_coef,
         first_stage_data,
         convert(Matrix{T}, Adj_reordered),  # Adj: K-class adjustment matrix
-        kappa                                # kappa: K-class parameter
+        kappa,                               # kappa: K-class parameter
+        fe_groups, data_prep.fekeys, ngroups_fes
     )
 
     ##############################################################################

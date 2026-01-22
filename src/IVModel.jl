@@ -109,6 +109,9 @@ Container for post-estimation data required for IV variance-covariance calculati
 - `first_stage_data::FirstStageData{T}`: First-stage data for F-statistics (empty if not computed)
 - `Adj::Matrix{T}`: K-class adjustment matrix (empty 0×0 for TSLS)
 - `kappa::T`: K-class parameter (NaN for TSLS, k_LIML for LIML, etc.)
+- `fe_groups::Vector{Vector{Int}}`: FE grouping vectors for nesting detection (one per FE dimension)
+- `fe_names::Vector{Symbol}`: Names of FE variables
+- `ngroups::Vector{Int}`: Number of groups per FE dimension
 
 Use `has_first_stage_data(pe.first_stage_data)` to check if first-stage data is available.
 Use `has_kclass_adj(pe)` to check if K-class adjustment matrix is available.
@@ -124,6 +127,10 @@ struct PostEstimationDataIV{T, W <: AbstractWeights}
     first_stage_data::FirstStageData{T}
     Adj::Matrix{T}              # Empty (0×0) for TSLS, filled for K-class
     kappa::T                    # NaN for TSLS
+    # FE nesting detection fields
+    fe_groups::Vector{Vector{Int}}   # One ref vector per FE dimension
+    fe_names::Vector{Symbol}          # Names of FE variables
+    ngroups::Vector{Int}              # Number of groups per FE dimension
 end
 
 """
@@ -307,11 +314,14 @@ bread(m::IVEstimator) = m.postestimation.invXX
 
 Compute leverage values (diagonal of hat matrix) for IV models.
 For IV: h_i = X_i * (X'X)^(-1) * X_i' where X contains predicted endogenous.
+For K-class: Uses Adj matrix (stored in pe.Adj) when X is empty.
 """
-function leverage(m::IVEstimator)
+function StatsAPI.leverage(m::IVEstimator)
     isnothing(m.postestimation) && error("Model does not have post-estimation data stored.")
-    X = m.postestimation.X
-    invXX = m.postestimation.invXX
+    pe = m.postestimation
+    # For K-class, pe.X is empty and we use pe.Adj instead
+    X = has_kclass_adj(pe) ? pe.Adj : pe.X
+    invXX = pe.invXX
     # h_i = X_i * invXX * X_i'
     return vec(sum(X .* (X * invXX), dims = 2))
 end
@@ -554,7 +564,18 @@ end
     _cluster_robust_scale_iv(k::_CM.CR, m::IVEstimator, n::Int)
 
 Compute the scale factor for cluster-robust variance estimation for IV models.
-Uses fixest-style small sample correction.
+Uses fixest-style small sample correction with FE nesting detection.
+
+# Formula
+`scale = n * G/(G-1) * (n-1)/(n-K)` where:
+- G = number of clusters (for multi-way: minimum cluster count)
+- K = k + k_fe_nonnested + k_fe_intercept (only FE NOT nested in cluster are counted)
+
+With K.fixef = "nonnested" (fixest default):
+- FE nested in the cluster variable are NOT counted in K
+- FE NOT nested in the cluster variable ARE counted in K
+
+This matches R fixest's behavior for IV models with cluster-robust standard errors.
 """
 function _cluster_robust_scale_iv(k::_CM.CR, m::IVEstimator, n::Int)
     cluster_groups = k.g
@@ -563,12 +584,116 @@ function _cluster_robust_scale_iv(k::_CM.CR, m::IVEstimator, n::Int)
     # G/(G-1) adjustment - only for CR1, CR2, CR3
     G_adj = k isa _CM.CR0 ? 1.0 : G / (G - 1)
 
-    # For IV, K = k (number of params) - we don't have FE nesting logic for IV
-    # This is a simpler case since IV models typically don't have absorbed FE DOF
-    K = dof(m)
+    # Compute K for (n-1)/(n-K) adjustment using K.fixef = "nonnested"
+    # K = k (non-FE params) + FE DOF for FE not nested in cluster
+    k_params = dof(m)
+    k_fe_nonnested = _compute_nonnested_fe_dof_iv(m, cluster_groups)
+
+    # Account for intercept absorbed by FE (Stata/fixest behavior)
+    # When FE absorbs an intercept, it should be counted in K
+    k_fe_intercept = (has_fe(m) && !model_hasintercept(m)) ? 1 : 0
+
+    K = k_params + k_fe_nonnested + k_fe_intercept
+
+    # (n-1)/(n-K) adjustment
     K_adj = (n - 1) / (n - K)
 
     return convert(Float64, n * G_adj * K_adj)
+end
+
+"""
+    _compute_nonnested_fe_dof_iv(m::IVEstimator, cluster_groups)
+
+Compute the DOF for fixed effects that are NOT nested in the cluster variable(s).
+
+A fixed effect is "nested" in a cluster if every FE group is contained within
+exactly one cluster group (fixest behavior). When FE is nested, it doesn't add
+information beyond the clustering and shouldn't be counted in the K adjustment.
+
+Returns 0 if all FE are nested in the clustering, or the sum of ngroups for
+non-nested FEs.
+"""
+function _compute_nonnested_fe_dof_iv(m::IVEstimator, cluster_groups)
+    # If no fixed effects, return 0
+    dof_fes(m) == 0 && return 0
+
+    # Get FE info from postestimation data
+    pe = m.postestimation
+    isnothing(pe) && return 0
+
+    fe_names = pe.fe_names
+    isempty(fe_names) && return 0
+
+    fe_groups = pe.fe_groups
+    ngroups = pe.ngroups
+
+    # Fallback if fe_groups not stored
+    if isempty(fe_groups)
+        return _compute_nonnested_fe_dof_by_name_iv(m, cluster_groups)
+    end
+
+    # Extract cluster refs from the CR estimator's grouping objects
+    cluster_refs_list = [g.groups for g in cluster_groups]
+
+    k_fe_nonnested = 0
+    for (i, fe_name) in enumerate(fe_names)
+        # A FE is nested if it's nested in ANY cluster dimension
+        is_nested = any(crefs -> _isnested_groups_iv(fe_groups[i], crefs, ngroups[i]),
+            cluster_refs_list)
+        if !is_nested
+            k_fe_nonnested += ngroups[i]
+        end
+    end
+
+    return k_fe_nonnested
+end
+
+"""
+    _isnested_groups_iv(fe_refs::Vector{Int}, cluster_refs::Vector{Int}, n_fe_groups::Int) -> Bool
+
+Check if fixed effect groups are nested within cluster groups for IV models.
+
+A FE is nested in a cluster if every FE group belongs to exactly one cluster group.
+This is the fixest definition of nesting.
+"""
+function _isnested_groups_iv(fe_refs::Vector{Int}, cluster_refs::Vector{Int}, n_fe_groups::Int)
+    entries = zeros(Int, n_fe_groups)
+    @inbounds for i in eachindex(fe_refs, cluster_refs)
+        feref, cref = fe_refs[i], cluster_refs[i]
+        if entries[feref] == 0
+            entries[feref] = cref
+        elseif entries[feref] != cref
+            return false
+        end
+    end
+    return true
+end
+
+"""
+    _compute_nonnested_fe_dof_by_name_iv(m::IVEstimator, cluster_groups)
+
+Fallback nesting detection using name-matching heuristic for IV models.
+Used when fe_groups are not available.
+
+FE is considered nested if its name matches one of the cluster names.
+"""
+function _compute_nonnested_fe_dof_by_name_iv(m::IVEstimator, cluster_groups)
+    pe = m.postestimation
+    isnothing(pe) && return 0
+
+    fe_names = pe.fe_names
+    ngroups = pe.ngroups
+    cluster_names = keys(pe.cluster_vars)
+
+    k_fe_nonnested = 0
+    for (i, fe_name) in enumerate(fe_names)
+        is_nested = fe_name in cluster_names
+        if !is_nested
+            k_fe_nonnested += ngroups[i]
+        end
+    end
+
+    return k_fe_nonnested
 end
 
 ##############################################################################
