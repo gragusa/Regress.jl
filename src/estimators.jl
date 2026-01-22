@@ -120,3 +120,25 @@ struct KClass <: AbstractIVEstimator
     kappa::Float64
     KClass(kappa::Real) = new(Float64(kappa))
 end
+
+##############################################################################
+##
+## Show Methods for IV Estimator Types
+##
+##############################################################################
+
+Base.show(io::IO, ::TSLS) = print(io, "TSLS()")
+
+Base.show(io::IO, ::LIML) = print(io, "LIML()")
+
+function Base.show(io::IO, e::Fuller)
+    if e.a == 1.0
+        print(io, "Fuller()")
+    else
+        print(io, "Fuller(", e.a, ")")
+    end
+end
+
+function Base.show(io::IO, e::KClass)
+    print(io, "KClass(", e.kappa, ")")
+end

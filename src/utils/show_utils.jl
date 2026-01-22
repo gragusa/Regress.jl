@@ -8,6 +8,7 @@
 
 # ANSI color codes for terminal output
 const ANSI_GREEN = "\e[32m"
+const ANSI_YELLOW = "\e[33m"
 const ANSI_RESET = "\e[0m"
 
 # Box-drawing character for horizontal lines

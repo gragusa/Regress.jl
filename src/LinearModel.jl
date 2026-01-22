@@ -608,10 +608,13 @@ function Base.show(io::IO, m::OLSEstimator)
          for i in 1:length(A)]
     totwidth = compute_table_width(A, colnms)
 
-    # Title: just "OLS"
+    # Title: OLS, right-aligned, yellow
     ctitle = "OLS"
-    halfwidth = max(0, div(totwidth - length(ctitle), 2))
-    print(io, " " ^ halfwidth * ctitle * " " ^ halfwidth)
+    if supports_color(io)
+        print(io, lpad(ANSI_YELLOW * ctitle * ANSI_RESET, totwidth - 2 + length(ANSI_YELLOW) + length(ANSI_RESET)))
+    else
+        print(io, lpad(ctitle, totwidth - 2))
+    end
     ctop = top(m)
     for i in 1:size(ctop, 1)
         ctop[i, 1] = ctop[i, 1] * ":"
@@ -657,7 +660,7 @@ function Base.show(io::IO, ::MIME"text/html", m::OLSEstimator)
     rownms = ct.rownms;
     colnms = ct.colnms;
 
-    # Start table with "OLS" as caption
+    # Start table with OLS as caption
     html_table_start(io; class = "regress-table regress-ols", caption = "OLS")
 
     # Summary statistics section
