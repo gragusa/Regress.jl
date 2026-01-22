@@ -54,10 +54,10 @@ function run_cuda_benchmarks(fixest_times::Dict{String, Float64})
 
     formula_reg = REG.@formula(y ~ x1 + x2)
 
-    REG.ols(df1, formula_reg; method=:CUDA)
+    REG.ols(df1, formula_reg; method = :CUDA)
     CUDA.synchronize()
     t_reg = @benchmark begin
-        REG.ols($df1, $formula_reg; method=:CUDA)
+        REG.ols($df1, $formula_reg; method = :CUDA)
         CUDA.synchronize()
     end samples=5 evals=1
     cuda_t = median(t_reg).time / 1e9
@@ -72,11 +72,11 @@ function run_cuda_benchmarks(fixest_times::Dict{String, Float64})
     println("\n  $scenario")
 
     cluster_vec = df1.id2
-    m = REG.ols(df1, formula_reg; method=:CUDA)
+    m = REG.ols(df1, formula_reg; method = :CUDA)
     CUDA.synchronize()
     vcov(CR1(cluster_vec), m)
     t_reg = @benchmark begin
-        m = REG.ols($df1, $formula_reg; method=:CUDA)
+        m=REG.ols($df1, $formula_reg; method = :CUDA)
         CUDA.synchronize()
         vcov(CR1($cluster_vec), m)
     end samples=5 evals=1
@@ -93,10 +93,10 @@ function run_cuda_benchmarks(fixest_times::Dict{String, Float64})
 
     formula_reg_fe = REG.@formula(y ~ x1 + x2 + REG.fe(id1))
 
-    REG.ols(df1, formula_reg_fe; method=:CUDA)
+    REG.ols(df1, formula_reg_fe; method = :CUDA)
     CUDA.synchronize()
     t_reg = @benchmark begin
-        REG.ols($df1, $formula_reg_fe; method=:CUDA)
+        REG.ols($df1, $formula_reg_fe; method = :CUDA)
         CUDA.synchronize()
     end samples=5 evals=1
     cuda_t = median(t_reg).time / 1e9
@@ -110,11 +110,11 @@ function run_cuda_benchmarks(fixest_times::Dict{String, Float64})
     scenario = "FE + cluster: | id1"
     println("\n  $scenario")
 
-    m = REG.ols(df1, formula_reg_fe, save_cluster=:id1; method=:CUDA)
+    m = REG.ols(df1, formula_reg_fe, save_cluster = :id1; method = :CUDA)
     CUDA.synchronize()
     vcov(CR1(:id1), m)
     t_reg = @benchmark begin
-        m = REG.ols($df1, $formula_reg_fe, save_cluster=:id1; method=:CUDA)
+        m=REG.ols($df1, $formula_reg_fe, save_cluster = :id1; method = :CUDA)
         CUDA.synchronize()
         vcov(CR1(:id1), m)
     end samples=5 evals=1
@@ -131,10 +131,10 @@ function run_cuda_benchmarks(fixest_times::Dict{String, Float64})
 
     formula_reg_2fe = REG.@formula(y ~ x1 + x2 + REG.fe(id1) + REG.fe(id2))
 
-    REG.ols(df1, formula_reg_2fe; method=:CUDA)
+    REG.ols(df1, formula_reg_2fe; method = :CUDA)
     CUDA.synchronize()
     t_reg = @benchmark begin
-        REG.ols($df1, $formula_reg_2fe; method=:CUDA)
+        REG.ols($df1, $formula_reg_2fe; method = :CUDA)
         CUDA.synchronize()
     end samples=5 evals=1
     cuda_t = median(t_reg).time / 1e9
@@ -160,10 +160,10 @@ function run_cuda_benchmarks(fixest_times::Dict{String, Float64})
 
     formula_reg_2fe = REG.@formula(y ~ x1 + x2 + REG.fe(id1) + REG.fe(id2))
 
-    REG.ols(df2, formula_reg_2fe; method=:CUDA)
+    REG.ols(df2, formula_reg_2fe; method = :CUDA)
     CUDA.synchronize()
     t_reg = @benchmark begin
-        REG.ols($df2, $formula_reg_2fe; method=:CUDA)
+        REG.ols($df2, $formula_reg_2fe; method = :CUDA)
         CUDA.synchronize()
     end samples=5 evals=1
     cuda_t = median(t_reg).time / 1e9
@@ -190,11 +190,11 @@ function run_cuda_benchmarks(fixest_times::Dict{String, Float64})
 
     formula_reg_1fe = REG.@formula(ln_y ~ X1 + REG.fe(id1))
 
-    m = REG.ols(df3, formula_reg_1fe, save_cluster=:id1; method=:CUDA)
+    m = REG.ols(df3, formula_reg_1fe, save_cluster = :id1; method = :CUDA)
     CUDA.synchronize()
     vcov(CR1(:id1), m)
     t_reg = @benchmark begin
-        m = REG.ols($df3, $formula_reg_1fe, save_cluster=:id1; method=:CUDA)
+        m=REG.ols($df3, $formula_reg_1fe, save_cluster = :id1; method = :CUDA)
         CUDA.synchronize()
         vcov(CR1(:id1), m)
     end samples=5 evals=1
@@ -211,11 +211,11 @@ function run_cuda_benchmarks(fixest_times::Dict{String, Float64})
 
     formula_reg_2fe = REG.@formula(ln_y ~ X1 + REG.fe(id1) + REG.fe(id2))
 
-    m = REG.ols(df3, formula_reg_2fe, save_cluster=:id1; method=:CUDA)
+    m = REG.ols(df3, formula_reg_2fe, save_cluster = :id1; method = :CUDA)
     CUDA.synchronize()
     vcov(CR1(:id1), m)
     t_reg = @benchmark begin
-        m = REG.ols($df3, $formula_reg_2fe, save_cluster=:id1; method=:CUDA)
+        m=REG.ols($df3, $formula_reg_2fe, save_cluster = :id1; method = :CUDA)
         CUDA.synchronize()
         vcov(CR1(:id1), m)
     end samples=5 evals=1
@@ -232,11 +232,11 @@ function run_cuda_benchmarks(fixest_times::Dict{String, Float64})
 
     formula_reg_3fe = REG.@formula(ln_y ~ X1 + REG.fe(id1) + REG.fe(id2) + REG.fe(id3))
 
-    m = REG.ols(df3, formula_reg_3fe, save_cluster=:id1; method=:CUDA)
+    m = REG.ols(df3, formula_reg_3fe, save_cluster = :id1; method = :CUDA)
     CUDA.synchronize()
     vcov(CR1(:id1), m)
     t_reg = @benchmark begin
-        m = REG.ols($df3, $formula_reg_3fe, save_cluster=:id1; method=:CUDA)
+        m=REG.ols($df3, $formula_reg_3fe, save_cluster = :id1; method = :CUDA)
         CUDA.synchronize()
         vcov(CR1(:id1), m)
     end samples=5 evals=1
@@ -283,7 +283,7 @@ function main()
     end
 
     # Run fixest with max threads for fair comparison
-    fixest_times = run_fixest_benchmarks(nthreads; script_dir=@__DIR__)
+    fixest_times = run_fixest_benchmarks(nthreads; script_dir = @__DIR__)
 
     # Run CUDA benchmarks
     results = run_cuda_benchmarks(fixest_times)

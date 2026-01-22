@@ -187,7 +187,7 @@ end
 
     # LIML without FE, with cluster-robust SE
     # . ivreg2 y (endo=z) x1 x2 , liml cluster(state_id)
-    m = iv(LIML(), df, @formula(y ~ x1 + x2 + (endo ~ z)), save_cluster=:state_id)
+    m = iv(LIML(), df, @formula(y ~ x1 + x2 + (endo ~ z)), save_cluster = :state_id)
 
     # Coefficients
     @test coef(m)[1] ≈ 1.448071 atol=0.01   # intercept
@@ -218,13 +218,13 @@ end
 
     # County FE is nested in state_id cluster
     # When FE is nested in cluster, DOF adjustment should account for nesting
-    m = ols(df, @formula(y ~ x1 + x2 + endo + fe(county_id)), save_cluster=:state_id)
+    m = ols(df, @formula(y ~ x1 + x2 + endo + fe(county_id)), save_cluster = :state_id)
 
     se_cr1 = stderror(CR1(:state_id), m)
     @test all(isfinite, se_cr1)
 
     # Compare with state FE (non-nested - state is the cluster level)
-    m2 = ols(df, @formula(y ~ x1 + x2 + endo + fe(state_id)), save_cluster=:state_id)
+    m2 = ols(df, @formula(y ~ x1 + x2 + endo + fe(state_id)), save_cluster = :state_id)
     se_cr1_state = stderror(CR1(:state_id), m2)
     @test all(isfinite, se_cr1_state)
 end
@@ -233,7 +233,7 @@ end
     df = DataFrame(CSV.File(joinpath(dirname(pathof(Regress)), "../test/data/iv_nested.csv")))
 
     # LIML with state FE (absorbed), cluster at state level
-    m = iv(LIML(), df, @formula(y ~ x1 + x2 + (endo ~ z) + fe(state_id)), save_cluster=:state_id)
+    m = iv(LIML(), df, @formula(y ~ x1 + x2 + (endo ~ z) + fe(state_id)), save_cluster = :state_id)
 
     se_cr1 = stderror(CR1(:state_id), m)
     @test all(isfinite, se_cr1)

@@ -65,10 +65,10 @@ function main()
     end
 
     # Run fixest with matching threads
-    fixest_times = run_fixest_benchmarks(nthreads; script_dir=@__DIR__)
+    fixest_times = run_fixest_benchmarks(nthreads; script_dir = @__DIR__)
 
     # Run Julia benchmarks
-    results = run_julia_benchmarks(fixest_times; method=:cpu, nthreads=nthreads)
+    results = run_julia_benchmarks(fixest_times; method = :cpu, nthreads = nthreads)
 
     # Generate report
     config = Dict{String, Any}(
@@ -80,8 +80,8 @@ function main()
         "MKL Active" => is_mkl,
         "R fixest Threads" => nthreads,
         "Description" => is_mkl ?
-            "Using Intel MKL for optimized BLAS operations" :
-            "MKL not available - using default BLAS"
+                         "Using Intel MKL for optimized BLAS operations" :
+                         "MKL not available - using default BLAS"
     )
 
     md_content = generate_markdown_header(BENCHMARK_NAME, config)
