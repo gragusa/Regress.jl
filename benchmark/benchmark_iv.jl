@@ -35,7 +35,8 @@ function generate_iv_dataset()
         endog = endog,
         z1 = z1, z2 = z2,
         y = y
-    ), N
+    ),
+    N
 end
 
 fmt(x) = @sprintf("%.3f", x)

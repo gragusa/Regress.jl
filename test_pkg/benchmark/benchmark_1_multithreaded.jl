@@ -39,10 +39,10 @@ function main()
     end
 
     # Run fixest with same number of threads
-    fixest_times = run_fixest_benchmarks(nthreads; script_dir=@__DIR__)
+    fixest_times = run_fixest_benchmarks(nthreads; script_dir = @__DIR__)
 
     # Run Julia benchmarks with matching threads
-    results = run_julia_benchmarks(fixest_times; method=:cpu, nthreads=nthreads)
+    results = run_julia_benchmarks(fixest_times; method = :cpu, nthreads = nthreads)
 
     # Generate report
     config = Dict{String, Any}(
