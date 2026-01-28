@@ -1,31 +1,19 @@
-##############################################################################
-##
-## K-Class Estimators Tests (LIML, Fuller, KClass)
-##
-##############################################################################
+@testitem "LIML basic" tags = [:iv, :kclass, :smoke] begin
+    using Regress
+    using Regress.StableRNGs: StableRNG
+    using DataFrames
+    using StatsBase: coef, vcov
 
-using Test
-using Regress
-using Regress.StableRNGs: StableRNG
-using DataFrames
-using CSV
-using CategoricalArrays: categorical
-using StatsBase: coef, vcov, stderror, r2
-using CovarianceMatrices: HC1, HC3, CR1
-
-# Helper to create test data
-function create_test_data(n = 500; rng = StableRNG(42))
+    # Helper to create test data
+    n = 500
+    rng = StableRNG(42)
     z1 = randn(rng, n)
     z2 = randn(rng, n)
     e = randn(rng, n)
     u = 0.5 .* e .+ randn(rng, n)
     x = 0.5 .* z1 .+ 0.3 .* z2 .+ u
     y = 2.0 .* x .+ 1.0 .+ e
-    DataFrame(y = y, x = x, z1 = z1, z2 = z2)
-end
-
-@testset "LIML basic functionality" begin
-    df = create_test_data()
+    df = DataFrame(y = y, x = x, z1 = z1, z2 = z2)
 
     m = iv(LIML(), df, @formula(y ~ (x ~ z1 + z2)))
 
@@ -35,8 +23,22 @@ end
     @test m.estimator isa LIML
 end
 
-@testset "Fuller basic functionality" begin
-    df = create_test_data()
+@testitem "Fuller basic" tags = [:iv, :kclass] begin
+    using Regress
+    using Regress.StableRNGs: StableRNG
+    using DataFrames
+    using StatsBase: coef
+
+    # Helper to create test data
+    n = 500
+    rng = StableRNG(42)
+    z1 = randn(rng, n)
+    z2 = randn(rng, n)
+    e = randn(rng, n)
+    u = 0.5 .* e .+ randn(rng, n)
+    x = 0.5 .* z1 .+ 0.3 .* z2 .+ u
+    y = 2.0 .* x .+ 1.0 .+ e
+    df = DataFrame(y = y, x = x, z1 = z1, z2 = z2)
 
     # Test Fuller with default a=1
     m1 = iv(Fuller(), df, @formula(y ~ (x ~ z1 + z2)))
@@ -53,8 +55,22 @@ end
     @test m1.postestimation.kappa < m_liml.postestimation.kappa
 end
 
-@testset "KClass(1.0) equals TSLS" begin
-    df = create_test_data()
+@testitem "KClass(1.0) equals TSLS" tags = [:iv, :kclass, :tsls] begin
+    using Regress
+    using Regress.StableRNGs: StableRNG
+    using DataFrames
+    using StatsBase: coef
+
+    # Helper to create test data
+    n = 500
+    rng = StableRNG(42)
+    z1 = randn(rng, n)
+    z2 = randn(rng, n)
+    e = randn(rng, n)
+    u = 0.5 .* e .+ randn(rng, n)
+    x = 0.5 .* z1 .+ 0.3 .* z2 .+ u
+    y = 2.0 .* x .+ 1.0 .+ e
+    df = DataFrame(y = y, x = x, z1 = z1, z2 = z2)
 
     m_tsls = iv(TSLS(), df, @formula(y ~ (x ~ z1 + z2)))
     m_k1 = iv(KClass(1.0), df, @formula(y ~ (x ~ z1 + z2)))
@@ -63,8 +79,23 @@ end
     @test coef(m_tsls) ≈ coef(m_k1) atol=1e-6
 end
 
-@testset "K-class vcov works" begin
-    df = create_test_data()
+@testitem "K-class vcov" tags = [:iv, :kclass, :vcov] begin
+    using Regress
+    using Regress.StableRNGs: StableRNG
+    using DataFrames
+    using StatsBase: coef, vcov, stderror
+    using CovarianceMatrices: HC3
+
+    # Helper to create test data
+    n = 500
+    rng = StableRNG(42)
+    z1 = randn(rng, n)
+    z2 = randn(rng, n)
+    e = randn(rng, n)
+    u = 0.5 .* e .+ randn(rng, n)
+    x = 0.5 .* z1 .+ 0.3 .* z2 .+ u
+    y = 2.0 .* x .+ 1.0 .+ e
+    df = DataFrame(y = y, x = x, z1 = z1, z2 = z2)
 
     m = iv(LIML(), df, @formula(y ~ (x ~ z1 + z2)))
 
@@ -83,7 +114,13 @@ end
     @test all(isfinite, m_hc3.se)
 end
 
-@testset "Cluster-robust vcov for K-class" begin
+@testitem "K-class cluster" tags = [:iv, :kclass, :cluster] begin
+    using Regress
+    using Regress.StableRNGs: StableRNG
+    using DataFrames
+    using StatsBase: vcov, stderror
+    using CovarianceMatrices: CR1
+
     rng = StableRNG(42)
     n = 500
     z1 = randn(rng, n)
@@ -109,7 +146,12 @@ end
     @test all(isfinite, m_cr.se)
 end
 
-@testset "Multiple endogenous variables" begin
+@testitem "K-class multiple endogenous" tags = [:iv, :kclass] begin
+    using Regress
+    using Regress.StableRNGs: StableRNG
+    using DataFrames
+    using StatsBase: coef
+
     rng = StableRNG(42)
     n = 500
     z1 = randn(rng, n)
@@ -132,7 +174,12 @@ end
     @test m.estimator isa LIML
 end
 
-@testset "LIML with fixed effects" begin
+@testitem "LIML with FE" tags = [:iv, :kclass, :fe] begin
+    using Regress
+    using Regress.StableRNGs: StableRNG
+    using DataFrames
+    using StatsBase: coef
+
     rng = StableRNG(42)
     n = 500
     z1 = randn(rng, n)
@@ -153,13 +200,14 @@ end
     @test m.postestimation.kappa !== nothing
 end
 
-##############################################################################
-##
-## Stata ivreg2 validation tests
-##
-##############################################################################
+@testitem "LIML Stata validation" tags = [:iv, :kclass, :validation] begin
+    using Regress
+    using DataFrames
+    using CSV
+    using CategoricalArrays: categorical
+    using StatsBase: coef, stderror, r2
+    using CovarianceMatrices: CR1
 
-@testset "LIML with state dummies - Stata ivreg2 validation" begin
     df = DataFrame(CSV.File(joinpath(dirname(pathof(Regress)), "../test/data/iv_nested.csv")))
     df.state_id = categorical(df.state_id)
 
@@ -180,40 +228,36 @@ end
 
     # R-squared
     @test r2(m) ≈ 0.9142 atol=0.01
-end
-
-@testset "LIML with cluster SE - Stata ivreg2 validation" begin
-    df = DataFrame(CSV.File(joinpath(dirname(pathof(Regress)), "../test/data/iv_nested.csv")))
 
     # LIML without FE, with cluster-robust SE
     # . ivreg2 y (endo=z) x1 x2 , liml cluster(state_id)
-    m = iv(LIML(), df, @formula(y ~ x1 + x2 + (endo ~ z)), save_cluster = :state_id)
+    m2 = iv(LIML(), df, @formula(y ~ x1 + x2 + (endo ~ z)), save_cluster = :state_id)
 
     # Coefficients
-    @test coef(m)[1] ≈ 1.448071 atol=0.01   # intercept
-    @test coef(m)[2] ≈ 0.4741162 atol=0.01  # x1
-    @test coef(m)[3] ≈ 0.3173924 atol=0.01  # x2
-    @test coef(m)[4] ≈ 2.001556 atol=0.01   # endo
+    @test coef(m2)[1] ≈ 1.448071 atol=0.01   # intercept
+    @test coef(m2)[2] ≈ 0.4741162 atol=0.01  # x1
+    @test coef(m2)[3] ≈ 0.3173924 atol=0.01  # x2
+    @test coef(m2)[4] ≈ 2.001556 atol=0.01   # endo
 
     # Cluster-robust SE (CR1)
     # Note: Small differences from Stata expected due to finite-sample corrections
-    se_cr1 = stderror(CR1(:state_id), m)
+    se_cr1 = stderror(CR1(:state_id), m2)
     @test se_cr1[1] ≈ 0.5667004 atol=0.10   # intercept SE (wider tolerance for cluster SE)
     @test se_cr1[2] ≈ 0.0803681 atol=0.02   # x1 SE
     @test se_cr1[3] ≈ 0.0642344 atol=0.02   # x2 SE
     @test se_cr1[4] ≈ 0.0673868 atol=0.02   # endo SE
 
     # R-squared
-    @test r2(m) ≈ 0.8554 atol=0.01
+    @test r2(m2) ≈ 0.8554 atol=0.01
 end
 
-##############################################################################
-##
-## Nested FE + Cluster SE tests
-##
-##############################################################################
+@testitem "Nested FE with cluster" tags = [:fe, :cluster] begin
+    using Regress
+    using DataFrames
+    using CSV
+    using StatsBase: stderror
+    using CovarianceMatrices: CR1
 
-@testset "Nested FE with cluster at parent level" begin
     df = DataFrame(CSV.File(joinpath(dirname(pathof(Regress)), "../test/data/iv_nested.csv")))
 
     # County FE is nested in state_id cluster
@@ -229,7 +273,13 @@ end
     @test all(isfinite, se_cr1_state)
 end
 
-@testset "LIML with nested FE and cluster" begin
+@testitem "LIML with nested FE and cluster" tags = [:iv, :kclass, :fe, :cluster] begin
+    using Regress
+    using DataFrames
+    using CSV
+    using StatsBase: stderror
+    using CovarianceMatrices: CR1
+
     df = DataFrame(CSV.File(joinpath(dirname(pathof(Regress)), "../test/data/iv_nested.csv")))
 
     # LIML with state FE (absorbed), cluster at state level

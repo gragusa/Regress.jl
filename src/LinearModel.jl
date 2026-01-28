@@ -611,7 +611,9 @@ function Base.show(io::IO, m::OLSEstimator)
     # Title: OLS, right-aligned, yellow
     ctitle = "OLS"
     if supports_color(io)
-        print(io, lpad(ANSI_YELLOW * ctitle * ANSI_RESET, totwidth - 2 + length(ANSI_YELLOW) + length(ANSI_RESET)))
+        print(io,
+            lpad(ANSI_YELLOW * ctitle * ANSI_RESET,
+                totwidth - 2 + length(ANSI_YELLOW) + length(ANSI_RESET)))
     else
         print(io, lpad(ctitle, totwidth - 2))
     end

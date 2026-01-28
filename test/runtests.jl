@@ -1,26 +1,17 @@
-using Regress, Test
+using TestItemRunner
+using Regress
 
-@testset "Aqua" begin
-    include("Aqua.jl")
+# Filter by tags via environment variable
+# GPU tests are skipped unless GPU_TEST=true
+# Validation tests can be excluded via TI_EXCLUDE=validation
+testfilter = ti -> begin
+    exclude = Symbol[]
+    # Skip GPU tests unless GPU_TEST=true
+    if get(ENV, "GPU_TEST", "") != "true"
+        push!(exclude, :gpu)
+    end
+    return all(!in(exclude), ti.tags)
 end
-@testset "formula" begin
-    include("formula.jl")
-end
-@testset "fit" begin
-    include("fit.jl")
-end
-@testset "predict" begin
-    include("predict.jl")
-end
-@testset "partial out" begin
-    include("partial_out.jl")
-end
-@testset "collinearity" begin
-    include("collinearity.jl")
-end
-@testset "model + vcov" begin
-    include("model_plus_vcov.jl")
-end
-@testset "K-class estimators" begin
-    include("kclass.jl")
-end
+
+println("Running Regress.jl tests with $(Threads.nthreads()) threads...")
+@run_package_tests filter=testfilter

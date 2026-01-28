@@ -1,15 +1,6 @@
-using Regress, CategoricalArrays, CSV, DataFrames, Test, LinearAlgebra,
-      StatsBase
-using CovarianceMatrices: CR0, CR1, CR2, CR3
-using Regress: nullloglikelihood_within
-include("gpu_utils.jl")
+@testitem "OLS coefficients - simple" tags = [:ols, :smoke] begin
+    using Regress, CategoricalArrays, CSV, DataFrames, LinearAlgebra, StatsBase
 
-##############################################################################
-##
-## coefficients
-##
-##############################################################################
-@testset "coefficients" begin
     df = DataFrame(CSV.File(joinpath(dirname(pathof(Regress)), "../dataset/Cigar.csv")))
     df.StateC = categorical(df.State)
     df.YearC = categorical(df.Year)
@@ -18,6 +9,7 @@ include("gpu_utils.jl")
     m = @formula Sales ~ Price
     x = ols(df, m)
     @test coef(x) ≈ [139.73446, -0.22974] atol = 1e-4
+
     m = @formula Sales ~ Price
     x = ols(df, m, weights = :Pop)
     @test coef(x) ≈ [137.72495428982756, -0.23738] atol = 1e-4
@@ -26,6 +18,14 @@ include("gpu_utils.jl")
     m = @formula SalesInt ~ Price
     x = ols(df, m)
     @test coef(x) ≈ [139.72674, -0.2296683205] atol = 1e-4
+end
+
+@testitem "OLS coefficients - fixed effects" tags = [:ols, :fe] begin
+    using Regress, CategoricalArrays, CSV, DataFrames, LinearAlgebra, StatsBase
+
+    df = DataFrame(CSV.File(joinpath(dirname(pathof(Regress)), "../dataset/Cigar.csv")))
+    df.StateC = categorical(df.State)
+    df.YearC = categorical(df.Year)
 
     # absorb
     m = @formula Sales ~ Price + fe(State)
@@ -36,14 +36,15 @@ include("gpu_utils.jl")
     m = @formula Sales ~ Price + fe(State) + fe(Year)
     x = ols(df, m)
     @test coef(x) ≈ [-1.08471] atol = 1e-4
+
     m = @formula Sales ~ Price + fe(State) + fe(State)*Year
     x = ols(df, m)
     @test coef(x) ≈ [-0.53470, 0.0] atol = 1e-4
+
     m = @formula Sales ~ Price + fe(State)*Year
     x = ols(df, m)
     @test coef(x) ≈ [-0.53470, 0.0] atol = 1e-4
 
-    #@test isempty(coef(iv(TSLS(), df, @formula(Sales ~ 0), @fe(State*Price))))
     df.mState = div.(df.State, 10)
     m = @formula Sales ~ Price + fe(mState)&fe(Year)
     x = ols(df, m)
@@ -52,9 +53,11 @@ include("gpu_utils.jl")
     m = @formula Sales ~ Price + fe(State)&Year
     x = ols(df, m)
     @test coef(x) ≈ [13.993028174622104, -0.5804357763515606] atol = 1e-4
+
     m = @formula Sales ~ Price + Year&fe(State)
     x = ols(df, m)
     @test coef(x) ≈ [13.993028174622104, -0.5804357763515606] atol = 1e-4
+
     m = @formula Sales ~ 1 + Year&fe(State)
     x = ols(df, m)
     @test coef(x) ≈ [174.4084407796102] atol = 1e-4
@@ -62,9 +65,11 @@ include("gpu_utils.jl")
     m = @formula Sales ~ Price + fe(State)&Year + fe(Year)&State
     x = ols(df, m)
     @test coef(x) ≈ [51.2359, - 0.5797] atol = 1e-4
+
     m = @formula Sales ~ Price + NDI + fe(State)&Year + fe(Year)&State
     x = ols(df, m)
     @test coef(x) ≈ [-46.4464, -0.2546, -0.005563] atol = 1e-4
+
     m = @formula Sales ~ 0 + Price + NDI + fe(State)&Year + fe(Year)&State
     x = ols(df, m)
     @test coef(x) ≈ [-0.21226562244177932, -0.004775616634862829] atol = 1e-4
@@ -73,6 +78,7 @@ include("gpu_utils.jl")
     m = @formula Sales ~ Pimin + Price&NDI&fe(State)
     x = ols(df, m)
     @test coef(x) ≈ [122.98713, 0.30933] atol = 1e-4
+
     # SSR does not work well here
     m = @formula Sales ~ Pimin + (Price&NDI)*fe(State)
     x = ols(df, m)
@@ -81,6 +87,14 @@ include("gpu_utils.jl")
     # only one intercept
     m = @formula Sales ~ 1 + fe(State) + fe(Year)
     x = ols(df, m)
+end
+
+@testitem "OLS coefficients - interactions" tags = [:ols, :fe] begin
+    using Regress, CategoricalArrays, CSV, DataFrames, LinearAlgebra, StatsBase
+
+    df = DataFrame(CSV.File(joinpath(dirname(pathof(Regress)), "../dataset/Cigar.csv")))
+    df.StateC = categorical(df.State)
+    df.YearC = categorical(df.Year)
 
     # TO DO: REPORT INTERCEPT IN CASE OF FIXED EFFFECTS, LIKE STATA
     df.id3 = categorical(mod.(1:size(df, 1), Ref(3)))
@@ -105,6 +119,7 @@ include("gpu_utils.jl")
     m = @formula Sales ~ id3&Price
     x = ols(df, m)
     @test length(coef(x)) == 4
+
     m = @formula Sales ~ id3&Price + Price
     x = ols(df, m)
     @test length(coef(x)) == 4
@@ -114,35 +129,66 @@ include("gpu_utils.jl")
 
     m = @formula Sales ~ Year&Price + fe(State)
     x = ols(df, m)
+end
+
+@testitem "OLS coefficients - weighted" tags = [:ols] begin
+    using Regress, CategoricalArrays, CSV, DataFrames, LinearAlgebra, StatsBase
+
+    df = DataFrame(CSV.File(joinpath(dirname(pathof(Regress)), "../dataset/Cigar.csv")))
+    df.StateC = categorical(df.State)
+    df.YearC = categorical(df.Year)
 
     # absorb + weights
     m = @formula Sales ~ Price + fe(State)
     x = ols(df, m, weights = :Pop)
     @test coef(x) ≈ [- 0.21741] atol = 1e-4
+
     m = @formula Sales ~ Price + fe(State) + fe(Year)
     x = ols(df, m, weights = :Pop)
     @test coef(x) ≈ [- 0.88794] atol = 1e-3
+
     m = @formula Sales ~ Price + fe(State) + fe(State)&Year
     x = ols(df, m, weights = :Pop)
     @test coef(x) ≈ [- 0.461085492] atol = 1e-4
+end
+
+@testitem "IV coefficients - simple" tags = [:iv, :tsls, :smoke] begin
+    using Regress, CategoricalArrays, CSV, DataFrames, LinearAlgebra, StatsBase
+
+    df = DataFrame(CSV.File(joinpath(dirname(pathof(Regress)), "../dataset/Cigar.csv")))
+    df.StateC = categorical(df.State)
+    df.YearC = categorical(df.Year)
 
     # iv
     m = @formula Sales ~ (Price ~ Pimin)
     x = iv(TSLS(), df, m)
     @test coef(x) ≈ [138.19479, - 0.20733] atol = 1e-4
+
     m = @formula Sales ~ NDI + (Price ~ Pimin)
     x = iv(TSLS(), df, m)
     @test coef(x) ≈ [137.45096, 0.00516, - 0.76276] atol = 1e-4
+
     m = @formula Sales ~ NDI + (Price ~ Pimin + Pop)
     x = iv(TSLS(), df, m)
     @test coef(x) ≈ [137.57335, 0.00534, - 0.78365] atol = 1e-4
+end
+
+@testitem "IV coefficients - multiple endogenous" tags = [:iv, :tsls] begin
+    using Regress, CategoricalArrays, CSV, DataFrames, LinearAlgebra, StatsBase
+
+    df = DataFrame(CSV.File(joinpath(dirname(pathof(Regress)), "../dataset/Cigar.csv")))
+    df.StateC = categorical(df.State)
+    df.YearC = categorical(df.Year)
+
     ## multiple endogeneous variables
     m = @formula Sales ~ (Price + NDI ~ Pimin + Pop)
     x = iv(TSLS(), df, m)
     @test coef(x) ≈ [139.544, 0.8001, -0.00937] atol = 1e-4
+
     m = @formula Sales ~ 1 + (Price + NDI ~ Pimin + Pop)
     x = iv(TSLS(), df, m)
     @test coef(x) ≈ [139.544, 0.8001, -0.00937] atol = 1e-4
+
     result = [
         196.576, 0.00490989, -2.94019, -3.00686, -2.94903, -2.80183, -2.74789, -2.66682,
         -2.63855, -2.52394, -2.34751, -2.19241, -2.18707, -2.09244, -1.9691, -1.80463,
@@ -157,14 +203,24 @@ include("gpu_utils.jl")
     m = @formula Sales ~ (Price ~ Pimin)
     x = iv(TSLS(), df, m, weights = :Pop)
     @test coef(x) ≈ [137.03637, - 0.22802] atol = 1e-4
+end
+
+@testitem "IV coefficients - with FE" tags = [:iv, :tsls, :fe] begin
+    using Regress, CategoricalArrays, CSV, DataFrames, LinearAlgebra, StatsBase
+
+    df = DataFrame(CSV.File(joinpath(dirname(pathof(Regress)), "../dataset/Cigar.csv")))
+    df.StateC = categorical(df.State)
+    df.YearC = categorical(df.Year)
 
     # iv + weight + absorb
     m = @formula Sales ~ (Price ~ Pimin) + fe(State)
     x = iv(TSLS(), df, m)
     @test coef(x) ≈ [-0.20284] atol = 1e-4
+
     m = @formula Sales ~ (Price ~ Pimin) + fe(State)
     x = iv(TSLS(), df, m, weights = :Pop)
     @test coef(x) ≈ [-0.20995] atol = 1e-4
+
     m = @formula Sales ~ NDI + (Price ~ Pimin) + fe(State)
     x = iv(TSLS(), df, m)
     @test coef(x) ≈ [0.0011021722526916768, -0.3216374943695231] atol = 1e-4
@@ -172,32 +228,37 @@ include("gpu_utils.jl")
     # non high dimensional factors
     m = @formula Sales ~ Price + YearC
     x = ols(df, m)
+
     m = @formula Sales ~ YearC + fe(State)
     x = ols(df, m)
+
     m = @formula Sales ~ Price + YearC + fe(State)
     x = ols(df, m)
     @test coef(x)[1] ≈ -1.08471 atol = 1e-4
+
     m = @formula Sales ~ Price + YearC + fe(State)
     x = ols(df, m, weights = :Pop)
     @test coef(x)[1] ≈ -0.88794 atol = 1e-4
+
     m = @formula Sales ~ NDI + (Price ~ Pimin) + YearC + fe(State)
     x = iv(TSLS(), df, m)
     @test coef(x)[1] ≈ -0.00525 atol = 1e-4
+end
 
-    ##############################################################################
-    ##
-    ## Programming
-    ##
-    ##############################################################################
+@testitem "Programmatic formula construction" tags = [:ols, :formula] begin
+    using Regress, CategoricalArrays, CSV, DataFrames
+
+    df = DataFrame(CSV.File(joinpath(dirname(pathof(Regress)), "../dataset/Cigar.csv")))
+
     ols(df, term(:Sales) ~ term(:NDI) + fe(:State) + fe(:Year))
     @test fe(:State) + fe(:Year) === reduce(+, fe.([:State, :Year])) ===
           fe(term(:State)) + fe(term(:Year))
+end
 
-    ##############################################################################
-    ##
-    ## Functions
-    ##
-    ##############################################################################
+@testitem "Function terms in formula" tags = [:ols] begin
+    using Regress, CategoricalArrays, CSV, DataFrames
+
+    df = DataFrame(CSV.File(joinpath(dirname(pathof(Regress)), "../dataset/Cigar.csv")))
 
     # function
     m = @formula Sales ~ log(Price)
@@ -214,25 +275,32 @@ include("gpu_utils.jl")
     df.Price_zero[1] = 0.0
     m = @formula Sales ~ log(Price_zero)
     @test_throws "Some observations for the regressor are infinite" ols(df, m)
+end
 
-    ##############################################################################
-    ##
-    ## collinearity
-    ## add more tests
-    ##
-    ##############################################################################
-    # ols
+@testitem "OLS collinearity" tags = [:ols] begin
+    using Regress, CategoricalArrays, CSV, DataFrames
+
+    df = DataFrame(CSV.File(joinpath(dirname(pathof(Regress)), "../dataset/Cigar.csv")))
+
+    # ols collinearity
     df.Price2 = df.Price
     m = @formula Sales ~ Price + Price2
     x = ols(df, m)
     @test coef(x) ≈ [139.7344639806166, -0.22974688593485126, 0.0] atol = 1e-4
+end
 
-    ## iv
+@testitem "IV collinearity" tags = [:iv, :tsls] begin
+    using Regress, CategoricalArrays, CSV, DataFrames
+
+    df = DataFrame(CSV.File(joinpath(dirname(pathof(Regress)), "../dataset/Cigar.csv")))
+
+    ## iv collinearity
     df.NDI2 = df.NDI
     m = @formula Sales ~ NDI2 + NDI + (Price ~ Pimin)
     x = iv(TSLS(), df, m)
     @test iszero(coef(x)[2]) || iszero(coef(x)[3])
 
+    df.Price2 = df.Price
     m = @formula Sales ~ (Price + Price2 ~ Pimin + NDI)
     x = iv(TSLS(), df, m)
     @test iszero(coef(x)[2]) || iszero(coef(x)[3])
@@ -243,10 +311,10 @@ include("gpu_utils.jl")
     x = iv(TSLS(), df, m)
 
     m2 = @formula Sales ~ (zPimin + Price ~ NDI + Pimin)
-    NDI = iv(TSLS(), df, m2)
-    @test coefnames(x) == coefnames(NDI)
-    @test coef(x) ≈ coef(NDI)
-    @test vcov(x) ≈ vcov(NDI)
+    xNDI = iv(TSLS(), df, m2)
+    @test coefnames(x) == coefnames(xNDI)
+    @test coef(x) ≈ coef(xNDI)
+    @test vcov(x) ≈ vcov(xNDI)
 
     # catch when IV underidentified
     @test_throws "Model not identified. There must be at least as many ivs as endogeneneous variables" iv(
@@ -265,12 +333,10 @@ include("gpu_utils.jl")
     @test sum(abs.(coef(result)) .> 0) == 2
 end
 
-##############################################################################
-##
-## std errors
-##
-##############################################################################
-@testset "standard errors" begin
+@testitem "OLS standard errors - HC" tags = [:ols, :vcov, :hc, :smoke] begin
+    using Regress, CategoricalArrays, CSV, DataFrames
+    using CovarianceMatrices: HC0, HC1, HC2, HC3, HC4, HC5
+
     df = DataFrame(CSV.File(joinpath(dirname(pathof(Regress)), "../dataset/Cigar.csv")))
     df.StateC = categorical(df.State)
     df.YearC = categorical(df.Year)
@@ -279,10 +345,7 @@ end
     m = @formula Sales ~ Price
     x = ols(df, m)
     @test stderror(x) ≈ [1.686791, 0.0167042] atol = 1e-6
-    # IV model - now uses HC1 robust SE by default (not classical SE)
-    m = @formula Sales ~ (Price ~ Pimin)
-    x = iv(TSLS(), df, m)
-    @test stderror(x) ≈ [1.6325, 0.01674] atol = 1e-3  # HC1 robust SE (default)
+
     # Stata areg - Note: Small DOF convention differences expected
     m = @formula Sales ~ Price + fe(State)
     x = ols(df, m)
@@ -291,20 +354,29 @@ end
     # HC estimators (heteroskedasticity-robust)
     m = @formula Sales ~ Price
     x = ols(df, m)
-    @test stderror(CovarianceMatrices.HC0(), x)[2] ≈ 0.01669 atol = 1e-4
-    @test stderror(CovarianceMatrices.HC1(), x)[2] ≈ 0.01670 atol = 1e-4  # Default
-    @test stderror(CovarianceMatrices.HC2(), x)[2] ≈ 0.01671 atol = 1e-4  # Leverage-adjusted
-    @test stderror(CovarianceMatrices.HC3(), x)[2] ≈ 0.01673 atol = 1e-4  # Squared leverage
-    @test stderror(CovarianceMatrices.HC4(), x)[2] ≈ 0.01673 atol = 1e-4
-    @test stderror(CovarianceMatrices.HC5(), x)[2] ≈ 0.01671 atol = 1e-4
+    @test stderror(HC0(), x)[2] ≈ 0.01669 atol = 1e-4
+    @test stderror(HC1(), x)[2] ≈ 0.01670 atol = 1e-4  # Default
+    @test stderror(HC2(), x)[2] ≈ 0.01671 atol = 1e-4  # Leverage-adjusted
+    @test stderror(HC3(), x)[2] ≈ 0.01673 atol = 1e-4  # Squared leverage
+    @test stderror(HC4(), x)[2] ≈ 0.01673 atol = 1e-4
+    @test stderror(HC5(), x)[2] ≈ 0.01671 atol = 1e-4
 
     # HC estimators with FE
     m = @formula Sales ~ Price + fe(State)
     x = ols(df, m)
-    @test stderror(CovarianceMatrices.HC0(), x)[1] ≈ 0.01081 atol = 1e-4
-    @test stderror(CovarianceMatrices.HC1(), x)[1] ≈ 0.01100 atol = 1e-4
-    @test stderror(CovarianceMatrices.HC2(), x)[1] ≈ 0.01083 atol = 1e-4
-    @test stderror(CovarianceMatrices.HC3(), x)[1] ≈ 0.01084 atol = 1e-4
+    @test stderror(HC0(), x)[1] ≈ 0.01081 atol = 1e-4
+    @test stderror(HC1(), x)[1] ≈ 0.01100 atol = 1e-4
+    @test stderror(HC2(), x)[1] ≈ 0.01083 atol = 1e-4
+    @test stderror(HC3(), x)[1] ≈ 0.01084 atol = 1e-4
+end
+
+@testitem "OLS standard errors - cluster" tags = [:ols, :vcov, :cluster] begin
+    using Regress, CategoricalArrays, CSV, DataFrames
+    using CovarianceMatrices: CR0, CR1, CR2, CR3
+
+    df = DataFrame(CSV.File(joinpath(dirname(pathof(Regress)), "../dataset/Cigar.csv")))
+    df.StateC = categorical(df.State)
+    df.YearC = categorical(df.Year)
 
     # Clustering models (new API: save_cluster + post-estimation stderror)
     # Uses fixest-style small sample correction: G/(G-1) * (n-1)/(n-K)
@@ -330,27 +402,15 @@ end
     @test stderror(CR1(:State), x)[1] ≈ 0.0357498 atol = 1e-4  # With G/(G-1)
     @test stderror(CR2(:State), x)[1] ≈ 0.03622 atol = 1e-4  # Leverage-adjusted
     @test stderror(CR3(:State), x)[1] ≈ 0.03659 atol = 1e-4  # Squared leverage
+end
 
-    # IV model HC estimators
-    # Note: HC0/HC1/HC2 all use sandwich formula. HC1 adds DOF adjustment, HC2 adds leverage adjustment.
-    # These values validated against R's sandwich::vcovHC for ivreg models.
-    m = @formula Sales ~ CPI + (Price ~ Pimin)
-    x = iv(TSLS(), df, m)
-    @test stderror(CovarianceMatrices.HC0(), x)[3] ≈ 0.0553 atol = 1e-3
-    @test stderror(CovarianceMatrices.HC1(), x)[3] ≈ 0.0554 atol = 1e-3
-    @test stderror(CovarianceMatrices.HC2(), x)[3] ≈ 0.0554 atol = 1e-3  # Leverage-adjusted
+@testitem "OLS standard errors - multiway" tags = [:ols, :vcov, :cluster] begin
+    using Regress, CategoricalArrays, CSV, DataFrames
+    using CovarianceMatrices: CR1
 
-    # IV model CR estimators
-    x = iv(TSLS(), df, m, save_cluster = :State)
-    @test stderror(CR0(:State), x)[3] ≈ 0.1058 atol = 1e-3
-    @test stderror(CR1(:State), x)[3] ≈ 0.1070 atol = 1e-3
-
-    # IV with FE and cluster
-    # Note: These values match FixedEffectModels.jl with Vcov.cluster(:Year)
-    m = @formula Sales ~ CPI + (Price ~ Pimin) + fe(State)
-    x = iv(TSLS(), df, m, save_cluster = :Year)
-    @test stderror(CR0(:Year), x)[2] ≈ 0.0747 atol = 1e-3
-    @test stderror(CR1(:Year), x)[2] ≈ 0.0760 atol = 1e-3
+    df = DataFrame(CSV.File(joinpath(dirname(pathof(Regress)), "../dataset/Cigar.csv")))
+    df.StateC = categorical(df.State)
+    df.YearC = categorical(df.Year)
 
     # multiway clustering - matches R fixest
     m = @formula Sales ~ Price
@@ -363,12 +423,55 @@ end
     @test stderror(CR1(:State, :Year), x) ≈ [0.0405335] atol = 1e-4
 end
 
-##############################################################################
-##
-## subset
-##
-##############################################################################
-@testset "subset" begin
+@testitem "IV standard errors - HC" tags = [:iv, :vcov, :hc] begin
+    using Regress, CategoricalArrays, CSV, DataFrames
+    using CovarianceMatrices: HC0, HC1, HC2
+
+    df = DataFrame(CSV.File(joinpath(dirname(pathof(Regress)), "../dataset/Cigar.csv")))
+    df.StateC = categorical(df.State)
+    df.YearC = categorical(df.Year)
+
+    # IV model - now uses HC1 robust SE by default (not classical SE)
+    m = @formula Sales ~ (Price ~ Pimin)
+    x = iv(TSLS(), df, m)
+    @test stderror(x) ≈ [1.6325, 0.01674] atol = 1e-3  # HC1 robust SE (default)
+
+    # IV model HC estimators
+    # Note: HC0/HC1/HC2 all use sandwich formula. HC1 adds DOF adjustment, HC2 adds leverage adjustment.
+    # These values validated against R's sandwich::vcovHC for ivreg models.
+    m = @formula Sales ~ CPI + (Price ~ Pimin)
+    x = iv(TSLS(), df, m)
+    @test stderror(HC0(), x)[3] ≈ 0.0553 atol = 1e-3
+    @test stderror(HC1(), x)[3] ≈ 0.0554 atol = 1e-3
+    @test stderror(HC2(), x)[3] ≈ 0.0554 atol = 1e-3  # Leverage-adjusted
+end
+
+@testitem "IV standard errors - cluster" tags = [:iv, :vcov, :cluster] begin
+    using Regress, CategoricalArrays, CSV, DataFrames
+    using CovarianceMatrices: CR0, CR1
+
+    df = DataFrame(CSV.File(joinpath(dirname(pathof(Regress)), "../dataset/Cigar.csv")))
+    df.StateC = categorical(df.State)
+    df.YearC = categorical(df.Year)
+
+    # IV model CR estimators
+    m = @formula Sales ~ CPI + (Price ~ Pimin)
+    x = iv(TSLS(), df, m, save_cluster = :State)
+    @test stderror(CR0(:State), x)[3] ≈ 0.1058 atol = 1e-3
+    @test stderror(CR1(:State), x)[3] ≈ 0.1070 atol = 1e-3
+
+    # IV with FE and cluster
+    # Note: These values match FixedEffectModels.jl with Vcov.cluster(:Year)
+    m = @formula Sales ~ CPI + (Price ~ Pimin) + fe(State)
+    x = iv(TSLS(), df, m, save_cluster = :Year)
+    @test stderror(CR0(:Year), x)[2] ≈ 0.0747 atol = 1e-3
+    @test stderror(CR1(:Year), x)[2] ≈ 0.0760 atol = 1e-3
+end
+
+@testitem "subset option" tags = [:ols, :iv] begin
+    using Regress, CategoricalArrays, CSV, DataFrames, LinearAlgebra
+    using CovarianceMatrices: CR1
+
     df = DataFrame(CSV.File(joinpath(dirname(pathof(Regress)), "../dataset/Cigar.csv")))
     df.StateC = categorical(df.State)
     df.YearC = categorical(df.Year)
@@ -377,18 +480,18 @@ end
     x0 = ols(df[df.State .<= 30, :], m)
 
     m = @formula Sales ~ Price + StateC
-    Price = ols(df, m, subset = df.State .<= 30)
-    @test length(Price.esample) == size(df, 1)
-    @test coef(x0) ≈ coef(Price) atol = 1e-4
-    @test vcov(x0) ≈ vcov(Price) atol = 1e-4
+    xPrice = ols(df, m, subset = df.State .<= 30)
+    @test length(xPrice.esample) == size(df, 1)
+    @test coef(x0) ≈ coef(xPrice) atol = 1e-4
+    @test vcov(x0) ≈ vcov(xPrice) atol = 1e-4
 
     df.State_missing = ifelse.(df.State .<= 30, df.State, missing)
     df.StateC_missing = categorical(df.State_missing)
     m = @formula Sales ~ Price + StateC_missing
-    NDI = ols(df, m)
-    @test length(NDI.esample) == size(df, 1)
-    @test coef(x0) ≈ coef(NDI) atol = 1e-4
-    @test vcov(x0) ≈ vcov(NDI) atol = 1e-2
+    xNDI = ols(df, m)
+    @test length(xNDI.esample) == size(df, 1)
+    @test coef(x0) ≈ coef(xNDI) atol = 1e-4
+    @test vcov(x0) ≈ vcov(xNDI) atol = 1e-2
 
     # missing weights
     df.Price_missing = ifelse.(df.State .<= 30, df.Price, missing)
@@ -420,43 +523,50 @@ end
     @test diag(vcov(CR1(:State), x)) ≈ [130.7464887, 0.0257875, 0.0383939] atol = 0.5
 end
 
-@testset "statistics" begin
+@testitem "R-squared and statistics" tags = [:ols, :statistics, :smoke] begin
+    using Regress, CategoricalArrays, CSV, DataFrames
+
     df = DataFrame(CSV.File(joinpath(dirname(pathof(Regress)), "../dataset/Cigar.csv")))
     df.StateC = categorical(df.State)
     df.YearC = categorical(df.Year)
-    ##############################################################################
-    ##
-    ## R2
-    ##
-    ##############################################################################
+
     m = @formula Sales ~ Price
     x = ols(df, m)
     @test r2(x) ≈ 0.0969 atol = 1e-4
     @test adjr2(x) ≈ 0.0956 atol = 1e-3  # Updated: Small DOF convention differences
+
     m = @formula Sales ~ Price + Pimin + fe(State)
     x = ols(df, m)
     @test r2(x) ≈ 0.77472 atol = 1e-4
     @test adjr2(x) ≈ 0.766768 atol = 1e-4
+end
 
-    ##############################################################################
-    ##
-    ## F Stat (Robust Wald F with HC1 vcov)
-    ##
-    ## Note: F-statistics are now computed as robust Wald F using HC1 vcov.
-    ## These values differ from classical MSS-based F-statistics.
-    ##############################################################################
+@testitem "F-statistics" tags = [:ols, :iv, :statistics] begin
+    using Regress, CategoricalArrays, CSV, DataFrames
+
+    df = DataFrame(CSV.File(joinpath(dirname(pathof(Regress)), "../dataset/Cigar.csv")))
+    df.StateC = categorical(df.State)
+    df.YearC = categorical(df.Year)
+
+    # F Stat (Robust Wald F with HC1 vcov)
+    # Note: F-statistics are now computed as robust Wald F using HC1 vcov.
+    # These values differ from classical MSS-based F-statistics.
     m = @formula Sales ~ Price
     x = ols(df, m)
     @test x.F ≈ 189.168 atol = 0.5  # Robust Wald F with HC1
+
     m = @formula Sales ~ Price + fe(State)
     x = ols(df, m)
     @test x.F ≈ 363.873 atol = 0.5  # Robust Wald F with HC1
+
     m = @formula Sales ~ (Price ~ Pimin)
     x = iv(TSLS(), df, m)
-    @test x.F ≈ 13611.79 atol = 1.0  # Robust Wald F with HC1
+    @test x.F ≈ 13601.92 atol = 1.0  # Robust Wald F with HC1
+
     m = @formula Sales ~ Price + Pop
     x = ols(df, m)
     @test x.F ≈ 96.496 atol = 0.5  # Robust Wald F with HC1
+
     # F-stat is computed with stored vcov_estimator (HC1 by default)
     m = @formula Sales ~ (Price ~ Pimin) + fe(State)
     x = iv(TSLS(), df, m)
@@ -466,6 +576,7 @@ end
     m = @formula Pop ~ Pimin
     x = ols(df, m)
     @test x.p ≈ 0.0103315 atol = 1e-4  # p-value from robust Wald F
+
     m = @formula Pop ~ Pimin + Price
     x = ols(df, m)
     @test x.p ≈ 1.4818e-8 atol = 1e-9  # p-value from robust Wald F
@@ -476,35 +587,40 @@ end
     df_example = DataFrame(CSV.File(joinpath(dirname(pathof(Regress)), "../dataset/Ftest.csv")))
     x = iv(TSLS(), df_example, @formula(Y ~ fe(id) + (X1 + X2 ~ Z1 + Z2)))
     @test x.F_kp ≈ 2.1932 atol = 0.001  # Robust K-P F-stat (weak instruments in this synthetic data)
+end
 
-    ##############################################################################
-    ##
-    ## F_kp r_kp statistics for IV (robust variance with HR1 by default)
-    ## Note: These values are computed using robust sandwich variance, which gives
-    ## more conservative (smaller) F-stats than the homoskedastic formula.
-    ##
-    ##############################################################################
+@testitem "F_kp statistics for IV" tags = [:iv, :statistics] begin
+    using Regress, CategoricalArrays, CSV, DataFrames
+
+    df = DataFrame(CSV.File(joinpath(dirname(pathof(Regress)), "../dataset/Cigar.csv")))
+    df.StateC = categorical(df.State)
+    df.YearC = categorical(df.Year)
+
+    # F_kp r_kp statistics for IV (robust variance with HR1 by default)
+    # Note: These values are computed using robust sandwich variance, which gives
+    # more conservative (smaller) F-stats than the homoskedastic formula.
     m = @formula Sales ~ (Price ~ Pimin)
     x = iv(TSLS(), df, m)
     @test x.F_kp ≈ 467.8717 atol = 0.001
+
     m = @formula Sales ~ NDI + (Price ~ Pimin)
     x = iv(TSLS(), df, m)
     @test x.F_kp ≈ 244.1580 atol = 0.001
+
     m = @formula Sales ~ (Price ~ Pimin + CPI)
     x = iv(TSLS(), df, m)
     @test x.F_kp ≈ 427.6440 atol = 0.001
+
     m = @formula Sales ~ (Price ~ Pimin) + fe(State)
     x = iv(TSLS(), df, m)
     @test x.F_kp ≈ 471.7853 atol = 0.001
+end
 
-    # TODO: Tests for F_kp with robust/cluster vcov require passing vcov type
-    # to first-stage F-stat computation. Will be re-enabled once implemented.
+@testitem "loglikelihood" tags = [:ols, :statistics] begin
+    using Regress, CategoricalArrays, CSV, DataFrames
+    using Regress: nullloglikelihood_within
 
-    ############################################
-    ##
-    ## loglikelihood and related
-    ##
-    ############################################
+    df = DataFrame(CSV.File(joinpath(dirname(pathof(Regress)), "../dataset/Cigar.csv")))
 
     m = @formula(Sales ~ Price)
     x = ols(df, m)
@@ -529,10 +645,10 @@ end
     @test adjr2(x, :McFadden) ≈ 0.14656 atol = 1e-4
 end
 
-@testset "singletons" begin
+@testitem "singletons" tags = [:ols, :fe] begin
+    using Regress, CategoricalArrays, CSV, DataFrames
+
     df = DataFrame(CSV.File(joinpath(dirname(pathof(Regress)), "../dataset/Cigar.csv")))
-    df.StateC = categorical(df.State)
-    df.YearC = categorical(df.Year)
 
     df.n = max.(1:size(df, 1), 60)
     df.pn = categorical(df.n)
@@ -545,21 +661,27 @@ end
     @test x.nobs == 1380
 end
 
-@testset "unbalanced panel" begin
+@testitem "unbalanced panel" tags = [:ols, :fe] begin
+    using Regress, CategoricalArrays, CSV, DataFrames
+
     df = DataFrame(CSV.File(joinpath(dirname(pathof(Regress)), "../dataset/EmplUK.csv")))
 
     m = @formula Wage ~ Emp + fe(Firm)
     x = ols(df, m)
     @test coef(x) ≈ [- 0.11981270017206136] atol = 1e-4
+
     m = @formula Wage ~ Emp + fe(Firm)&Year
     x = ols(df, m)
     @test coef(x) ≈ [-315.0000747500431, - 0.07633636891202833] atol = 1e-4
+
     m = @formula Wage ~ Emp + Year&fe(Firm)
     x = ols(df, m)
     @test coef(x) ≈ [-315.0000747500431, - 0.07633636891202833] atol = 1e-4
+
     m = @formula Wage ~ 1 + Year&fe(Firm)
     x = ols(df, m)
     @test coef(x) ≈ [- 356.40430526316396] atol = 1e-4
+
     m = @formula Wage ~ Emp + fe(Firm)
     x = ols(df, m, weights = :Output)
     @test coef(x) ≈ [- 0.11514363590574725] atol = 1e-4
@@ -568,6 +690,7 @@ end
     m = @formula Wage ~ Emp + fe(Firm) + fe(Year)
     x = ols(df, m)
     @test coef(x) ≈ [- 0.04683333721137311] atol = 1e-4
+
     m = @formula Wage ~ Emp + fe(Firm) + fe(Year)
     x = ols(df, m, weights = :Output)
     @test coef(x) ≈ [- 0.043475472188120416] atol = 1e-3
@@ -606,47 +729,81 @@ end
     @test x.nobs == 821
 end
 
-@testset "gpu" begin
+@testitem "GPU acceleration" tags = [:ols, :fe, :gpu] begin
+    using Regress, CategoricalArrays, CSV, DataFrames
+
+    # GPU detection based on platform
+    GPU_METHOD = if Sys.isapple()
+        try
+            using Metal
+            Metal.functional() ? :Metal : nothing
+        catch
+            nothing
+        end
+    else
+        try
+            using CUDA
+            CUDA.functional() ? :CUDA : nothing
+        catch
+            nothing
+        end
+    end
+    GPU_AVAILABLE = GPU_METHOD !== nothing
+
+    df = DataFrame(CSV.File(joinpath(dirname(pathof(Regress)), "../dataset/EmplUK.csv")))
+
     methods_vec = [:cpu]
     if GPU_AVAILABLE
         push!(methods_vec, GPU_METHOD)
     end
-    df = DataFrame(CSV.File(joinpath(dirname(pathof(Regress)), "../dataset/EmplUK.csv")))
+
     for method in methods_vec
         # same thing with float32 precision
         local m = @formula Wage ~ Emp + fe(Firm)
         local x = ols(df, m, method = method, double_precision = false)
         @test coef(x) ≈ [- 0.11981270017206136] rtol = 1e-4
+
         local m = @formula Wage ~ Emp + fe(Firm)&Year
         local x = ols(df, m, method = method, double_precision = false)
         @test coef(x) ≈ [-315.0000747500431, - 0.07633636891202833] rtol = 1e-4
+
         local m = @formula Wage ~ Emp + Year&fe(Firm)
         local x = ols(df, m, method = method, double_precision = false)
         @test coef(x) ≈ [-315.0000747500431, - 0.07633636891202833] rtol = 1e-4
+
         local m = @formula Wage ~ 1 + Year&fe(Firm)
         local x = ols(df, m, method = method, double_precision = false)
         @test coef(x) ≈ [- 356.40430526316396] rtol = 1e-4
+
         local m = @formula Wage ~ Emp + fe(Firm)
         local x = ols(df, m, weights = :Output, method = method, double_precision = false)
         @test coef(x) ≈ [- 0.11514363590574725] rtol = 1e-4
+
         local m = @formula Wage ~ Emp + fe(Firm) + fe(Year)
         local x = ols(df, m, method = method, double_precision = false)
         @test coef(x) ≈ [- 0.04683333721137311] rtol = 1e-4
+
         local m = @formula Wage ~ Emp + fe(Firm) + fe(Year)
         local x = ols(df, m, weights = :Output, method = method, double_precision = false)
         @test coef(x) ≈ [- 0.043475472188120416] atol = 1e-3
     end
 end
 
-@testset "missings" begin
+@testitem "missing values" tags = [:ols, :smoke] begin
+    using Regress, CategoricalArrays, DataFrames
+
     df1 = DataFrame(a = [1.0, 2.0, 3.0, 4.0], b = [5.0, 7.0, 11.0, 13.0])
     df2 = DataFrame(a = [1.0, missing, 3.0, 4.0], b = [5.0, 7.0, 11.0, 13.0])
+
     x = ols(df1, @formula(a ~ b))
     @test coef(x) ≈ [-0.6500000000000004, 0.35000000000000003] atol = 1e-4
+
     x = ols(df1, @formula(b ~ a))
     @test coef(x) ≈ [2.0, 2.8] atol = 1e-4
+
     x = ols(df2, @formula(a ~ b))
     @test coef(x) ≈ [-0.8653846153846163, 0.3653846153846155] atol = 1e-4
+
     x = ols(df2, @formula(b ~ a))
     @test coef(x) ≈ [2.4285714285714253, 2.7142857142857157] atol = 1e-4
 
@@ -654,6 +811,7 @@ end
     df1 = DataFrame(a = [1, 2, 3, 4], b = [5, 7, 11, 13], c = categorical([1, 1, 2, 2]))
     x = ols(df1, @formula(a ~ b))
     @test coef(x) ≈ [-0.65, 0.35] atol = 1e-4
+
     x = ols(df1, @formula(a ~ b + fe(c)))
     @test coef(x) ≈ [0.5] atol = 1e-4
 end

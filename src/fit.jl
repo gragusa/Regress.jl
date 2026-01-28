@@ -369,3 +369,188 @@ function iv(estimator::KClass, @nospecialize(df), formula::FormulaTerm; kwargs..
     _check_iv_formula(formula)
     return fit_kclass(df, formula; kappa = estimator.kappa, kwargs...)
 end
+
+##############################################################################
+##
+## Matrix-based IV Function
+##
+##############################################################################
+
+"""
+    iv(::TSLS, Z::AbstractMatrix, X::AbstractMatrix, y::AbstractVector;
+       has_intercept::Bool=true, n_endogenous::Int=1) -> IVMatrixEstimator
+
+Estimate an IV model using Two-Stage Least Squares with matrix inputs.
+
+# Arguments
+- `Z::AbstractMatrix`: Instrument matrix, typically [Xexo, Zinstr] where Zinstr are excluded instruments
+- `X::AbstractMatrix`: Regressor matrix, typically [Xexo, Xendo] where Xendo are endogenous variables
+- `y::AbstractVector`: Response vector
+
+# Keyword Arguments
+- `has_intercept::Bool=true`: Whether the model includes an intercept (affects DOF calculation)
+- `n_endogenous::Int=1`: Number of endogenous variables (last n_endogenous columns of X)
+
+# Returns
+- `IVMatrixEstimator{T}`: Fitted IV model supporting `coef()`, `vcov()`, `model + vcov()`, etc.
+
+# Details
+
+The TSLS estimator is computed as:
+```math
+\\hat{\\beta}_{TSLS} = (X'P_Z X)^{-1} X'P_Z y
+```
+where ``P_Z = Z(Z'Z)^{-1}Z'`` is the projection matrix onto the instrument space.
+
+# Example
+```julia
+using Regress
+
+# Generate data
+n = 200
+z = randn(n)           # Instrument
+u = randn(n)           # Error
+x = 0.5*z + 0.5*u      # Endogenous (correlated with u)
+y = 1.0 .+ 2.0*x .+ u  # True coefficient = 2.0
+
+# Build matrices (no intercept case for simplicity)
+Z = hcat(ones(n), z)   # [constant, instrument]
+X = hcat(ones(n), x)   # [constant, endogenous]
+
+model = iv(TSLS(), Z, X, y; has_intercept=true, n_endogenous=1)
+coef(model)  # Should be approximately [1.0, 2.0]
+
+# Robust standard errors
+using CovarianceMatrices
+vcov(HC1(), model)
+model_robust = model + vcov(HC1())
+```
+
+See also: [`iv(::TSLS, df, formula)`](@ref), [`IVMatrixEstimator`](@ref)
+"""
+function iv(::TSLS, Z::AbstractMatrix{<:Real}, X::AbstractMatrix{<:Real},
+        y::AbstractVector{<:Real};
+        has_intercept::Bool = true,
+        n_endogenous::Int = 1)
+
+    # Validate inputs
+    n = length(y)
+    size(X, 1) == n ||
+        throw(DimensionMismatch("X has $(size(X,1)) rows but y has $n elements"))
+    size(Z, 1) == n ||
+        throw(DimensionMismatch("Z has $(size(Z,1)) rows but y has $n elements"))
+    n_endogenous >= 0 || throw(ArgumentError("n_endogenous must be non-negative"))
+    n_endogenous <= size(X, 2) ||
+        throw(ArgumentError("n_endogenous ($n_endogenous) > number of X columns ($(size(X,2)))"))
+
+    # Check order condition
+    k_x = size(X, 2)
+    k_z = size(Z, 2)
+    k_exo = k_x - n_endogenous
+    k_instr = k_z - k_exo  # Excluded instruments
+    k_instr >= n_endogenous || throw(ArgumentError(
+        "Not enough instruments: $k_instr excluded instruments < $n_endogenous endogenous variables"))
+
+    # Determine numeric type
+    T = promote_type(eltype(X), eltype(Z), eltype(y))
+    T <: AbstractFloat || (T = Float64)
+
+    # Convert to concrete types
+    X_mat = convert(Matrix{T}, X)
+    Z_mat = convert(Matrix{T}, Z)
+    y_vec = convert(Vector{T}, y)
+
+    # Compute projection matrix P_Z = Z(Z'Z)^{-1}Z'
+    ZZ = Z_mat' * Z_mat
+    ZZ_chol = try
+        cholesky(Symmetric(ZZ))
+    catch e
+        throw(ArgumentError("Instrument matrix Z is rank deficient or nearly singular"))
+    end
+    ZZ_inv = inv(ZZ_chol)
+
+    # Projected regressors: X̂ = P_Z * X = Z * (Z'Z)^{-1} * Z' * X
+    ZX = Z_mat' * X_mat
+    X_hat = Z_mat * (ZZ_inv * ZX)
+
+    # TSLS estimator: β = (X̂'X)^{-1} X̂'y = (X'P_Z X)^{-1} X'P_Z y
+    # Using X̂'X = X'P_Z X and X̂'y = X'P_Z y
+    XhatX = X_hat' * X_mat
+    Xhaty = X_hat' * y_vec
+
+    XhatX_chol = try
+        cholesky(Symmetric(XhatX))
+    catch e
+        throw(ArgumentError("X̂'X is singular - check for perfect collinearity"))
+    end
+
+    beta = XhatX_chol \ Xhaty
+
+    # For vcov, we need (X̂'X̂)^{-1}, not (X̂'X)^{-1}
+    XhatXhat = X_hat' * X_hat
+    XhatXhat_chol = try
+        cholesky(Symmetric(XhatXhat))
+    catch
+        # Fall back to pseudo-inverse
+        Symmetric(pinv(XhatXhat))
+    end
+    invXhatXhat = if XhatXhat_chol isa Cholesky
+        inv(XhatXhat_chol)
+    else
+        XhatXhat_chol  # Already a matrix from pinv
+    end
+
+    # Residuals
+    residuals = y_vec - X_mat * beta
+
+    # Degrees of freedom
+    k = size(X_mat, 2)
+    basis_coef = trues(k)  # No collinearity detection for simplicity
+    dof_model = sum(basis_coef)
+    dof_res = max(1, n - dof_model)
+
+    # Sum of squares
+    rss = sum(abs2, residuals)
+    ymean = mean(y_vec)
+    tss = has_intercept ? sum(abs2, y_vec .- ymean) : sum(abs2, y_vec)
+    r2_val = 1 - rss / tss
+
+    # Post-estimation data for vcov
+    postestimation = PostEstimationDataIVMatrix{T}(
+        X_mat, Z_mat, X_hat, y_vec, residuals, Matrix{T}(invXhatXhat), n_endogenous
+    )
+
+    # Default vcov (HC1)
+    default_vcov = CovarianceMatrices.HC1()
+
+    # Compute HC1 variance-covariance matrix
+    # Sandwich: V = n * (X̂'X̂)^{-1} * (X̂'diag(e²)X̂ * n/(n-k)) / n * (X̂'X̂)^{-1}
+    #           = (n/(n-k)) * (X̂'X̂)^{-1} * X̂'diag(e²)X̂ * (X̂'X̂)^{-1}
+    scale_hc1 = T(n) / T(n - k)
+    Xe = X_hat .* residuals
+    meat = Xe' * Xe
+    vcov_matrix = Symmetric(scale_hc1 .* invXhatXhat * meat * invXhatXhat)
+
+    # Standard errors, t-stats, p-values
+    se = sqrt.(diag(vcov_matrix))
+    t_stats = beta ./ se
+    p_values = 2 .* tdistccdf.(dof_res, abs.(t_stats))
+
+    return IVMatrixEstimator{T, typeof(default_vcov)}(
+        beta,
+        postestimation,
+        basis_coef,
+        n,
+        dof_model,
+        dof_res,
+        T(rss),
+        T(tss),
+        T(r2_val),
+        has_intercept,
+        default_vcov,
+        vcov_matrix,
+        se,
+        t_stats,
+        p_values
+    )
+end

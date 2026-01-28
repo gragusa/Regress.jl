@@ -78,7 +78,7 @@ include("partial_out.jl")
 export ols, iv, fe
 
 # Model types
-export OLSEstimator, OLSMatrixEstimator, IVEstimator
+export OLSEstimator, OLSMatrixEstimator, IVEstimator, IVMatrixEstimator
 
 # VcovSpec for model + vcov() syntax
 export VcovSpec

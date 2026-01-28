@@ -410,8 +410,7 @@ function fit_kclass_estimator(
     # Degrees of freedom
     ngroups_fes = [nunique(fe) for fe in subfes]
     dof_fes = sum(ngroups_fes)
-    dof_base = data_prep.nobs - size(X, 2) - dof_fes - dof_add
-    dof_residual = max(1, dof_base - (data_prep.has_intercept | data_prep.has_fe_intercept))
+    dof_residual = max(1, data_prep.nobs - size(X, 2) - dof_fes - dof_add)
 
     # R-squared (use raw weighted residuals for RSS)
     rss = sum(abs2, residuals_raw)
@@ -476,6 +475,12 @@ function fit_kclass_estimator(
     ngroups_fes = [nunique(fe) for fe in subfes]
     fe_groups = Vector{Int}[fe.refs for fe in subfes]
 
+    # For leverage calculation (AER formula), we need the FULL instrument matrix
+    # newZ = hcat(Xexo, Z) was computed earlier for the first stage
+    Z_full = newZ
+    Z_fullZZ = Symmetric(Z_full' * Z_full)
+    invZ_fullZZ = Symmetric(inv(cholesky(Z_fullZZ)))
+
     postestimation_data = PostEstimationDataIV(
         convert(Matrix{T}, Adj_reordered),  # X: use Adj for vcov moment matrix
         convert(Matrix{T}, X),               # Xhat: original X
@@ -487,6 +492,7 @@ function fit_kclass_estimator(
         first_stage_data,
         convert(Matrix{T}, Adj_reordered),  # Adj: K-class adjustment matrix
         kappa,                               # kappa: K-class parameter
+        convert(Matrix{T}, Z_full), invZ_fullZZ,  # Full instrument matrix for leverage
         fe_groups, data_prep.fekeys, ngroups_fes
     )
 

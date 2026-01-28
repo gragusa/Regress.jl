@@ -636,13 +636,14 @@ function fit_tsls(@nospecialize(df),
 
     ngroups_fes = [nunique(fe) for fe in subfes]
     dof_fes = sum(ngroups_fes)
-    dof_base = data_prep.nobs - size(X, 2) - dof_fes - dof_add
-    dof_residual = max(1, dof_base - (data_prep.has_intercept | data_prep.has_fe_intercept))
+
+    # dof_residual uses all parameters in X (intercept is in X when no FE)
+    dof_residual = max(1, data_prep.nobs - size(X, 2) - dof_fes - dof_add)
+    # dof_model excludes intercept (for F-test numerator DOF)
+    dof_model = size(X, 2) - (data_prep.has_intercept & !data_prep.has_fe_intercept)
 
     rss = sum(abs2, residuals_raw)
     r2_within = data_prep.has_fes ? one(T) - rss / tss_partial : one(T) - rss / tss_total
-
-    dof_model = size(X, 2) - (data_prep.has_intercept & !data_prep.has_fe_intercept)
     tss_for_fstat = data_prep.has_fes ? tss_partial : tss_total
     mss_val = tss_for_fstat - rss
     F_stat = dof_model > 0 ? (mss_val / dof_model) / (rss / dof_residual) : T(NaN)
@@ -676,11 +677,19 @@ function fit_tsls(@nospecialize(df),
     ngroups_fes = [nunique(fe) for fe in subfes]
     fe_groups = Vector{Int}[fe.refs for fe in subfes]
 
+    # For leverage calculation (AER formula), we need the FULL instrument matrix
+    # which includes exogenous regressors: Z_full = [Xexo, Z_excluded]
+    # newZ already contains this from the first stage computation
+    Z_full = newZ
+    Z_fullZZ = Symmetric(Z_full' * Z_full)
+    invZ_fullZZ = Symmetric(inv(cholesky(Z_fullZZ)))
+
     postestimation_data = PostEstimationDataIV(
         convert(Matrix{T}, Xhat), convert(Matrix{T}, X),
         cholesky(Symmetric(XhatXhat)), invXhatXhat, wts, cluster_data,
         basis_coef, first_stage_data,
         Matrix{T}(undef, 0, 0), T(NaN),
+        convert(Matrix{T}, Z_full), invZ_fullZZ,
         fe_groups, data_prep.fekeys, ngroups_fes
     )
 

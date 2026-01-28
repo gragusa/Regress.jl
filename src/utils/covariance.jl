@@ -1,6 +1,10 @@
 const CM = CovarianceMatrices
 using LinearAlgebra: BLAS
 
+# Type union for OLS models - allows shared residualadjustment implementations
+# Both OLSEstimator and OLSMatrixEstimator use identical residual adjustment logic
+const OLSModel = Union{OLSEstimator, OLSMatrixEstimator}
+
 ##############################################################################
 ##
 ## Moment Matrix Computation (can be overridden by LoopVectorization extension)
@@ -177,9 +181,12 @@ function compute_hc1_vcov_direct(
     BLAS.syrk!('U', 'T', one(T) / T(n), M, zero(T), aVar_buf)
     aVar = Symmetric(aVar_buf, :U)
 
-    # Scale factor for HC1: n * dof_residual / (n - k - k_fe)
-    p_total = dof_model + dof_fes
-    scale = T(n) * T(dof_residual) / T(n - p_total)
+    # Scale factor for HC1 sandwich estimator
+    # The adjustment sqrt(n/dof_residual) was applied to residuals above,
+    # which gives aVar = (1/dof_residual) * Σ(e_i² * X_i'X_i)
+    # The HC1 formula is: Σ = (n/dof_residual) * invXX * Σ(e_i² * X_i'X_i) * invXX
+    # So we need: scale * (1/dof_residual) = n/dof_residual, i.e., scale = n
+    scale = T(n)
 
     # Handle collinearity
     if !all(basis_coef)
@@ -253,9 +260,12 @@ function compute_hc1_vcov_direct_iv(
     BLAS.syrk!('U', 'T', one(T) / T(n), M, zero(T), aVar_buf)
     aVar = Symmetric(aVar_buf, :U)
 
-    # Scale factor for HC1: n * dof_residual / (n - k - k_fe)
-    p_total = dof_model + dof_fes
-    scale = T(n) * T(dof_residual) / T(n - p_total)
+    # Scale factor for HC1 sandwich estimator
+    # The adjustment sqrt(n/dof_residual) was applied to residuals above,
+    # which gives aVar = (1/dof_residual) * Σ(e_i² * X_i'X_i)
+    # The HC1 formula is: Σ = (n/dof_residual) * invXX * Σ(e_i² * X_i'X_i) * invXX
+    # So we need: scale * (1/dof_residual) = n/dof_residual, i.e., scale = n
+    scale = T(n)
 
     # Handle collinearity - expand result back to full size
     if !all(basis_coef)
@@ -284,6 +294,32 @@ end
 ## CovarianceMatrices.jl Interface for Post-Estimation vcov
 ##
 ##############################################################################
+
+##############################################################################
+##
+## CovarianceMatrices.jl Protocol Methods
+##
+## These implement the CovarianceMatrices.jl protocol for RegressionModel types.
+## While Regress.jl uses its own specialized implementations for performance
+## (fixest-style DOF corrections, fused broadcasts, direct cluster aggregation),
+## these methods document the interface and enable potential future use of
+## generic CovarianceMatrices.jl algorithms.
+##
+##############################################################################
+
+# Protocol method: number of observations
+CM.numobs(m::OLSEstimator) = nobs(m)
+CM.numobs(m::OLSMatrixEstimator) = nobs(m)
+
+# Protocol method: residuals (CovarianceMatrices uses _residuals internally)
+CM._residuals(m::OLSEstimator) = residuals(m)
+CM._residuals(m::OLSMatrixEstimator) = residuals(m)
+
+# Protocol method: mask for non-collinear coefficients
+CM.mask(m::OLSEstimator) = m.basis_coef
+CM.mask(m::OLSMatrixEstimator) = m.basis_coef
+
+# Note: bread() and leverage() are defined below in their respective sections
 
 """
     CovarianceMatrices.momentmatrix(m::OLSEstimator)
@@ -629,7 +665,7 @@ function CM.aVar(
 end
 
 # Residual adjustment for CachedCR (same as CR0/CR1 - no adjustment)
-@noinline residualadjustment(k::CM.CachedCR, r::OLSEstimator) = 1.0
+@noinline residualadjustment(k::CM.CachedCR, r::OLSModel) = 1.0
 
 ##############################################################################
 ##
@@ -698,12 +734,15 @@ function StatsAPI.leverage(m::OLSEstimator{T, <:OLSPredictorSweep}) where {T}
     return vec(sum(abs2, XL, dims = 2))
 end
 
-@noinline residualadjustment(k::CM.HR0, r::OLSEstimator) = 1.0
-@noinline residualadjustment(k::CM.HR1, r::OLSEstimator) = sqrt(nobs(r) / dof_residual(r))
-@noinline residualadjustment(k::CM.HR2, r::OLSEstimator) = @. 1.0 / sqrt(1.0 - $leverage(r))
-@noinline residualadjustment(k::CM.HR3, r::OLSEstimator) = @. 1.0 / (1.0 - $leverage(r))
+# Residual adjustment functions for OLS models (both OLSEstimator and OLSMatrixEstimator)
+# These use the OLSModel type union to avoid code duplication
 
-@noinline function residualadjustment(k::CM.HR4, r::OLSEstimator)
+@noinline residualadjustment(k::CM.HR0, r::OLSModel) = 1.0
+@noinline residualadjustment(k::CM.HR1, r::OLSModel) = sqrt(nobs(r) / dof_residual(r))
+@noinline residualadjustment(k::CM.HR2, r::OLSModel) = @. 1.0 / sqrt(1.0 - $leverage(r))
+@noinline residualadjustment(k::CM.HR3, r::OLSModel) = @. 1.0 / (1.0 - $leverage(r))
+
+@noinline function residualadjustment(k::CM.HR4, r::OLSModel)
     n = nobs(r)
     h = leverage(r)
     p = round(Int, sum(h))
@@ -714,7 +753,7 @@ end
     h
 end
 
-@noinline function residualadjustment(k::CM.HR4m, r::OLSEstimator)
+@noinline function residualadjustment(k::CM.HR4m, r::OLSModel)
     n = nobs(r)
     h = leverage(r)
     p = round(Int, sum(h))
@@ -725,7 +764,7 @@ end
     h
 end
 
-@noinline function residualadjustment(k::CM.HR5, r::OLSEstimator)
+@noinline function residualadjustment(k::CM.HR5, r::OLSModel)
     n = nobs(r)
     h = leverage(r)
     p = round(Int, sum(h))
@@ -739,11 +778,11 @@ end
 
 # For cluster-robust estimators CR0/CR1, no adjustment to moment matrix needed.
 # The clustering is handled by CovarianceMatrices.aVar itself.
-@noinline residualadjustment(k::CM.CR0, r::OLSEstimator) = 1.0
-@noinline residualadjustment(k::CM.CR1, r::OLSEstimator) = 1.0
+@noinline residualadjustment(k::CM.CR0, r::OLSModel) = 1.0
+@noinline residualadjustment(k::CM.CR1, r::OLSModel) = 1.0
 
 # HAC (kernel) estimators - no residual adjustment needed
-@noinline residualadjustment(k::CM.HAC, r::OLSEstimator) = 1.0
+@noinline residualadjustment(k::CM.HAC, r::OLSModel) = 1.0
 
 """
     _get_group_ranges(g)
@@ -783,7 +822,7 @@ function _get_group_ranges(g)
     return perm, starts
 end
 
-function residualadjustment(k::CM.CR2, r::OLSEstimator)
+function residualadjustment(k::CM.CR2, r::OLSModel)
     wts = r.rr.wts
     @assert length(k.g) == 1
     g = k.g[1]
@@ -820,7 +859,7 @@ function matrixpowbysvd(A, p; tol = eps()^(1 / 1.5))
     return s.V * diagm(0 => V .^ p) * s.Vt
 end
 
-function residualadjustment(k::CM.CR3, r::OLSEstimator)
+function residualadjustment(k::CM.CR3, r::OLSModel)
     wts = r.rr.wts
     @assert length(k.g) == 1
     g = k.g[1]
@@ -1034,6 +1073,11 @@ function CM.vcov(k::CM.AbstractAsymptoticVarianceEstimator, m::OLSEstimator; dof
         #   - FE nested in cluster variable are NOT counted in K
         #   - FE NOT nested in cluster variable ARE counted in K
         _cluster_robust_scale(k, m, n)
+    elseif k isa CM.HAC
+        # HAC: Apply DOF correction n/(n-p) to match CovarianceMatrices/GLM behavior
+        # p_total includes both model parameters and fixed effects DOF
+        p_total = dof(m) + dof_fes(m)
+        n * n / (n - p_total)
     else
         # HC0/HR0: no DOF adjustment, scale = n
         convert(eltype(A), n)
@@ -1121,53 +1165,9 @@ function StatsAPI.leverage(m::OLSMatrixEstimator{T, <:OLSPredictorSweep}) where 
     return vec(sum(abs2, XL, dims = 2))
 end
 
-# Residual adjustment functions for OLSMatrixEstimator
-@noinline residualadjustment(k::CM.HR0, r::OLSMatrixEstimator) = 1.0
-@noinline residualadjustment(k::CM.HR1, r::OLSMatrixEstimator) = sqrt(nobs(r) /
-                                                                      dof_residual(r))
-@noinline residualadjustment(k::CM.HR2, r::OLSMatrixEstimator) = @. 1.0 /
-                                                                    sqrt(1.0 - $leverage(r))
-@noinline residualadjustment(k::CM.HR3, r::OLSMatrixEstimator) = @. 1.0 /
-                                                                    (1.0 - $leverage(r))
-
-@noinline function residualadjustment(k::CM.HR4, r::OLSMatrixEstimator)
-    n = nobs(r)
-    h = leverage(r)
-    p = round(Int, sum(h))
-    @inbounds for j in eachindex(h)
-        delta = min(4.0, n * h[j] / p)
-        h[j] = 1 / (1 - h[j])^(delta / 2)
-    end
-    h
-end
-
-@noinline function residualadjustment(k::CM.HR4m, r::OLSMatrixEstimator)
-    n = nobs(r)
-    h = leverage(r)
-    p = round(Int, sum(h))
-    @inbounds for j in eachindex(h)
-        delta = min(1, n * h[j] / p) + min(1.5, n * h[j] / p)
-        h[j] = 1 / (1 - h[j])^(delta / 2)
-    end
-    h
-end
-
-@noinline function residualadjustment(k::CM.HR5, r::OLSMatrixEstimator)
-    n = nobs(r)
-    h = leverage(r)
-    p = round(Int, sum(h))
-    mx = max(n * 0.7 * maximum(h) / p, 4.0)
-    @inbounds for j in eachindex(h)
-        alpha = min(n * h[j] / p, mx)
-        h[j] = 1 / (1 - h[j])^(alpha / 4)
-    end
-    return h
-end
-
-# Cluster-robust and HAC estimators - no residual adjustment
-@noinline residualadjustment(k::CM.CR0, r::OLSMatrixEstimator) = 1.0
-@noinline residualadjustment(k::CM.CR1, r::OLSMatrixEstimator) = 1.0
-@noinline residualadjustment(k::CM.HAC, r::OLSMatrixEstimator) = 1.0
+# Note: residualadjustment methods for OLSMatrixEstimator are provided by the
+# OLSModel type union (Union{OLSEstimator, OLSMatrixEstimator}) defined earlier
+# in this file, eliminating code duplication.
 
 function CM.aVar(
         k::K,
@@ -1261,6 +1261,11 @@ function CM.vcov(k::CM.AbstractAsymptoticVarianceEstimator, m::OLSMatrixEstimato
         K = dof(m)
         K_adj = (n - 1) / (n - K)
         convert(Float64, n * G_adj * K_adj)
+    elseif k isa CM.HAC
+        # HAC: Apply DOF correction n/(n-p) to match CovarianceMatrices/GLM behavior
+        # For matrix estimator, no fixed effects so p = dof(m)
+        p = dof(m)
+        n * n / (n - p)
     else
         # HC0/HR0: no DOF adjustment, scale = n
         convert(eltype(A), n)

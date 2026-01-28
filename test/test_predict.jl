@@ -1,7 +1,6 @@
-using Regress, DataFrames, CategoricalArrays, CSV, Test, StatsBase, LinearAlgebra
-include("gpu_utils.jl")
+@testitem "print and display" tags = [:ols, :iv, :smoke] begin
+    using Regress, DataFrames, CategoricalArrays, CSV, StatsBase
 
-@testset "print results" begin
     df = DataFrame(CSV.File(joinpath(dirname(pathof(Regress)), "../dataset/Cigar.csv")))
     df.StateC = categorical(df.State)
 
@@ -30,32 +29,50 @@ include("gpu_utils.jl")
     result = iv(TSLS(), df, model)
 end
 
-@testset "Predict" begin
+@testitem "predict - simple FE" tags = [:predict, :fe, :smoke] begin
+    using Regress, DataFrames, LinearAlgebra
+
     # Simple - one binary FE
     df = DataFrame(x = rand(100), g = rand(["a", "b"], 100))
     df.y = 1.0 .+ 0.5 .* df.x .+ (df.g .== "b")
-    m = ols(df, @formula(y ~ x + fe(g)); save = :fe)  # Fixed: use ols for non-IV formula
+    m = ols(df, @formula(y ~ x + fe(g)); save = :fe)
     pred = predict(m, df)
     @test pred ≈ df.y
 
     # One group only
     df = DataFrame(x = rand(100), g = "a")
     df.y = 1.0 .+ 0.5 .* df.x
-    m = ols(df, @formula(y ~ x + fe(g)); save = :fe)  # Fixed: use ols for non-IV formula
+    m = ols(df, @formula(y ~ x + fe(g)); save = :fe)
     pred = predict(m, df)
     @test pred ≈ df.y
+end
+
+@testitem "predict - multiple FE" tags = [:predict, :fe] begin
+    using Regress, DataFrames, LinearAlgebra
 
     # Two groups and predict df has a level that's missing from model
     df = DataFrame(x = rand(100), g = rand(["a", "b"], 100))
     df.y = 1.0 .+ 0.5 .* df.x .+ (df.g .== "b")
-    m = ols(df, @formula(y ~ x + fe(g)); save = :fe)  # Fixed: use ols for non-IV formula
+    m = ols(df, @formula(y ~ x + fe(g)); save = :fe)
     pred = predict(m, DataFrame(x = [1.0, 2.0], g = ["a", "c"]))
     @test ismissing(pred[2])
+
+    # Two groups + two FEs
+    df = DataFrame(x = rand(100), g1 = rand(["a", "b"], 100), g2 = rand(["c", "d"], 100))
+    df.y = 1.0 .+ 0.5 .* df.x .+ isequal.(df.g1, "b") .+ (df.g2 .== "d") * 2
+    m = ols(df, @formula(y ~ x + fe(g1) + fe(g2)); save = :fe)
+    pred = predict(m, df)
+    @test pred isa Vector{Union{Float64, Missing}}  # Always Union type for type stability
+    @test pred ≈ df.y
+end
+
+@testitem "predict - missing FE levels" tags = [:predict, :fe] begin
+    using Regress, DataFrames, LinearAlgebra
 
     # Two groups + missing observation of FE
     df = DataFrame(x = rand(100), g = [missing; rand(["a", "b"], 99)])
     df.y = 1.0 .+ 0.5 .* df.x .+ isequal.(df.g, "b")
-    m = ols(df, @formula(y ~ x + fe(g)), save = :fe)  # Fixed: use ols for non-IV formula
+    m = ols(df, @formula(y ~ x + fe(g)), save = :fe)
     pred = predict(m, df)
     @test pred isa Vector{Union{Missing, Float64}}
     @test ismissing(pred[1])
@@ -64,25 +81,17 @@ end
     # Two groups + missing observation of non-FE
     df = DataFrame(x = [missing; rand(99)], g = rand(["a", "b"], 100))
     df.y = 1.0 .+ 0.5 .* df.x .+ isequal.(df.g, "b")
-    m = ols(df, @formula(y ~ x + fe(g)), save = :fe)  # Fixed: use ols for non-IV formula
+    m = ols(df, @formula(y ~ x + fe(g)), save = :fe)
     pred = predict(m, df)
     @test pred isa Vector{Union{Missing, Float64}}
     @test ismissing(pred[1])
     @test pred[2] ≈ df.y[2]
 
-    # Two groups + two FEs
-    df = DataFrame(x = rand(100), g1 = rand(["a", "b"], 100), g2 = rand(["c", "d"], 100))
-    df.y = 1.0 .+ 0.5 .* df.x .+ isequal.(df.g1, "b") .+ (df.g2 .== "d") * 2
-    m = ols(df, @formula(y ~ x + fe(g1) + fe(g2)); save = :fe)  # Fixed: use ols for non-IV formula
-    pred = predict(m, df)
-    @test pred isa Vector{Union{Float64, Missing}}  # Always Union type for type stability
-    @test pred ≈ df.y
-
     # Two groups + two FEs, missing one FE
     df = DataFrame(x = rand(100), g1 = rand(["a", "b"], 100), g2 = [missing;
                                                                     rand(["c", "d"], 99)])
     df.y = 1.0 .+ 0.5 .* df.x .+ isequal.(df.g1, "b") .+ isequal.(df.g2, "d") * 2
-    m = ols(df, @formula(y ~ x + fe(g1) + fe(g2)); save = :fe)  # Fixed: use ols for non-IV formula
+    m = ols(df, @formula(y ~ x + fe(g1) + fe(g2)); save = :fe)
     pred = predict(m, df)
     @test pred isa Vector{Union{Missing, Float64}}
     @test ismissing(pred[1])
@@ -94,75 +103,40 @@ end
         g3 = rand(["e", "f"], 100))
     df.y = 1.0 .+ 0.5 .* df.x .+ isequal.(df.g1, "b") .+ isequal.(df.g2, "d") * 2 .+
            isequal.(df.g3, "e")
-    m = ols(df, @formula(y ~ x + fe(g1) + fe(g2) + fe(g3)); save = :fe)  # Fixed: use ols
+    m = ols(df, @formula(y ~ x + fe(g1) + fe(g2) + fe(g3)); save = :fe)
     pred = predict(m, df)
     @test pred isa Vector{Union{Missing, Float64}}
     @test ismissing(pred[1])
     @test pred[2:end] ≈ df.y[2:end]
+end
+
+@testitem "predict - interactive FE" tags = [:predict, :fe] begin
+    using Regress, DataFrames, LinearAlgebra
 
     # Interactive FE
     df = DataFrame(x = rand(100), g1 = rand(["a", "b"], 100), g2 = rand(["c", "d"], 100))
     df.y = 1.0 .+ 0.5 .* df.x .+ (df.g1 .== "b") .+ (df.g1 .== "b" .&& df.g2 .== "d")
-    m = ols(df, @formula(y ~ x + fe(g1)&fe(g2)); save = :fe)  # Fixed: use ols
+    m = ols(df, @formula(y ~ x + fe(g1)&fe(g2)); save = :fe)
     pred = predict(m, df)
     @test pred isa Vector{Union{Float64, Missing}}  # Always Union type for type stability
     @test pred ≈ df.y
 
-    # Interactive FE + missing 
+    # Interactive FE + missing
     df = DataFrame(x = rand(100), g1 = rand(["a", "b"], 100), g2 = [missing;
                                                                     rand(["c", "d"], 99)])
     df.y = 1.0 .+ 0.5 .* df.x .+ (df.g1 .== "b") .+
            (isequal.(df.g1, "b") .&& isequal.(df.g2, "d"))
-    m6 = ols(df, @formula(y ~ x + fe(g1)&fe(g2)); save = :fe)  # Fixed: use ols
-    pred = predict(m, df)
+    m6 = ols(df, @formula(y ~ x + fe(g1)&fe(g2)); save = :fe)
+    pred = predict(m6, df)
     @test pred isa Vector{Union{Missing, Float64}}
     @test length(pred) == nrow(df)
     @test ismissing(pred[1])
     @test pred[2:end] ≈ df.y[2:end]
-
-    # Interaction with continuous variable
-    df = DataFrame(x = rand(100), g = rand(["a", "b"], 100), z = rand(100))
-    df.y = 1.0 .+ 0.5 .* df.x .+ 2.0 .* (df.g .== "b") .* df.z
-    m = ols(df, @formula(y ~ x + fe(g)&z); save = :fe)  # Fixed: use ols
-    @test_throws ArgumentError pred = predict(m, df)
-    #@test pred ≈ df.y # Once implemented
-
-    # Interaction with continuous variable, FE missing 
-    df = DataFrame(x = rand(100), g = [missing; rand(["a", "b"], 99)], z = rand(100))
-    df.y = 1.0 .+ 0.5 .* df.x .+ 2.0 .* (df.g .== "b") .* df.z
-    m = ols(df, @formula(y ~ x + fe(g)&z); save = :fe)  # Fixed: use ols
-    @test_throws ArgumentError pred = predict(m, df)
-    #@test pred ≈ df.y
-
-    # Interaction with continuous variable, cont var missing
-    df = DataFrame(x = rand(100), g = rand(["a", "b"], 100), z = [missing; rand(99)])
-    df.y = 1.0 .+ 0.5 .* df.x .+ 2.0 .* (df.g .== "b") .* df.z
-    m = ols(df, @formula(y ~ x + fe(g)&z); save = :fe)  # Fixed: use ols
-    @test_throws ArgumentError pred = predict(m, df)
-    #@test pred ≈ df.y
-
-    # Regular FE + another FE interacted with continuous variable
-    df = DataFrame(x = rand(100), g1 = rand(["a", "b"], 100), g2 = rand(["c", "d"], 100), z = rand(100))
-    df.y = 1.0 .+ 0.5 .* df.x .+ 2.0 .* (df.g2 .== "b") .* df.z .+ 3.0 .* (df.g1 .== "b")
-    m = ols(df, @formula(y ~ x + fe(g1) + fe(g2)&z); save = :fe)  # Fixed: use ols
-    @test_throws ArgumentError pred = predict(m, df)
-    #@test pred ≈ df.y
-
-    # Two continuous/FE interactions
-    m = ols(df, @formula(y ~ x + fe(g1) + fe(g2)&z + fe(g1)&x); save = :fe)  # Fixed: use ols
-    @test_throws ArgumentError pred = predict(m, df)
-
-    # Regular FE + interacted FE + FE/continuous interaction
-    df = DataFrame(x = rand(100), g1 = rand(["a", "b"], 100), g2 = rand(["c", "d"], 100),
-        g3 = rand(["e", "f"], 100), g4 = rand(["g", "h"], 100), z = rand(100))
-    df.y = 1.0 .+ 0.5 .* df.x .+ 2.0 .* (df.g1 .== "b") .+
-           3.0 .* (df.g2 .== "d") .* (df.g3 .== "f") .+
-           4.0 .* (df.g4 .== "h") .* df.z
-    m = ols(df, @formula(y ~ x + fe(g1) + fe(g2)&fe(g3) + fe(g4)&z))  # Fixed: use ols
-    @test_throws ArgumentError pred = predict(m, df)
 end
 
-@testset "Continuous/FE detection" begin
+@testitem "has_cont_fe_interaction" tags = [:formula] begin
+    using Regress
+
     # Regular interaction is fine as handled by StatsModels
     @test Regress.has_cont_fe_interaction(@formula(y ~ x + y&z)) == false
 
@@ -180,7 +154,50 @@ end
     @test Regress.has_cont_fe_interaction(@formula(y ~ x + y^2&z)) == false
 end
 
-@testset "residuals" begin
+@testitem "predict - continuous/FE interaction throws" tags = [:predict, :fe] begin
+    using Regress, DataFrames
+
+    # Interaction with continuous variable
+    df = DataFrame(x = rand(100), g = rand(["a", "b"], 100), z = rand(100))
+    df.y = 1.0 .+ 0.5 .* df.x .+ 2.0 .* (df.g .== "b") .* df.z
+    m = ols(df, @formula(y ~ x + fe(g)&z); save = :fe)
+    @test_throws ArgumentError pred = predict(m, df)
+
+    # Interaction with continuous variable, FE missing
+    df = DataFrame(x = rand(100), g = [missing; rand(["a", "b"], 99)], z = rand(100))
+    df.y = 1.0 .+ 0.5 .* df.x .+ 2.0 .* (df.g .== "b") .* df.z
+    m = ols(df, @formula(y ~ x + fe(g)&z); save = :fe)
+    @test_throws ArgumentError pred = predict(m, df)
+
+    # Interaction with continuous variable, cont var missing
+    df = DataFrame(x = rand(100), g = rand(["a", "b"], 100), z = [missing; rand(99)])
+    df.y = 1.0 .+ 0.5 .* df.x .+ 2.0 .* (df.g .== "b") .* df.z
+    m = ols(df, @formula(y ~ x + fe(g)&z); save = :fe)
+    @test_throws ArgumentError pred = predict(m, df)
+
+    # Regular FE + another FE interacted with continuous variable
+    df = DataFrame(x = rand(100), g1 = rand(["a", "b"], 100), g2 = rand(["c", "d"], 100), z = rand(100))
+    df.y = 1.0 .+ 0.5 .* df.x .+ 2.0 .* (df.g2 .== "b") .* df.z .+ 3.0 .* (df.g1 .== "b")
+    m = ols(df, @formula(y ~ x + fe(g1) + fe(g2)&z); save = :fe)
+    @test_throws ArgumentError pred = predict(m, df)
+
+    # Two continuous/FE interactions
+    m = ols(df, @formula(y ~ x + fe(g1) + fe(g2)&z + fe(g1)&x); save = :fe)
+    @test_throws ArgumentError pred = predict(m, df)
+
+    # Regular FE + interacted FE + FE/continuous interaction
+    df = DataFrame(x = rand(100), g1 = rand(["a", "b"], 100), g2 = rand(["c", "d"], 100),
+        g3 = rand(["e", "f"], 100), g4 = rand(["g", "h"], 100), z = rand(100))
+    df.y = 1.0 .+ 0.5 .* df.x .+ 2.0 .* (df.g1 .== "b") .+
+           3.0 .* (df.g2 .== "d") .* (df.g3 .== "f") .+
+           4.0 .* (df.g4 .== "h") .* df.z
+    m = ols(df, @formula(y ~ x + fe(g1) + fe(g2)&fe(g3) + fe(g4)&z))
+    @test_throws ArgumentError pred = predict(m, df)
+end
+
+@testitem "residuals - OLS" tags = [:predict, :ols, :smoke] begin
+    using Regress, DataFrames, CategoricalArrays, CSV, StatsBase
+
     df = DataFrame(CSV.File(joinpath(dirname(pathof(Regress)), "../dataset/Cigar.csv")))
     df.StateC = categorical(df.State)
 
@@ -198,6 +215,13 @@ end
     model = @formula Sales ~ CPI
     result = ols(df, model, weights = :Pop)
     @test residuals(result, df)[1:3] ≈ [-35.641449, -34.0611538, -30.860784] atol = 1e-4
+end
+
+@testitem "residuals - IV" tags = [:predict, :iv] begin
+    using Regress, DataFrames, CategoricalArrays, CSV, StatsBase
+
+    df = DataFrame(CSV.File(joinpath(dirname(pathof(Regress)), "../dataset/Cigar.csv")))
+    df.StateC = categorical(df.State)
 
     # iv
     model = @formula Sales ~ CPI + (Price ~ Pimin)
@@ -218,6 +242,13 @@ end
     model = @formula Sales ~ CPI + (Price ~ Pimin)
     result = iv(TSLS(), df, model, subset = df.State .<= 30, weights = :Pop)
     @test residuals(result, df)[1:3] ≈ [-34.081720, -31.906020, -29.131738] atol = 1e-4
+end
+
+@testitem "residuals - FE" tags = [:predict, :fe] begin
+    using Regress, DataFrames, CategoricalArrays, CSV, StatsBase
+
+    df = DataFrame(CSV.File(joinpath(dirname(pathof(Regress)), "../dataset/Cigar.csv")))
+    df.StateC = categorical(df.State)
 
     # fixed effects
     model = @formula Sales ~ Price + fe(State)
@@ -258,6 +289,12 @@ end
     model = @formula Sales ~ Price + fe(State)
     result = ols(df, model, save = :fe)
     @test "fe_State" ∈ names(fe(result))
+end
+
+@testitem "residuals - IV recategorized" tags = [:predict, :iv] begin
+    using Regress, DataFrames, CategoricalArrays, CSV
+
+    df = DataFrame(CSV.File(joinpath(dirname(pathof(Regress)), "../dataset/Cigar.csv")))
 
     # iv recategorized
     df.Pimin2 = df.Pimin
@@ -295,7 +332,9 @@ end
     @test res ≈ res5
 end
 
-@testset "saved fixed effects" begin
+@testitem "saved fixed effects" tags = [:fe, :smoke] begin
+    using Regress, DataFrames, CategoricalArrays, CSV, StatsBase
+
     df = DataFrame(CSV.File(joinpath(dirname(pathof(Regress)), "../dataset/Cigar.csv")))
     df.StateC = categorical(df.State)
 
@@ -376,7 +415,27 @@ end
     @test fe(result)[1, :fe_Year] + fe(result)[1, :fe_State] ≈ 158.91798 atol = 1e-4
 end
 
-@testset "gpu" begin
+@testitem "GPU predict" tags = [:predict, :fe, :gpu] begin
+    using Regress, DataFrames, CSV
+
+    # GPU detection based on platform
+    GPU_METHOD = if Sys.isapple()
+        try
+            using Metal
+            Metal.functional() ? :Metal : nothing
+        catch
+            nothing
+        end
+    else
+        try
+            using CUDA
+            CUDA.functional() ? :CUDA : nothing
+        catch
+            nothing
+        end
+    end
+    GPU_AVAILABLE = GPU_METHOD !== nothing
+
     df = DataFrame(CSV.File(joinpath(dirname(pathof(Regress)), "../dataset/Cigar.csv")))
     methods_vec = [:cpu]
     if GPU_AVAILABLE

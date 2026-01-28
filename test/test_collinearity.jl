@@ -1,8 +1,7 @@
-using DataFrames, CSV, Regress, Random, Statistics, Test
-using StatsBase: coef, stderror
-using CovarianceMatrices: CR1
-
-@testset "collinearity_with_fixedeffects" begin
+@testitem "collinearity with fixed effects" tags = [:ols, :fe, :vcov] begin
+    using DataFrames, CSV, Regress, Random, Statistics
+    using StatsBase: coef, stderror
+    using CovarianceMatrices: CR1
 
     # read the data
     csvfile = CSV.File(joinpath(dirname(pathof(Regress)), "../dataset/Cigar.csv"))
@@ -26,14 +25,18 @@ using CovarianceMatrices: CR1
     dflarge.catvar = rand(1:200, nrow(dflarge))
 
     # run the regression with the default setting (tol = 1e-6)
-    # Fixed: use ols for non-IV formula, cluster SE via post-estimation
     rr = ols(
         dflarge, @formula(Price ~ highstate + Pop + fe(Year) + fe(catvar) + fe(State)),
         save_cluster = :State, tol = 1e-6)
 
     # test that the collinear coefficient is zero and the standard error is NaN
-    @test coef(rr)[1] ≈ 0.0  # Fixed: use coef(rr) function, not rr.coef
+    @test coef(rr)[1] ≈ 0.0
     @test isnan(stderror(CR1(:State), rr)[1])
+end
+
+@testitem "collinearity - small data" tags = [:ols] begin
+    using DataFrames, Regress
+    using StatsBase: stderror
 
     df = DataFrame(
         [36.9302 44.5105;
@@ -44,6 +47,6 @@ using CovarianceMatrices: CR1
          35.3885 44.5109;],
         :auto
     )
-    rr = ols(df, @formula(x1 ~ x2))  # Fixed: use ols for non-IV formula
+    rr = ols(df, @formula(x1 ~ x2))
     @test all(!isnan, stderror(rr))
 end

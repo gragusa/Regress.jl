@@ -117,16 +117,19 @@ Use `has_first_stage_data(pe.first_stage_data)` to check if first-stage data is 
 Use `has_kclass_adj(pe)` to check if K-class adjustment matrix is available.
 """
 struct PostEstimationDataIV{T, W <: AbstractWeights}
-    X::Matrix{T}
-    Xhat::Matrix{T}
+    X::Matrix{T}                # X̂ = fitted values from first stage (confusing name, kept for compatibility)
+    Xhat::Matrix{T}             # Original X regressors (confusing name, kept for compatibility)
     crossx::Cholesky{T, Matrix{T}}
-    invXX::Symmetric{T, Matrix{T}}
+    invXX::Symmetric{T, Matrix{T}}  # (X̂'X̂)^{-1}
     weights::W
     cluster_vars::NamedTuple
     basis_coef::BitVector
     first_stage_data::FirstStageData{T}
     Adj::Matrix{T}              # Empty (0×0) for TSLS, filled for K-class
     kappa::T                    # NaN for TSLS
+    # For leverage computation (AER formula)
+    Z::Matrix{T}                # Instruments matrix
+    invZZ::Symmetric{T, Matrix{T}}  # (Z'Z)^{-1}
     # FE nesting detection fields
     fe_groups::Vector{Vector{Int}}   # One ref vector per FE dimension
     fe_names::Vector{Symbol}          # Names of FE variables
@@ -313,17 +316,77 @@ bread(m::IVEstimator) = m.postestimation.invXX
     leverage(m::IVEstimator)
 
 Compute leverage values (diagonal of hat matrix) for IV models.
-For IV: h_i = X_i * (X'X)^(-1) * X_i' where X contains predicted endogenous.
+
+Uses the AER/sandwich formula for IV models:
+    h = diag(X * (X̂'X̂)^{-1} * X' * Z * (Z'Z)^{-1} * Z')
+
+Where:
+- X = original regressors
+- X̂ = fitted values from first stage
+- Z = instruments
+
+This matches R's AER::ivreg and sandwich::vcovHC for IV models.
 For K-class: Uses Adj matrix (stored in pe.Adj) when X is empty.
 """
 function StatsAPI.leverage(m::IVEstimator)
     isnothing(m.postestimation) && error("Model does not have post-estimation data stored.")
     pe = m.postestimation
-    # For K-class, pe.X is empty and we use pe.Adj instead
-    X = has_kclass_adj(pe) ? pe.Adj : pe.X
-    invXX = pe.invXX
-    # h_i = X_i * invXX * X_i'
-    return vec(sum(X .* (X * invXX), dims = 2))
+
+    # For K-class estimators, use the Adj matrix if available
+    if has_kclass_adj(pe)
+        # K-class uses simple leverage: h = diag(Adj * invXX * Adj')
+        Adj = pe.Adj
+        invXX = pe.invXX
+        return vec(sum(Adj .* (Adj * invXX), dims = 2))
+    end
+
+    # TSLS uses AER formula: h = diag(X * invXhatXhat * X' * Z * invZZ * Z')
+    X_orig = pe.Xhat      # Original regressors (confusing field name)
+    invXhatXhat = pe.invXX
+    Z = pe.Z
+    invZZ = pe.invZZ
+
+    # Compute A = X * invXhatXhat * X' (this is n x n, but we only need for diag computation)
+    # Compute P_Z = Z * invZZ * Z' (projection onto instruments)
+    # h = diag(A * P_Z)
+    #
+    # Efficient computation: h_i = (X_i * invXhatXhat * X') * (Z * invZZ * Z'_i)
+    # = sum_j (X_i * invXhatXhat * X_j') * (Z_j * invZZ * Z_i')
+    #
+    # More efficient: compute A_row = X_i * invXhatXhat * X' for each i
+    # then h_i = A_row * P_Z[:, i] = A_row * Z * invZZ * Z_i'
+    #
+    # Best approach: compute full matrices and take diagonal
+    # A = X * invXhatXhat * X'
+    # B = Z * invZZ * Z'
+    # h = diag(A * B)
+    #
+    # For memory efficiency, compute row by row:
+    n = size(X_orig, 1)
+    h = Vector{eltype(X_orig)}(undef, n)
+    XinvXX = X_orig * invXhatXhat  # n x k
+    ZinvZZ = Z * invZZ              # n x q
+
+    @inbounds for i in 1:n
+        # A_row_i = X_i * invXhatXhat * X' = XinvXX[i, :] * X'
+        # h_i = A_row_i * Z * invZZ * Z_i' = sum_j (XinvXX[i, :] ⋅ X[j, :]) * (ZinvZZ[j, :] ⋅ Z[i, :])
+        hi = zero(eltype(X_orig))
+        for j in 1:n
+            # (X_i * invXhatXhat) ⋅ X_j
+            a_ij = zero(eltype(X_orig))
+            for k in 1:size(XinvXX, 2)
+                a_ij += XinvXX[i, k] * X_orig[j, k]
+            end
+            # (Z * invZZ)_j ⋅ Z_i
+            b_ji = zero(eltype(Z))
+            for q in 1:size(ZinvZZ, 2)
+                b_ji += ZinvZZ[j, q] * Z[i, q]
+            end
+            hi += a_ij * b_ji
+        end
+        h[i] = hi
+    end
+    return h
 end
 
 # Residual adjustments for HC/HR estimators
@@ -1162,7 +1225,7 @@ struct TestStat
     val::Float64
 end
 Base.show(io::IO, x::TestStat) = isnan(x.val) ? print(io, ".") : @printf(io, "%.4f", x.val)
-Base.alignment(io::IO, x::TestStat) = (0, length(sprint(show, x, context=io)))
+Base.alignment(io::IO, x::TestStat) = (0, length(sprint(show, x, context = io)))
 
 function Base.show(io::IO, m::IVEstimator)
     ct = coeftable(m)
@@ -1190,7 +1253,9 @@ function Base.show(io::IO, m::IVEstimator)
     # Title: estimator name, right-aligned, yellow
     ctitle = _estimator_name(m)
     if supports_color(io)
-        print(io, lpad(ANSI_YELLOW * ctitle * ANSI_RESET, totwidth - 2 + length(ANSI_YELLOW) + length(ANSI_RESET)))
+        print(io,
+            lpad(ANSI_YELLOW * ctitle * ANSI_RESET,
+                totwidth - 2 + length(ANSI_YELLOW) + length(ANSI_RESET)))
     else
         print(io, lpad(ctitle, totwidth - 2))
     end
@@ -1407,4 +1472,444 @@ function StatsAPI.coeftable(m::IVEstimator; level = 0.95)
         hcat(cc, se, tt, pv, conf_int[:, 1:2]),
         ["Estimate", "Std. Error", "t-stat", "Pr(>|t|)", "Lower 95%", "Upper 95%"],
         ["$(coefnms[i])" for i in 1:length(cc)], 4)
+end
+
+##############################################################################
+##
+## IVMatrixEstimator - Matrix-based IV estimation (like OLSMatrixEstimator)
+##
+##############################################################################
+
+"""
+    PostEstimationDataIVMatrix{T}
+
+Stores data needed for post-estimation variance computation in matrix-based IV.
+
+# Fields
+- `X::Matrix{T}`: Original regressor matrix [Xexo, Xendo]
+- `Z::Matrix{T}`: Instrument matrix [Xexo, Zinstr]
+- `X_hat::Matrix{T}`: Projected regressors P_Z * X
+- `y::Vector{T}`: Response vector
+- `residuals::Vector{T}`: Residuals e = y - X*β
+- `invXhatXhat::Matrix{T}`: (X̂'X̂)⁻¹ for sandwich formula
+- `n_endogenous::Int`: Number of endogenous variables
+"""
+struct PostEstimationDataIVMatrix{T <: AbstractFloat}
+    X::Matrix{T}
+    Z::Matrix{T}
+    X_hat::Matrix{T}
+    y::Vector{T}
+    residuals::Vector{T}
+    invXhatXhat::Matrix{T}
+    n_endogenous::Int
+end
+
+"""
+    IVMatrixEstimator{T, V} <: AbstractRegressModel
+
+Matrix-based IV estimator for use without formula interface.
+Designed for programmatic use (e.g., LocalProjections.jl).
+
+# Type Parameters
+- `T`: Element type (Float64 or Float32)
+- `V`: Variance estimator type
+
+# Fields
+- `coef::Vector{T}`: Coefficient estimates
+- `postestimation::PostEstimationDataIVMatrix{T}`: Data for vcov computation
+- `basis_coef::BitVector`: Which coefficients are not collinear
+- `nobs::Int`: Number of observations
+- `dof::Int`: Number of estimated parameters
+- `dof_residual::Int`: Residual degrees of freedom
+- `rss::T`: Residual sum of squares
+- `tss::T`: Total sum of squares
+- `r2::T`: R-squared
+- `has_intercept::Bool`: Whether model includes intercept
+- `vcov_estimator::V`: Variance estimator used
+- `vcov_matrix::Symmetric{T, Matrix{T}}`: Precomputed variance-covariance matrix
+- `se::Vector{T}`: Standard errors
+- `t_stats::Vector{T}`: t-statistics
+- `p_values::Vector{T}`: p-values
+
+# Example
+```julia
+# Z = [exogenous, instruments], X = [exogenous, endogenous]
+model = iv(TSLS(), Z, X, y; has_intercept=false, n_endogenous=1)
+coef(model)
+vcov(HC1(), model)
+```
+"""
+struct IVMatrixEstimator{T <: AbstractFloat, V} <: AbstractRegressModel
+    coef::Vector{T}
+    postestimation::PostEstimationDataIVMatrix{T}
+    basis_coef::BitVector
+    nobs::Int
+    dof::Int
+    dof_residual::Int
+    rss::T
+    tss::T
+    r2::T
+    has_intercept::Bool
+
+    # Variance-covariance
+    vcov_estimator::V
+    vcov_matrix::Symmetric{T, Matrix{T}}
+    se::Vector{T}
+    t_stats::Vector{T}
+    p_values::Vector{T}
+end
+
+has_iv(::IVMatrixEstimator) = true
+has_fe(::IVMatrixEstimator) = false
+dof_fes(::IVMatrixEstimator) = 0
+model_hasintercept(m::IVMatrixEstimator) = m.has_intercept
+
+##############################################################################
+## StatsAPI Interface for IVMatrixEstimator
+##############################################################################
+
+function StatsAPI.coef(m::IVMatrixEstimator)
+    beta = copy(m.coef)
+    beta[.!m.basis_coef] .= zero(eltype(beta))
+    return beta
+end
+
+StatsAPI.nobs(m::IVMatrixEstimator) = m.nobs
+StatsAPI.dof(m::IVMatrixEstimator) = m.dof
+StatsAPI.dof_residual(m::IVMatrixEstimator) = m.dof_residual
+StatsAPI.rss(m::IVMatrixEstimator) = m.rss
+StatsAPI.r2(m::IVMatrixEstimator) = m.r2
+
+function StatsAPI.response(m::IVMatrixEstimator)
+    return m.postestimation.y
+end
+
+function StatsAPI.residuals(m::IVMatrixEstimator)
+    return m.postestimation.residuals
+end
+
+function StatsAPI.fitted(m::IVMatrixEstimator)
+    return m.postestimation.y .- m.postestimation.residuals
+end
+
+function StatsAPI.modelmatrix(m::IVMatrixEstimator)
+    return m.postestimation.X
+end
+
+function StatsAPI.vcov(m::IVMatrixEstimator)
+    return m.vcov_matrix
+end
+
+function StatsAPI.stderror(m::IVMatrixEstimator)
+    return m.se
+end
+
+##############################################################################
+## CovarianceMatrices Interface for IVMatrixEstimator
+##############################################################################
+
+"""
+    bread(m::IVMatrixEstimator)
+
+Returns (X̂'X̂)⁻¹ for sandwich variance estimation.
+"""
+bread(m::IVMatrixEstimator) = m.postestimation.invXhatXhat
+
+"""
+    momentmatrix(m::IVMatrixEstimator)
+
+Returns X̂ * diag(e) for moment-based variance estimation.
+For IV, we use the projected regressors X̂ = P_Z * X.
+"""
+function CovarianceMatrices.momentmatrix(m::IVMatrixEstimator)
+    X_hat = m.postestimation.X_hat
+    resid = m.postestimation.residuals
+    return X_hat .* resid
+end
+
+"""
+    leverage(m::IVMatrixEstimator)
+
+Returns diagonal of hat matrix H = X̂(X̂'X̂)⁻¹X̂' for HC2/HC3/HC4/HC5.
+"""
+function StatsAPI.leverage(m::IVMatrixEstimator)
+    X_hat = m.postestimation.X_hat
+    invXX = m.postestimation.invXhatXhat
+    # h_ii = X̂_i' * (X̂'X̂)⁻¹ * X̂_i
+    # Efficient computation: sum((X_hat * invXX) .* X_hat, dims=2)
+    return vec(sum((X_hat * invXX) .* X_hat, dims = 2))
+end
+
+# CovarianceMatrices.jl uses numobs, which is distinct from StatsAPI.nobs
+_CM.numobs(m::IVMatrixEstimator) = m.nobs
+
+# Residual adjustments for HC estimators
+function residualadjustment(k::_CM.HC0, m::IVMatrixEstimator)
+    return ones(eltype(m.postestimation.residuals), nobs(m))
+end
+
+function residualadjustment(k::_CM.HC1, m::IVMatrixEstimator{T}) where {T}
+    n, k_params = nobs(m), dof(m)
+    return fill(sqrt(T(n) / T(n - k_params)), n)
+end
+
+function residualadjustment(k::_CM.HC2, m::IVMatrixEstimator{T}) where {T}
+    h = leverage(m)
+    return T(1) ./ sqrt.(max.(T(1) .- h, eps(T)))
+end
+
+function residualadjustment(k::_CM.HC3, m::IVMatrixEstimator{T}) where {T}
+    h = leverage(m)
+    return T(1) ./ max.(T(1) .- h, eps(T))
+end
+
+@noinline function residualadjustment(k::_CM.HC4, m::IVMatrixEstimator{T}) where {T}
+    n = nobs(m)
+    p = dof(m)
+    h = leverage(m)
+    δ = @. min(4.0, h * n / p)
+    return @. T(1) / (T(1) - h)^δ
+end
+
+@noinline function residualadjustment(k::_CM.HC5, m::IVMatrixEstimator{T}) where {T}
+    n = nobs(m)
+    p = dof(m)
+    h = leverage(m)
+    hmax = max(n * 0.7 * maximum(h) / p, 4.0)
+    δ = @. min(h * n / p, hmax)
+    return @. sqrt(T(1) / (T(1) - h)^δ)
+end
+
+# HAC (Bartlett, Parzen, etc.) - no adjustment needed
+@noinline residualadjustment(k::_CM.HAC, m::IVMatrixEstimator) = 1.0
+
+# CR (cluster-robust) - no individual residual adjustment needed (handled in aVar)
+@noinline residualadjustment(k::_CM.CR0, m::IVMatrixEstimator) = 1.0
+@noinline residualadjustment(k::_CM.CR1, m::IVMatrixEstimator) = 1.0
+@noinline residualadjustment(k::_CM.CR2, m::IVMatrixEstimator) = 1.0
+@noinline residualadjustment(k::_CM.CR3, m::IVMatrixEstimator) = 1.0
+
+# aVar for CR (cluster-robust) estimators - disambiguating method
+function _CM.aVar(
+        k::K,
+        m::IVMatrixEstimator{T};
+        demean = false,
+        prewhite = false,
+        scale = true,
+        kwargs...
+) where {K <: _CM.CR, T}
+    # Compute adjusted moment matrix: X̂ .* e
+    X_hat = m.postestimation.X_hat
+    resid = m.postestimation.residuals
+    M = X_hat .* resid
+
+    # Compute aVar using CovarianceMatrices
+    Σ = _CM.aVar(k, M; demean = demean, prewhite = prewhite, scale = scale)
+    return Σ
+end
+
+# aVar for HC-type estimators
+function _CM.aVar(
+        k::K,
+        m::IVMatrixEstimator{T};
+        demean = false,
+        prewhite = false,
+        scale = true,
+        kwargs...
+) where {K <: _CM.AbstractAsymptoticVarianceEstimator, T}
+    # Compute adjusted moment matrix: X̂ .* (u .* e)
+    # where u is the residual adjustment factor
+    X_hat = m.postestimation.X_hat
+    resid = m.postestimation.residuals
+
+    u = residualadjustment(k, m)
+    M = X_hat .* resid
+    if !(u isa Number && u == 1.0)
+        M = M .* u
+    end
+
+    # Compute aVar using CovarianceMatrices
+    Σ = _CM.aVar(k, M; demean = demean, prewhite = prewhite, scale = scale)
+    return Σ
+end
+
+"""
+    vcov(ve::AbstractAsymptoticVarianceEstimator, m::IVMatrixEstimator)
+
+Compute robust variance-covariance matrix for IV matrix estimator.
+"""
+function StatsBase.vcov(ve::CovarianceMatrices.AbstractAsymptoticVarianceEstimator,
+        m::IVMatrixEstimator{T}) where {T}
+    n = nobs(m)
+    B = bread(m)
+    resid = m.postestimation.residuals
+
+    # Homoskedastic case
+    if ve isa CovarianceMatrices.Uncorrelated
+        σ² = sum(abs2, resid) / dof_residual(m)
+        return Symmetric(σ² * B)
+    end
+
+    # Sandwich: V = scale * B * A * B
+    A = _CM.aVar(ve, m)
+    scale = convert(T, n)
+
+    Σ = scale .* B * A * B
+    return Symmetric(Σ)
+end
+
+function StatsBase.stderror(ve::CovarianceMatrices.AbstractAsymptoticVarianceEstimator,
+        m::IVMatrixEstimator)
+    V = vcov(ve, m)
+    return sqrt.(diag(V))
+end
+
+##############################################################################
+## VcovSpec + operator for IVMatrixEstimator
+##############################################################################
+
+"""
+    m::IVMatrixEstimator + v::VcovSpec
+
+Create a new IVMatrixEstimator with updated variance-covariance estimator.
+"""
+function Base.:+(m::IVMatrixEstimator{T, V1}, v::VcovSpec{V2}) where {T, V1, V2}
+    new_vcov = vcov(v.source, m)
+    new_se = sqrt.(diag(new_vcov))
+
+    # Recompute t-stats and p-values
+    cc = coef(m)
+    new_t = cc ./ new_se
+    new_p = 2 .* tdistccdf.(dof_residual(m), abs.(new_t))
+
+    return IVMatrixEstimator{T, V2}(
+        m.coef,
+        m.postestimation,
+        m.basis_coef,
+        m.nobs,
+        m.dof,
+        m.dof_residual,
+        m.rss,
+        m.tss,
+        m.r2,
+        m.has_intercept,
+        deepcopy_vcov(v.source),
+        new_vcov,
+        new_se,
+        new_t,
+        new_p
+    )
+end
+
+##############################################################################
+## first_stage for IVMatrixEstimator
+##############################################################################
+
+"""
+    first_stage(m::IVMatrixEstimator)
+
+Compute first-stage F-statistic for IV matrix estimator.
+Returns a FirstStageResult with joint F-statistic.
+"""
+function first_stage(m::IVMatrixEstimator{T}) where {T}
+    pe = m.postestimation
+    n_endo = pe.n_endogenous
+
+    if n_endo == 0
+        return FirstStageResult{T}(
+            T(NaN), T(NaN), String[], T[], T[], 0, 0, "N/A"
+        )
+    end
+
+    # Extract data
+    Z = pe.Z
+    X = pe.X
+    n = size(X, 1)
+    k_total = size(X, 2)
+    k_exo = k_total - n_endo
+    k_z = size(Z, 2) - k_exo  # Number of excluded instruments
+
+    # First stage: regress each endogenous var on Z
+    # F-stat tests whether excluded instruments have joint significance
+
+    # Simple approach: compute partial F-stat for excluded instruments
+    # For single endogenous: F = (R² / k_z) / ((1 - R²) / (n - k_z - k_exo - 1))
+
+    # Compute projected values
+    ZZ = Z' * Z
+    ZZ_inv = try
+        inv(cholesky(Symmetric(ZZ)))
+    catch
+        pinv(ZZ)
+    end
+    P_Z = Z * ZZ_inv * Z'
+
+    # For each endogenous variable, compute first-stage R²
+    Xendo = X[:, (k_exo + 1):end]
+    Xendo_hat = P_Z * Xendo
+
+    # Joint F-statistic (Cragg-Donald style for simplicity)
+    # This is an approximation; full K-P would require more complex computation
+    F_values = T[]
+    p_values = T[]
+    endo_names = ["endo_$i" for i in 1:n_endo]
+
+    for i in 1:n_endo
+        x_endo = Xendo[:, i]
+        x_hat = Xendo_hat[:, i]
+
+        # Explained SS by instruments
+        ess = sum(abs2, x_hat .- mean(x_hat))
+        tss_endo = sum(abs2, x_endo .- mean(x_endo))
+        rss_endo = tss_endo - ess
+
+        # F-statistic
+        df1 = k_z
+        df2 = n - k_z - k_exo - (m.has_intercept ? 1 : 0)
+        F_val = (ess / df1) / (rss_endo / max(df2, 1))
+        p_val = fdistccdf(df1, df2, F_val)
+
+        push!(F_values, F_val)
+        push!(p_values, p_val)
+    end
+
+    # Joint F is minimum of individual F-stats (conservative)
+    F_joint = minimum(F_values)
+    p_joint = maximum(p_values)
+
+    return FirstStageResult{T}(
+        F_joint,
+        p_joint,
+        endo_names,
+        F_values,
+        p_values,
+        n_endo,
+        k_z,
+        string(typeof(m.vcov_estimator))
+    )
+end
+
+##############################################################################
+## Show methods for IVMatrixEstimator
+##############################################################################
+
+function Base.show(io::IO, m::IVMatrixEstimator)
+    print(io, "IVMatrixEstimator(n=$(nobs(m)), k=$(dof(m)))")
+end
+
+function Base.show(io::IO, ::MIME"text/plain", m::IVMatrixEstimator{T}) where {T}
+    println(io, "IV Matrix Estimator (TSLS)")
+    println(io, "─" ^ 40)
+    println(io, "Observations:      $(nobs(m))")
+    println(io, "Parameters:        $(dof(m))")
+    println(io, "R²:                $(round(r2(m), digits=4))")
+    println(io, "Residual DoF:      $(dof_residual(m))")
+    println(io, "Endogenous vars:   $(m.postestimation.n_endogenous)")
+    println(io)
+    println(io, "Coefficients:")
+    cc = coef(m)
+    se = m.se
+    for i in 1:length(cc)
+        println(io, "  β[$i] = $(round(cc[i], digits=6)) (SE: $(round(se[i], digits=6)))")
+    end
 end

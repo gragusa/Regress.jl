@@ -190,8 +190,7 @@ function fit_ols(@nospecialize(df),
     ngroups_fes = [nunique(fe) for fe in subfes]
     dof_fes = sum(ngroups_fes)
     dof_model = sum(basis_coef)  # Only non-collinear coefficients
-    dof_base = data_prep.nobs - dof_model - dof_fes - dof_add
-    dof_residual = max(1, dof_base - (data_prep.has_intercept | data_prep.has_fe_intercept))
+    dof_residual = max(1, data_prep.nobs - dof_model - dof_fes - dof_add)
 
     # R-squared
     r2 = 1 - rss / tss_total
