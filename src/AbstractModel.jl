@@ -178,9 +178,8 @@ end
 
 # Helper for top summary
 function _summary_table_common(m::AbstractRegressModel)
-    # Handle lazy F-stat: compute on demand if nothing
-    F_val = _get_fstat(m)
-    p_val = _get_pval(m)
+    F_val = m.F
+    p_val = m.p
 
     out = ["Number of obs" sprint(show, nobs(m), context = :compact => true);
            "dof (model)" sprint(show, dof(m), context = :compact => true);
@@ -195,10 +194,6 @@ function _summary_table_common(m::AbstractRegressModel)
     end
     return out
 end
-
-# Default: directly access field
-_get_fstat(m::AbstractRegressModel) = m.F
-_get_pval(m::AbstractRegressModel) = m.p
 
 # We can't fully unify show() yet because OLS and IV have different "top" sections 
 # (IV has First Stage stats, OLS has converged/iterations for FE).

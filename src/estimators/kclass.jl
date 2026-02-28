@@ -168,92 +168,27 @@ function fit_kclass_estimator(
     end
 
     ##############################################################################
-    ## Collinearity Detection (same as TSLS)
+    ## Collinearity Detection (shared with TSLS)
     ##############################################################################
 
-    perm = nothing
-
-    # First pass: check collinearity within Xendo
-    XendoXendo = compute_crossproduct(Xendo)
-    XendoXendo_check = copy(XendoXendo.data)
-    basis_endo = basis!(Symmetric(XendoXendo_check); has_intercept = false)
-    if !all(basis_endo)
-        Xendo = Xendo[:, basis_endo]
-        XendoXendo = Symmetric(XendoXendo.data[basis_endo, basis_endo])
-    end
-
-    # Compute cross-products
     XexoXexo = compute_crossproduct(Xexo)
+    XendoXendo = compute_crossproduct(Xendo)
     ZZ = compute_crossproduct(Z)
-    XexoZ = Xexo' * Z
-    XexoXendo = Xexo' * Xendo
-    ZXendo = Z' * Xendo
 
-    # Second pass: joint collinearity check
-    k_exo, k_z, k_endo = size(Xexo, 2), size(Z, 2), size(Xendo, 2)
-    XexoZXendo = build_block_symmetric(
-        [XexoXexo.data, XexoZ, XexoXendo, ZZ.data, ZXendo, XendoXendo.data],
-        [k_exo, k_z, k_endo]
+    coll = _iv_collinearity_detection!(
+        Xexo, Xendo, Z, XexoXexo, XendoXendo, ZZ,
+        data_prep.has_intercept, coefnames_endo
     )
 
-    basis_all = basis!(XexoZXendo; has_intercept = data_prep.has_intercept)
-    basis_Xexo = basis_all[1:k_exo]
-    basis_Z = basis_all[(k_exo + 1):(k_exo + k_z)]
-    basis_endo_small = basis_all[(k_exo + k_z + 1):end]
-
-    # Handle recategorization if needed
-    if !all(basis_endo_small)
-        Xexo = hcat(Xexo, Xendo[:, .!basis_endo_small])
-        Xendo = Xendo[:, basis_endo_small]
-
-        XexoXexo = compute_crossproduct(Xexo)
-        XexoZ = Xexo' * Z
-        XexoXendo = Xexo' * Xendo
-        ZXendo = Z' * Xendo
-        XendoXendo = compute_crossproduct(Xendo)
-
-        basis_endo2 = trues(length(basis_endo))
-        basis_endo2[basis_endo] = basis_endo_small
-        ans = collect(1:length(basis_endo))
-        ans = vcat(ans[.!basis_endo2], ans[basis_endo2])
-        perm = vcat(1:(size(Xexo, 2) - count(.!basis_endo_small)),
-            (size(Xexo, 2) - count(.!basis_endo_small)) .+ ans)
-
-        out = join(coefnames_endo[.!basis_endo2], " ")
-        @info "Endogenous vars collinear with ivs. Recategorized as exogenous: $(out)"
-
-        k_exo, k_z, k_endo = size(Xexo, 2), size(Z, 2), size(Xendo, 2)
-        XexoZXendo = build_block_symmetric(
-            [XexoXexo.data, XexoZ, XexoXendo, ZZ.data, ZXendo, XendoXendo.data],
-            [k_exo, k_z, k_endo]
-        )
-        basis_all = basis!(XexoZXendo; has_intercept = data_prep.has_intercept)
-        basis_Xexo = basis_all[1:k_exo]
-        basis_Z = basis_all[(k_exo + 1):(k_exo + k_z)]
-        basis_endo_small2 = basis_all[(k_exo + k_z + 1):end]
-    end
-
-    # Apply basis to matrices
-    if !all(basis_Xexo)
-        Xexo = Xexo[:, basis_Xexo]
-        XexoXexo = Symmetric(XexoXexo.data[basis_Xexo, basis_Xexo])
-        XexoXendo = XexoXendo[basis_Xexo, :]
-    end
-    if !all(basis_Z)
-        Z = Z[:, basis_Z]
-        ZZ = Symmetric(ZZ.data[basis_Z, basis_Z])
-        ZXendo = ZXendo[basis_Z, :]
-    end
-    XexoZ = XexoZ[basis_Xexo, basis_Z]
+    Xexo, Xendo, Z = coll.Xexo, coll.Xendo, coll.Z
+    XexoXexo, ZZ = coll.XexoXexo, coll.ZZ
+    XexoZ, XexoXendo, ZXendo = coll.XexoZ, coll.XexoXendo, coll.ZXendo
+    basis_coef, perm = coll.basis_coef, coll.perm
+    basis_endo, basis_endo_small = coll.basis_endo, coll.basis_endo_small
 
     # Check identification
     size(ZXendo, 1) >= size(ZXendo, 2) ||
         throw("Model not identified. There must be at least as many instruments as endogenous variables")
-
-    # Compute final basis for coefficients
-    basis_endo2 = trues(length(basis_endo))
-    basis_endo2[basis_endo] = basis_endo_small
-    basis_coef = vcat(basis_Xexo, basis_endo[basis_endo2])
 
     ##############################################################################
     ## Compute K-class Kappa
@@ -323,53 +258,17 @@ function fit_kclass_estimator(
     F_kp_per_endo = T[]
     p_kp_per_endo = T[]
     first_stage_data = empty_first_stage_data(T)
+    newZ = hcat(Xexo, Z)  # Needed for PostEstimationData leverage computation
 
     if first_stage && k_endo_final > 0
-        # Compute first-stage quantities (same as TSLS)
-        newZ = hcat(Xexo, Z)
-        newZXendo = vcat(XexoXendo, ZXendo)
-
+        # Compute first-stage quantities using the same helper as TSLS
+        # Need to build Pi via first stage regression first
         newZnewZ_aug = build_block_symmetric(
             [XexoXexo.data, XexoZ, XexoXendo, ZZ.data,
                 ZXendo, zeros(T, k_endo_final, k_endo_final)],
             [k_exo_final, k_z_final, k_endo_final]
         )
         Pi = ls_solve!(newZnewZ_aug, k_exo_final + k_z_final)
-
-        # Compute residuals for first-stage F-stat
-        Xendo_res = BLAS.gemm!('N', 'N', -one(T), newZ, Pi, one(T), copy(Xendo))
-
-        XexoZ_aug = build_block_symmetric(
-            [XexoXexo.data, XexoZ, ZZ.data],
-            [k_exo_final, k_z_final]
-        )
-        Pi2 = ls_solve!(XexoZ_aug, k_exo_final)
-        Z_res = BLAS.gemm!('N', 'N', -one(T), Xexo, Pi2, one(T), copy(Z))
-
-        Pip = Pi[(k_exo_final + 1):end, :]
-
-        dof_fes_local = sum(nunique(fe) for fe in subfes; init = 0)
-
-        F_kp,
-        p_kp = compute_first_stage_fstat(
-            Xendo_res, Z_res, Pip,
-            CovarianceMatrices.HR1(),
-            data_prep.nobs,
-            size(X, 2),
-            dof_fes_local
-        )
-
-        # Pass original data for robust Wald F computation (matches R's approach)
-        F_kp_per_endo,
-        p_kp_per_endo = compute_per_endogenous_fstats(
-            Xendo_res, Z_res, Pip,
-            CovarianceMatrices.HR1(),
-            data_prep.nobs,
-            size(X, 2),
-            dof_fes_local;
-            Xendo_orig = Xendo,
-            newZ = newZ
-        )
 
         endo_names_final = if all(basis_endo)
             collect(String.(coefnames_endo))
@@ -381,17 +280,16 @@ function fit_kclass_estimator(
             [String(coefnames_endo[i]) for i in endo_idx]
         end
 
-        # Reuse existing matrices where possible - avoid unnecessary copies
-        first_stage_data = FirstStageData{T}(
-            Pip,           # Already computed, not modified later
-            Xendo_res,     # Already a copy from gemm!
-            Z_res,         # Already a copy from gemm!
-            endo_names_final,
-            k_exo_final,
-            Xendo,         # Share reference - not modified after this
-            newZ,          # Share reference - not modified after this
-            data_prep.has_intercept
-        )
+        dof_fes_local = sum(nunique(fe) for fe in subfes; init = 0)
+
+        fstats = _iv_first_stage_fstats_standard(
+            Xendo, newZ, Pi, XexoXexo, XexoZ, ZZ, X,
+            data_prep.nobs, dof_fes_local, endo_names_final,
+            k_exo_final, data_prep.has_intercept)
+
+        F_kp, p_kp = fstats.F_kp, fstats.p_kp
+        F_kp_per_endo, p_kp_per_endo = fstats.F_kp_per_endo, fstats.p_kp_per_endo
+        first_stage_data = fstats.first_stage_data
     end
 
     ##############################################################################
@@ -482,8 +380,8 @@ function fit_kclass_estimator(
     invZ_fullZZ = Symmetric(inv(cholesky(Z_fullZZ)))
 
     postestimation_data = PostEstimationDataIV(
-        convert(Matrix{T}, Adj_reordered),  # X: use Adj for vcov moment matrix
-        convert(Matrix{T}, X),               # Xhat: original X
+        convert(Matrix{T}, Adj_reordered),  # X_fitted: use Adj for vcov moment matrix
+        convert(Matrix{T}, X),               # X_original: original X
         cholesky(Symmetric(X' * X)),        # crossx
         invA_reordered,                      # invXX: inv(A) for K-class
         wts,

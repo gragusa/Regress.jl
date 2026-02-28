@@ -26,6 +26,16 @@ function _qr_resid(A::AbstractMatrix, B::AbstractVecOrMat)
 end
 
 """
+    _qr_resid(F::LinearAlgebra.QRPivoted, A::AbstractMatrix, B::AbstractVecOrMat)
+
+Compute residuals B | A using a precomputed pivoted QR factorization of A.
+Avoids recomputing QR(A) when residualizing multiple RHS against the same A.
+"""
+function _qr_resid(F::LinearAlgebra.QRPivoted, A::AbstractMatrix, B::AbstractVecOrMat)
+    return B .- A * (F \ B)
+end
+
+"""
     _liml_kappa(y, Xendo, Z, Xexo) -> T
 
 Compute LIML kappa using generalized eigenvalue problem M1 * v = kappa * M2 * v.
@@ -56,10 +66,17 @@ function _liml_kappa(
     # Handle single endogenous as matrix
     Xendo_mat = Xendo isa AbstractVector ? reshape(Xendo, :, 1) : Xendo
 
-    # Residualize on exogenous variables
-    Yadj = _qr_resid(Xexo, y)
-    Xendo_adj = _qr_resid(Xexo, Xendo_mat)
-    Zadj = _qr_resid(Xexo, Z)
+    # Precompute QR(Xexo) once and reuse for all three residualizations
+    if size(Xexo, 2) == 0
+        Yadj = copy(y)
+        Xendo_adj = copy(Xendo_mat)
+        Zadj = copy(Z)
+    else
+        F_exo = qr(Xexo, ColumnNorm())
+        Yadj = _qr_resid(F_exo, Xexo, y)
+        Xendo_adj = _qr_resid(F_exo, Xexo, Xendo_mat)
+        Zadj = _qr_resid(F_exo, Xexo, Z)
+    end
 
     # Stack [y, Xendo] into R matrix: n × (1 + k_endo)
     R = hcat(Yadj, Xendo_adj)
@@ -126,9 +143,10 @@ function _kclass_fit(
     # Full regressor set: endogenous first, then exogenous
     W = hcat(Xendo_mat, Xexo)
 
-    # Residualize W and y on full instrument set
-    Wres = _qr_resid(ZX, W)
-    yres = _qr_resid(ZX, y)
+    # Precompute QR(ZX) once and reuse for both W and y residualizations
+    F_ZX = qr(ZX, ColumnNorm())
+    Wres = _qr_resid(F_ZX, ZX, W)
+    yres = _qr_resid(F_ZX, ZX, y)
 
     # K-class normal equations
     # A = W'W - kappa * (W'Wres)

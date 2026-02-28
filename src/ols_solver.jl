@@ -208,7 +208,7 @@ function _fit_cholesky!(rr::OLSResponse{T}, X::Matrix{T},
     if save_matrices
         pp = OLSPredictorChol(X, X_reduced, beta, chol_fact)
     else
-        pp = OLSPredictorChol(nothing, nothing, beta, chol_fact)
+        pp = OLSPredictorChol(Matrix{T}(undef, 0, 0), Matrix{T}(undef, 0, 0), beta, chol_fact)
     end
 
     return pp, beta_reduced
@@ -237,7 +237,7 @@ function _fit_qr!(rr::OLSResponse{T}, X::Matrix{T},
     if save_matrices
         pp = OLSPredictorQR(X, X_reduced, beta, qr_fact)
     else
-        pp = OLSPredictorQR(nothing, nothing, beta, qr_fact)
+        pp = OLSPredictorQR(Matrix{T}(undef, 0, 0), Matrix{T}(undef, 0, 0), beta, qr_fact)
     end
 
     return pp, beta_reduced

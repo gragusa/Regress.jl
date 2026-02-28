@@ -99,8 +99,8 @@ end
 Container for post-estimation data required for IV variance-covariance calculations.
 
 # Fields
-- `X::Matrix{T}`: Design matrix used for inference (with predicted endogenous for TSLS)
-- `Xhat::Matrix{T}`: Original matrix with actual endogenous variables
+- `X_fitted::Matrix{T}`: Design matrix used for inference (predicted endogenous for TSLS, Adj for K-class)
+- `X_original::Matrix{T}`: Original regressor matrix [Xexo, Xendo]
 - `crossx::Cholesky{T, Matrix{T}}`: Cholesky factorization of X'X
 - `invXX::Symmetric{T, Matrix{T}}`: Inverse of X'X (or inv(A) for K-class)
 - `weights::AbstractWeights`: Weights used in estimation
@@ -116,12 +116,12 @@ Container for post-estimation data required for IV variance-covariance calculati
 Use `has_first_stage_data(pe.first_stage_data)` to check if first-stage data is available.
 Use `has_kclass_adj(pe)` to check if K-class adjustment matrix is available.
 """
-struct PostEstimationDataIV{T, W <: AbstractWeights}
-    X::Matrix{T}                # X̂ = fitted values from first stage (confusing name, kept for compatibility)
-    Xhat::Matrix{T}             # Original X regressors (confusing name, kept for compatibility)
+struct PostEstimationDataIV{T}
+    X_fitted::Matrix{T}         # Predicted/adjusted endogenous used for inference (X̂ for TSLS, Adj for K-class)
+    X_original::Matrix{T}       # Original regressors [Xexo, Xendo]
     crossx::Cholesky{T, Matrix{T}}
     invXX::Symmetric{T, Matrix{T}}  # (X̂'X̂)^{-1}
-    weights::W
+    weights::AbstractWeights
     cluster_vars::NamedTuple
     basis_coef::BitVector
     first_stage_data::FirstStageData{T}
@@ -291,7 +291,7 @@ function CovarianceMatrices.momentmatrix(m::IVEstimator)
 
     # Use Adj if available (K-class: LIML, Fuller), otherwise use X (TSLS)
     pe = m.postestimation
-    X_for_vcov = has_kclass_adj(pe) ? pe.Adj : pe.X
+    X_for_vcov = has_kclass_adj(pe) ? pe.Adj : pe.X_fitted
     return X_for_vcov .* residuals_for_vcov(m)
 end
 
@@ -341,7 +341,7 @@ function StatsAPI.leverage(m::IVEstimator)
     end
 
     # TSLS uses AER formula: h = diag(X * invXhatXhat * X' * Z * invZZ * Z')
-    X_orig = pe.Xhat      # Original regressors (confusing field name)
+    X_orig = pe.X_original
     invXhatXhat = pe.invXX
     Z = pe.Z
     invZZ = pe.invZZ
@@ -432,7 +432,7 @@ end
 function residualadjustment(k::_CM.CR2, m::IVEstimator)
     @assert length(k.g) == 1 "CR2 for IV currently only supports single-way clustering"
     g = k.g[1]
-    X = m.postestimation.X
+    X = m.postestimation.X_fitted
     resid = residuals_for_vcov(m)
     u = copy(resid)
     XX = bread(m)
@@ -453,7 +453,7 @@ end
 function residualadjustment(k::_CM.CR3, m::IVEstimator)
     @assert length(k.g) == 1 "CR3 for IV currently only supports single-way clustering"
     g = k.g[1]
-    X = m.postestimation.X
+    X = m.postestimation.X_fitted
     resid = residuals_for_vcov(m)
     u = copy(resid)
     XX = bread(m)
@@ -490,7 +490,7 @@ function _CM.aVar(
     # Compute adjusted moment matrix
     # Use Adj if available (K-class: LIML, Fuller), otherwise use X (TSLS)
     pe = m.postestimation
-    X_for_vcov = has_kclass_adj(pe) ? pe.Adj : pe.X
+    X_for_vcov = has_kclass_adj(pe) ? pe.Adj : pe.X_fitted
 
     u = residualadjustment(k, m)
     M = X_for_vcov .* residuals_for_vcov(m)
@@ -518,7 +518,7 @@ function _CM.aVar(
     # Compute adjusted moment matrix
     # Use Adj if available (K-class: LIML, Fuller), otherwise use X (TSLS)
     pe = m.postestimation
-    X_for_vcov = has_kclass_adj(pe) ? pe.Adj : pe.X
+    X_for_vcov = has_kclass_adj(pe) ? pe.Adj : pe.X_fitted
 
     u = residualadjustment(k, m)
     M = X_for_vcov .* residuals_for_vcov(m)
