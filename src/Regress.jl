@@ -50,7 +50,6 @@ include("utils/vcov_copy.jl")    # Deep copy utilities for vcov estimators
 include("utils/kclass_utils.jl") # K-class estimation utilities (LIML, Fuller)
 include("utils/show_utils.jl")   # Display formatting utilities
 
-
 include("response.jl")               # OLSResponse
 include("predictor.jl")              # OLSLinearPredictor (Chol and QR)
 include("fixedeffects_component.jl") # OLSFixedEffects

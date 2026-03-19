@@ -12,7 +12,9 @@
     df = CSV.read(mroz_path, DataFrame)
 
     # Fit TSLS model: lwage ~ exper + expersq + (educ ~ age + kidslt6 + kidsge6), robust
-    m = Regress.iv(Regress.TSLS(), df, @formula(lwage ~ exper + expersq + (educ ~ age + kidslt6 + kidsge6)))
+    m = Regress.iv(Regress.TSLS(), df, @formula(lwage ~
+                                                exper + expersq +
+                                                (educ ~ age + kidslt6 + kidsge6)))
 
     r = Regress.weakivtest(m)
 
@@ -69,7 +71,9 @@ end
     end
     df = CSV.read(mroz_path, DataFrame)
 
-    m = Regress.iv(Regress.TSLS(), df, @formula(lwage ~ exper + expersq + (educ ~ age + kidslt6 + kidsge6)))
+    m = Regress.iv(Regress.TSLS(), df, @formula(lwage ~
+                                                exper + expersq +
+                                                (educ ~ age + kidslt6 + kidsge6)))
     r = Regress.weakivtest(m; benchmark = :ols)
 
     # Stata reference: gfweakivtestols

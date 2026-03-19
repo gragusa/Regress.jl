@@ -296,21 +296,21 @@ function weakivtest(m::IVEstimator{T}; level::Real = 0.05, eps::Real = 0.001,
 
     # TSLS critical values (Patnaik approximation)
     cv_TSLS = ntuple(i -> begin
-        x = tau_x[i] * B_TSLS
-        _patnaik_critical_value(W_2, T(level), x)
-    end, 4)
+            x = tau_x[i] * B_TSLS
+            _patnaik_critical_value(W_2, T(level), x)
+        end, 4)
 
     # LIML critical values (Patnaik approximation)
     cv_LIML = ntuple(i -> begin
-        x = tau_x[i] * B_LIML
-        _patnaik_critical_value(W_2, T(level), x)
-    end, 4)
+            x = tau_x[i] * B_LIML
+            _patnaik_critical_value(W_2, T(level), x)
+        end, 4)
 
     # GMMf critical values (noncentral chi-squared)
     cv_GMMf = ntuple(i -> begin
-        x_gmmf = tau_x[i] * B_GMMf * K
-        _invnchisq(T(K), x_gmmf, T(1) - T(level)) / K
-    end, 4)
+            x_gmmf = tau_x[i] * B_GMMf * K
+            _invnchisq(T(K), x_gmmf, T(1) - T(level)) / K
+        end, 4)
 
     return WeakIVTestResult{T}(
         F_eff_val, F_nonrobust_val, F_robust_val,
@@ -587,7 +587,8 @@ function _Bmaxfunction_ols(beta::T, Omega, W_1, W_12, W_2) where {T}
     trW2 = tr(W_2)
 
     # OLS benchmark: BM = sqrt((Omega[1,1] - 2*beta*Omega[1,2] + beta^2*Omega[2,2]) / Omega[2,2])
-    BM = sqrt(max(T(0), (Omega[1, 1] - 2 * beta * Omega[1, 2] + beta^2 * Omega[2, 2]) / Omega[2, 2]))
+    BM = sqrt(max(T(0), (Omega[1, 1] - 2 * beta * Omega[1, 2] + beta^2 * Omega[2, 2]) /
+                        Omega[2, 2]))
 
     if BM ≈ 0 || trW2 ≈ 0
         return T(0)
@@ -711,11 +712,13 @@ function _compute_BGMMf_nagar(trW_1s::T, trW_12s::T, mineig::T, maxeig::T,
             if sense == :max
                 beta_opt = _nelder_mead_1d(
                     b -> -_BGMMf_objective_nagar(b, trW_1s, trW_12s, eig, K), bgmmf_start)
-                push!(results, abs(_BGMMf_objective_nagar(beta_opt, trW_1s, trW_12s, eig, K)))
+                push!(results, abs(_BGMMf_objective_nagar(
+                    beta_opt, trW_1s, trW_12s, eig, K)))
             else
                 beta_opt = _nelder_mead_1d(
                     b -> _BGMMf_objective_nagar(b, trW_1s, trW_12s, eig, K), bgmmf_start)
-                push!(results, abs(_BGMMf_objective_nagar(beta_opt, trW_1s, trW_12s, eig, K)))
+                push!(results, abs(_BGMMf_objective_nagar(
+                    beta_opt, trW_1s, trW_12s, eig, K)))
             end
         catch
             # If optimization fails for a combination, skip
@@ -731,7 +734,8 @@ end
 
 function _BGMMf_objective_ols(beta::T, Omega, trW_1s, trW_12s, eig, K) where {T}
     num = (trW_12s - 2 * eig - (K - 2) * beta) / K
-    den = sqrt(max(T(0), (Omega[1, 1] - 2 * beta * Omega[1, 2] + beta^2 * Omega[2, 2]) / Omega[2, 2]))
+    den = sqrt(max(T(0), (Omega[1, 1] - 2 * beta * Omega[1, 2] + beta^2 * Omega[2, 2]) /
+                         Omega[2, 2]))
     return abs(den) < 1e-15 ? T(0) : num / den
 end
 
@@ -744,11 +748,13 @@ function _compute_BGMMf_ols(Omega, trW_1s::T, trW_12s::T, mineig::T, maxeig::T,
             if sense == :max
                 beta_opt = _nelder_mead_1d(
                     b -> -_BGMMf_objective_ols(b, Omega, trW_1s, trW_12s, eig, K), bgmmf_start)
-                push!(results, abs(_BGMMf_objective_ols(beta_opt, Omega, trW_1s, trW_12s, eig, K)))
+                push!(results, abs(_BGMMf_objective_ols(
+                    beta_opt, Omega, trW_1s, trW_12s, eig, K)))
             else
                 beta_opt = _nelder_mead_1d(
                     b -> _BGMMf_objective_ols(b, Omega, trW_1s, trW_12s, eig, K), bgmmf_start)
-                push!(results, abs(_BGMMf_objective_ols(beta_opt, Omega, trW_1s, trW_12s, eig, K)))
+                push!(results, abs(_BGMMf_objective_ols(
+                    beta_opt, Omega, trW_1s, trW_12s, eig, K)))
             end
         catch
             # If optimization fails for a combination, skip
