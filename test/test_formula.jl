@@ -1,7 +1,7 @@
 @testitem "parse_fixedeffect - basic" tags = [:formula, :fe, :smoke] begin
     using CSV, DataFrames
     using Regress
-    using Regress: parse_fixedeffect, _parse_fixedeffect, _multiply
+    using Regress: fe, parse_fixedeffect, _parse_fixedeffect, _multiply
     using FixedEffects
     import Base: ==
 
@@ -53,7 +53,7 @@ end
 @testitem "parse_fixedeffect - interactions" tags = [:formula, :fe] begin
     using CSV, DataFrames
     using Regress
-    using Regress: parse_fixedeffect, _parse_fixedeffect, _multiply
+    using Regress: fe, parse_fixedeffect, _parse_fixedeffect, _multiply
     using FixedEffects
     import Base: ==
 
@@ -104,7 +104,7 @@ end
 @testitem "parse_fixedeffect - Tables.jl" tags = [:formula] begin
     using CSV, DataFrames
     using Regress
-    using Regress: parse_fixedeffect
+    using Regress: fe, parse_fixedeffect
     using FixedEffects
     import Base: ==
 
