@@ -1,5 +1,6 @@
 @testitem "collinearity with fixed effects" tags = [:ols, :fe, :vcov] begin
     using DataFrames, CSV, Regress, Random, Statistics
+    using Regress: fe
     using StatsBase: coef, stderror
     using CovarianceMatrices: CR1
 
@@ -25,7 +26,7 @@
     dflarge.catvar = rand(1:200, nrow(dflarge))
 
     # run the regression with the default setting (tol = 1e-6)
-    rr = ols(
+    rr = Regress.ols(
         dflarge, @formula(Price ~ highstate + Pop + fe(Year) + fe(catvar) + fe(State)),
         save_cluster = :State, tol = 1e-6)
 
@@ -47,6 +48,6 @@ end
          35.3885 44.5109;],
         :auto
     )
-    rr = ols(df, @formula(x1 ~ x2))
+    rr = Regress.ols(df, @formula(x1 ~ x2))
     @test all(!isnan, stderror(rr))
 end
