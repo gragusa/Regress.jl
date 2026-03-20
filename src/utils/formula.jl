@@ -253,10 +253,9 @@ function _multiply_columns(data, ss::Vector{Symbol})
         col = Tables.getcolumn(data, ss[1])
         return _convert_to_float64(col)
     else
-        # Get all columns first
-        cols = Any[Tables.getcolumn(data, x) for x in ss]
-        result = _multiply_cols(cols)
-        return result
+        # Use a tuple to preserve concrete column types and avoid Vector{Any}
+        cols = ntuple(i -> Tables.getcolumn(data, ss[i]), length(ss))
+        return _multiply_cols(cols, n)
     end
 end
 
@@ -272,9 +271,8 @@ function _convert_to_float64(col)
     return out
 end
 
-# Helper to multiply columns element-wise
-function _multiply_cols(cols::Vector{Any})
-    n = length(cols[1])
+# Helper to multiply columns element-wise — typed via tuple
+function _multiply_cols(cols::Tuple, n::Int)
     out = Vector{Float64}(undef, n)
     @inbounds for i in 1:n
         val = 1.0
