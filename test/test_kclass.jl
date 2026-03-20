@@ -15,12 +15,12 @@
     y = 2.0 .* x .+ 1.0 .+ e
     df = DataFrame(y = y, x = x, z1 = z1, z2 = z2)
 
-    m = iv(LIML(), df, @formula(y ~ (x ~ z1 + z2)))
+    m = Regress.iv(Regress.LIML(), df, @formula(y ~ (x ~ z1 + z2)))
 
     @test length(coef(m)) == 2
     @test m.postestimation.kappa !== nothing
     @test m.postestimation.kappa >= 1.0  # LIML kappa should be >= 1
-    @test m.estimator isa LIML
+    @test m.estimator isa Regress.LIML
 end
 
 @testitem "Fuller basic" tags = [:iv, :kclass] begin
@@ -41,17 +41,17 @@ end
     df = DataFrame(y = y, x = x, z1 = z1, z2 = z2)
 
     # Test Fuller with default a=1
-    m1 = iv(Fuller(), df, @formula(y ~ (x ~ z1 + z2)))
-    @test m1.estimator isa Fuller
+    m1 = Regress.iv(Regress.Fuller(), df, @formula(y ~ (x ~ z1 + z2)))
+    @test m1.estimator isa Regress.Fuller
     @test m1.estimator.a == 1.0
 
     # Test Fuller with custom a
-    m4 = iv(Fuller(4.0), df, @formula(y ~ (x ~ z1 + z2)))
-    @test m4.estimator isa Fuller
+    m4 = Regress.iv(Regress.Fuller(4.0), df, @formula(y ~ (x ~ z1 + z2)))
+    @test m4.estimator isa Regress.Fuller
     @test m4.estimator.a == 4.0
 
     # Fuller kappa should be less than LIML kappa
-    m_liml = iv(LIML(), df, @formula(y ~ (x ~ z1 + z2)))
+    m_liml = Regress.iv(Regress.LIML(), df, @formula(y ~ (x ~ z1 + z2)))
     @test m1.postestimation.kappa < m_liml.postestimation.kappa
 end
 
@@ -72,8 +72,8 @@ end
     y = 2.0 .* x .+ 1.0 .+ e
     df = DataFrame(y = y, x = x, z1 = z1, z2 = z2)
 
-    m_tsls = iv(TSLS(), df, @formula(y ~ (x ~ z1 + z2)))
-    m_k1 = iv(KClass(1.0), df, @formula(y ~ (x ~ z1 + z2)))
+    m_tsls = Regress.iv(Regress.TSLS(), df, @formula(y ~ (x ~ z1 + z2)))
+    m_k1 = Regress.iv(Regress.KClass(1.0), df, @formula(y ~ (x ~ z1 + z2)))
 
     # Coefficients should match (note: different algorithms so tolerance needed)
     @test coef(m_tsls) ≈ coef(m_k1) atol=1e-6
@@ -97,7 +97,7 @@ end
     y = 2.0 .* x .+ 1.0 .+ e
     df = DataFrame(y = y, x = x, z1 = z1, z2 = z2)
 
-    m = iv(LIML(), df, @formula(y ~ (x ~ z1 + z2)))
+    m = Regress.iv(Regress.LIML(), df, @formula(y ~ (x ~ z1 + z2)))
 
     # Test default vcov (HC1)
     V_default = vcov(m)
@@ -134,7 +134,7 @@ end
     df = DataFrame(y = y, x = x, z1 = z1, z2 = z2, cluster = cluster)
 
     # Fit with saved cluster variable
-    m = iv(LIML(), df, @formula(y ~ (x ~ z1 + z2)), save_cluster = :cluster)
+    m = Regress.iv(Regress.LIML(), df, @formula(y ~ (x ~ z1 + z2)), save_cluster = :cluster)
 
     # Test cluster-robust vcov using symbol
     V_cr = vcov(CR1(:cluster), m)
@@ -167,15 +167,16 @@ end
     df = DataFrame(y = y, x1 = x1, x2 = x2, z1 = z1, z2 = z2, z3 = z3)
 
     # Test LIML with 2 endogenous variables
-    m = iv(LIML(), df, @formula(y ~ (x1 + x2 ~ z1 + z2 + z3)))
+    m = Regress.iv(Regress.LIML(), df, @formula(y ~ (x1 + x2 ~ z1 + z2 + z3)))
 
     @test length(coef(m)) == 3  # 2 endogenous + intercept
     @test m.postestimation.kappa !== nothing
-    @test m.estimator isa LIML
+    @test m.estimator isa Regress.LIML
 end
 
 @testitem "LIML with FE" tags = [:iv, :kclass, :fe] begin
     using Regress
+    using Regress: fe
     using Regress.StableRNGs: StableRNG
     using DataFrames
     using StatsBase: coef
@@ -194,7 +195,7 @@ end
     df = DataFrame(y = y, x = x, z1 = z1, z2 = z2, fe_id = fe_id)
 
     # Test LIML with fixed effects
-    m = iv(LIML(), df, @formula(y ~ (x ~ z1 + z2) + fe(fe_id)))
+    m = Regress.iv(Regress.LIML(), df, @formula(y ~ (x ~ z1 + z2) + fe(fe_id)))
 
     @test length(coef(m)) == 1  # Only x coefficient (no intercept with FE)
     @test m.postestimation.kappa !== nothing
@@ -212,7 +213,7 @@ end
     df.state_id = categorical(df.state_id)
 
     # LIML with state as categorical (dummy variables, not absorbed FE)
-    m = iv(LIML(), df, @formula(y ~ x1 + x2 + state_id + (endo ~ z)))
+    m = Regress.iv(Regress.LIML(), df, @formula(y ~ x1 + x2 + state_id + (endo ~ z)))
 
     # Coefficients from Stata ivreg2:
     # . ivreg2 y (endo=z) x1 x2 i.state_id, liml
@@ -231,7 +232,7 @@ end
 
     # LIML without FE, with cluster-robust SE
     # . ivreg2 y (endo=z) x1 x2 , liml cluster(state_id)
-    m2 = iv(LIML(), df, @formula(y ~ x1 + x2 + (endo ~ z)), save_cluster = :state_id)
+    m2 = Regress.iv(Regress.LIML(), df, @formula(y ~ x1 + x2 + (endo ~ z)), save_cluster = :state_id)
 
     # Coefficients
     @test coef(m2)[1] ≈ 1.448071 atol=0.01   # intercept
@@ -253,6 +254,7 @@ end
 
 @testitem "Nested FE with cluster" tags = [:fe, :cluster] begin
     using Regress
+    using Regress: fe
     using DataFrames
     using CSV
     using StatsBase: stderror
@@ -262,19 +264,20 @@ end
 
     # County FE is nested in state_id cluster
     # When FE is nested in cluster, DOF adjustment should account for nesting
-    m = ols(df, @formula(y ~ x1 + x2 + endo + fe(county_id)), save_cluster = :state_id)
+    m = Regress.ols(df, @formula(y ~ x1 + x2 + endo + fe(county_id)), save_cluster = :state_id)
 
     se_cr1 = stderror(CR1(:state_id), m)
     @test all(isfinite, se_cr1)
 
     # Compare with state FE (non-nested - state is the cluster level)
-    m2 = ols(df, @formula(y ~ x1 + x2 + endo + fe(state_id)), save_cluster = :state_id)
+    m2 = Regress.ols(df, @formula(y ~ x1 + x2 + endo + fe(state_id)), save_cluster = :state_id)
     se_cr1_state = stderror(CR1(:state_id), m2)
     @test all(isfinite, se_cr1_state)
 end
 
 @testitem "LIML with nested FE and cluster" tags = [:iv, :kclass, :fe, :cluster] begin
     using Regress
+    using Regress: fe
     using DataFrames
     using CSV
     using StatsBase: stderror
@@ -283,7 +286,8 @@ end
     df = DataFrame(CSV.File(joinpath(dirname(pathof(Regress)), "../test/data/iv_nested.csv")))
 
     # LIML with state FE (absorbed), cluster at state level
-    m = iv(LIML(), df, @formula(y ~ x1 + x2 + (endo ~ z) + fe(state_id)), save_cluster = :state_id)
+    m = Regress.iv(Regress.LIML(), df, @formula(y ~ x1 + x2 + (endo ~ z) + fe(state_id)),
+        save_cluster = :state_id)
 
     se_cr1 = stderror(CR1(:state_id), m)
     @test all(isfinite, se_cr1)
