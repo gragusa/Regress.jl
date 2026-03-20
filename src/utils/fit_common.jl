@@ -258,7 +258,7 @@ function extract_cluster_variables(df::DataFrame,
     if isempty(cluster_vars_to_save)
         return NamedTuple()
     else
-        cluster_arrays = []
+        cluster_arrays = AbstractVector[]
         cluster_names = Symbol[]
         for var in cluster_vars_to_save
             if hasproperty(df, var)
