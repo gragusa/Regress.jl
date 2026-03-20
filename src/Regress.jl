@@ -42,19 +42,18 @@ include("utils/fixedeffects.jl")
 include("utils/basecol.jl")
 include("utils/tss.jl")
 include("utils/formula.jl")
-include("utils/fit_common.jl")  # Shared utilities for fitting
-include("utils/ranktest.jl")    # Kleibergen-Paap rank test for IV
-include("utils/vcov_spec.jl")   # VcovSpec wrapper for model + vcov() syntax
-include("utils/robust_fstat.jl")  # Robust Wald F-statistic computation
-include("utils/vcov_copy.jl")   # Deep copy utilities for vcov estimators
-include("utils/kclass_utils.jl")  # K-class estimation utilities (LIML, Fuller)
+include("utils/fit_common.jl")   # Shared utilities for fitting
+include("utils/ranktest.jl")     # Kleibergen-Paap rank test for IV
+include("utils/vcov_spec.jl")    # VcovSpec wrapper for model + vcov() syntax
+include("utils/robust_fstat.jl") # Robust Wald F-statistic computation
+include("utils/vcov_copy.jl")    # Deep copy utilities for vcov estimators
+include("utils/kclass_utils.jl") # K-class estimation utilities (LIML, Fuller)
 include("utils/show_utils.jl")   # Display formatting utilities
 
-# New component types (GLM-style architecture)
-include("response.jl")              # OLSResponse
-include("predictor.jl")             # OLSLinearPredictor (Chol and QR)
+include("response.jl")               # OLSResponse
+include("predictor.jl")              # OLSLinearPredictor (Chol and QR)
 include("fixedeffects_component.jl") # OLSFixedEffects
-include("ols_solver.jl")            # Solver utilities
+include("ols_solver.jl")             # Solver utilities
 
 # Model types and estimators
 include("estimators.jl")
@@ -62,38 +61,42 @@ include("AbstractModel.jl")
 include("LinearModel.jl")
 include("IVModel.jl")
 
-# Covariance utilities (must be before fitting functions)
-include("utils/covariance.jl")  # Helper functions for covariance calculations
+# Covariance utilities: Helper functions for covariance calculations
+include("utils/covariance.jl")
+
+# Weak instrument test: Montiel-Olea-Pflueger weak instrument test
+include("utils/weakiv_test.jl")
 
 # Estimator implementations
 include("estimators/tsls.jl")  # TSLS implementation
 include("estimators/kclass.jl")  # K-class estimators: LIML, Fuller, KClass
 
 # Fitting functions
-include("fit_ols.jl")  # NEW: Pure OLS implementation
-include("fit.jl")      # REFACTORED: Just thin wrappers now
+include("fit_ols.jl")     # OLS implementation
+include("fit.jl")         # Just thin wrappers now
 include("partial_out.jl")
 
 # Main estimation functions
-export ols, iv, fe
+public ols, iv, fe
 
 # Model types
-export OLSEstimator, OLSMatrixEstimator, IVEstimator, IVMatrixEstimator
+# export OLSEstimator, OLSMatrixEstimator, IVEstimator, IVMatrixEstimator
 
 # VcovSpec for model + vcov() syntax
-export VcovSpec
-
-# # Component types (for advanced usage)
-# export OLSResponse, OLSLinearPredictor, OLSPredictorChol, OLSPredictorQR, OLSFixedEffects
+# export VcovSpec
 
 # IV Estimators
-export AbstractIVEstimator, TSLS, LIML, Fuller, KClass
+# export AbstractIVEstimator
+public TSLS, LIML, Fuller, KClass
 
 # First-stage diagnostics
-export FirstStageResult, first_stage
+# export FirstStageResult, first_stage
+
+# Weak instrument test
+# export weakivtest, WeakIVTestResult
 
 # Utility functions
-export partial_out
+# export partial_out
 
 # Re-export StatsAPI functions for user convenience
 export coef, coefnames, coeftable, confint, stderror, vcov

@@ -92,7 +92,11 @@ function fit_ols(@nospecialize(df),
     formula_schema = apply_schema(data_prep.formula, s, OLSEstimator, data_prep.has_fe_intercept)
 
     # Create matrices
-    y = convert(Vector{T}, response(formula_schema, subdf))
+    y_raw = response(formula_schema, subdf)
+    y_raw isa AbstractVector || throw(ArgumentError(
+        "the response variable must be numeric (got a matrix — " *
+        "check that the dependent variable column is not a String or categorical type)"))
+    y = convert(Vector{T}, y_raw)
     X = convert(Matrix{T}, modelmatrix(formula_schema, subdf))
     response_name, coef_names = coefnames(formula_schema)
 

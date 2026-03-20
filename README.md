@@ -13,6 +13,7 @@ High-performance linear models with fixed effects and instrumental variables.
 - **Tight CovarianceMatrices.jl integration** with `model + vcov()` syntax
 - **Extended IV estimators**: TSLS, LIML, Fuller, and KClass
 - Comprehensive first-stage diagnostics for IV models
+- **Montiel-Olea & Pflueger (2013) robust weak instrument test** with Windmeijer (2025) extensions
 - Precomputed inference statistics for fast post-estimation
 
 ## Installation
@@ -28,13 +29,13 @@ Pkg.add(url="https://github.com/gragusa/Regress.jl")
 using Regress, DataFrames
 
 # OLS estimation
-model = ols(df, @formula(y ~ x1 + x2))
+model = Regress.ols(df, @formula(y ~ x1 + x2))
 
 # OLS with fixed effects
-model = ols(df, @formula(y ~ x1 + fe(industry) + fe(year)))
+model = Regress.ols(df, @formula(y ~ x1 + fe(industry) + fe(year)))
 
 # IV estimation (Two-Stage Least Squares)
-model = iv(TSLS(), df, @formula(y ~ x + (endo ~ z1 + z2)))
+model = Regress.iv(Regress.TSLS(), df, @formula(y ~ x + (endo ~ z1 + z2)))
 ```
 
 ## CovarianceMatrices.jl Integration
@@ -46,7 +47,7 @@ model = iv(TSLS(), df, @formula(y ~ x + (endo ~ z1 + z2)))
 A key feature is the `+` operator for updating a model's variance-covariance estimator. This returns a new model with all inference statistics precomputed:
 
 ```julia
-model = ols(df, @formula(y ~ x1 + x2))
+model = Regress.ols(df, @formula(y ~ x1 + x2))
 
 # Create a new model with HC3 standard errors
 model_hc3 = model + vcov(HC3())
@@ -72,24 +73,24 @@ All the estimators defined in `CovarianceMatrices.jl` are supported.
 
 ```julia
 # Two-Stage Least Squares (most common)
-model_tsls = iv(TSLS(), df, @formula(y ~ x + (endo ~ z1 + z2)))
+model_tsls = Regress.iv(Regress.TSLS(), df, @formula(y ~ x + (endo ~ z1 + z2)))
 
 # LIML - better finite-sample properties, especially with weak instruments
-model_liml = iv(LIML(), df, @formula(y ~ x + (endo ~ z1 + z2)))
+model_liml = Regress.iv(Regress.LIML(), df, @formula(y ~ x + (endo ~ z1 + z2)))
 
 # Fuller - bias-corrected estimator
 # Fuller(1.0) is approximately median-unbiased
 # Fuller(4.0) minimizes mean squared error
-model_fuller = iv(Fuller(1.0), df, @formula(y ~ x + (endo ~ z1 + z2)))
+model_fuller = Regress.iv(Regress.Fuller(1.0), df, @formula(y ~ x + (endo ~ z1 + z2)))
 
 # Generic K-class with custom kappa
-model_kclass = iv(KClass(0.9), df, @formula(y ~ x + (endo ~ z1 + z2)))
+model_kclass = Regress.iv(Regress.KClass(0.9), df, @formula(y ~ x + (endo ~ z1 + z2)))
 ```
 
 The `+ vcov()` syntax also works with IV models and automatically recomputes first-stage diagnostics:
 
 ```julia
-model = iv(TSLS(), df, @formula(y ~ x + (endo ~ z1 + z2)))
+model = Regress.iv(Regress.TSLS(), df, @formula(y ~ x + (endo ~ z1 + z2)))
 
 # Update to HC3 - recomputes ALL statistics, including first-stage F
 model_hc3 = model + vcov(HC3())
@@ -102,7 +103,7 @@ model_hc3.F_kp_per_endo  # Per-endogenous F-stats with HC3
 For IV estimation, Regress.jl provides comprehensive first-stage diagnostics:
 
 ```julia
-model = iv(TSLS(), df, @formula(y ~ x + (endo ~ z1 + z2)))
+model = Regress.iv(Regress.TSLS(), df, @formula(y ~ x + (endo ~ z1 + z2)))
 ```
 
 The output automatically displays:
@@ -134,14 +135,14 @@ endo                                 124.6735         0.0000
 Note: Std. errors computed using HC1 variance estimator; 2 excluded instruments, 1 endogenous
 ```
 
-### `first_stage()` - Extracting First-Stage Diagnostics
+### `Regress.first_stage()` - Extracting First-Stage Diagnostics
 
-The `first_stage()` function returns a `FirstStageResult` struct for programmatic access:
+The `Regress.first_stage()` function returns a `FirstStageResult` struct for programmatic access:
 
 ```julia
-model = iv(TSLS(), df, @formula(y ~ x + (endo ~ z1 + z2)))
+model = Regress.iv(Regress.TSLS(), df, @formula(y ~ x + (endo ~ z1 + z2)))
 
-fs = first_stage(model)
+fs = Regress.first_stage(model)
 fs.F_joint           # Joint Kleibergen-Paap F-statistic
 fs.p_joint           # p-value of joint test
 fs.F_per_endo        # Per-endogenous F-statistics
@@ -149,8 +150,69 @@ fs.p_per_endo        # Per-endogenous p-values
 
 # With a different variance estimator
 model_hc3 = model + vcov(HC3())
-fs_hc3 = first_stage(model_hc3)
+fs_hc3 = Regress.first_stage(model_hc3)
 ```
+
+## Weak Instrument Test
+
+The Kleibergen-Paap F-statistic is a useful first-stage diagnostic, but it does not provide formal critical values for detecting weak instruments under heteroskedasticity. `Regress.weakivtest` implements the **Montiel-Olea & Pflueger (2013)** robust weak instrument test, along with the **Windmeijer (2025)** robust F-statistic for the GMMf estimator.
+
+```julia
+model = Regress.iv(Regress.TSLS(), df, @formula(y ~ exper + expersq + (educ ~ age + kidslt6 + kidsge6)))
+
+result = Regress.weakivtest(model)
+```
+
+```
+Montiel-Pflueger robust weak instrument test
+──────────────────────────────────────────────────────
+btsls:                              0.0964
+sebtsls:                            0.0865
+bliml:                              0.0958
+sebliml:                            0.0913
+kappa:                              1.0016
+Non-Robust F statistic:              4.342
+Effective F statistic:               4.552
+Confidence level alpha:               5%
+──────────────────────────────────────────────────────
+
+──────────────────────────────────────────────────────
+Critical Values                  TSLS         LIML
+──────────────────────────────────────────────────────
+% of Worst Case Bias
+tau=5%                         15.711       15.406
+tau=10%                         9.957        9.789
+tau=20%                         6.749        6.654
+tau=30%                         5.562        5.494
+──────────────────────────────────────────────────────
+```
+
+**Decision rule:** Reject weak instruments at threshold $\tau$ if the effective F exceeds the critical value. In the example above, the effective F of 4.552 is below all critical values --- the instruments are weak.
+
+The test supports two bias benchmarks:
+
+```julia
+# Nagar bias benchmark (default, Montiel-Olea & Pflueger 2013)
+result = Regress.weakivtest(model)
+
+# OLS bias benchmark (Windmeijer 2025)
+result = Regress.weakivtest(model; benchmark=:ols)
+```
+
+The result struct provides programmatic access to all quantities:
+
+```julia
+result.F_eff          # Effective F-statistic
+result.F_robust       # Robust F-statistic (Windmeijer)
+result.cv_TSLS        # TSLS critical values at tau = 5%, 10%, 20%, 30%
+result.cv_LIML        # LIML critical values
+result.cv_GMMf        # GMMf critical values
+result.btsls          # TSLS coefficient
+result.bliml          # LIML coefficient
+result.kappa          # LIML kappa
+```
+
+> **Note:** The test requires a single endogenous regressor, matching the Stata `gfweakivtest` command. Results have been validated against Stata.
 
 ## Large-Scale IV Estimation
 
@@ -168,8 +230,8 @@ data.yob = categorical(data.yob)  # Year of birth
 data.qob = categorical(data.qob)  # Quarter of birth
 
 # Large model: 180 excluded instruments
-# Education is endogenous, instrumented by yob×qob and sob×qob interactions
-model = iv(TSLS(), data,
+# Education is endogenous, instrumented by yob*qob and sob*qob interactions
+model = Regress.iv(Regress.TSLS(), data,
   @formula(lwage ~ (educ ~ fe(yob)&fe(qob) + fe(sob)&fe(qob)) + fe(yob) + fe(sob)))
 ```
 
@@ -195,27 +257,29 @@ educ  0.0928181  0.00966506  9.60347    <1e-21  0.0738748   0.111761
 
 | Function | Description |
 |----------|-------------|
-| `ols(df, formula; ...)` | Ordinary Least Squares estimation |
-| `iv(method, df, formula; ...)` | Instrumental Variables estimation |
+| `Regress.ols(df, formula; ...)` | Ordinary Least Squares estimation |
+| `Regress.iv(method, df, formula; ...)` | Instrumental Variables estimation |
+| `Regress.first_stage(model)` | Extract first-stage diagnostics from IV model |
+| `Regress.weakivtest(model)` | Montiel-Olea & Pflueger robust weak instrument test |
 | `fe(var)` | Fixed effect term in formula |
-| `first_stage(model)` | Extract first-stage diagnostics from IV model |
 
 ### Model Types
 
 | Type | Description |
 |------|-------------|
-| `OLSEstimator` | Fitted OLS model |
-| `IVEstimator` | Fitted IV model |
-| `FirstStageResult` | First-stage diagnostics container |
+| `Regress.OLSEstimator` | Fitted OLS model |
+| `Regress.IVEstimator` | Fitted IV model |
+| `Regress.FirstStageResult` | First-stage diagnostics container |
+| `Regress.WeakIVTestResult` | Weak instrument test results |
 
 ### IV Estimator Types
 
 | Type | Description |
 |------|-------------|
-| `TSLS` | Two-Stage Least Squares (k = 1) |
-| `LIML` | Limited Information Maximum Likelihood |
-| `Fuller(a)` | Fuller bias-corrected estimator (default a = 1.0) |
-| `KClass(kappa)` | Generic K-class with custom kappa |
+| `Regress.TSLS` | Two-Stage Least Squares (k = 1) |
+| `Regress.LIML` | Limited Information Maximum Likelihood |
+| `Regress.Fuller(a)` | Fuller bias-corrected estimator (default a = 1.0) |
+| `Regress.KClass(kappa)` | Generic K-class with custom kappa |
 
 ### StatsAPI Methods
 
