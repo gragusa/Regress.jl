@@ -160,8 +160,8 @@ function _kclass_fit(
     # Residuals using original regressors
     residuals = y .- W * coef
 
-    # Store for vcov calculation
-    invA = inv(A)
+    # Store for vcov calculation — solve instead of explicit inv
+    invA = A \ I
 
     # Adjustment matrix for K-class variance: W - k*Wres
     Adj = W .- kappa .* Wres
