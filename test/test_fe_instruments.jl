@@ -1,5 +1,6 @@
 @testitem "FE-based instruments - basic equivalence" tags = [:iv, :fe] begin
     using Regress, CategoricalArrays, DataFrames, StatsBase, StableRNGs
+    using Regress: fe
     using StatsAPI: coef, stderror, vcov, nobs, dof_residual, r2
 
     # Create test data with categorical variables
@@ -39,11 +40,11 @@
     )
 
     # Standard approach: explicit dummy expansion
-    model_std = iv(TSLS(), df,
+    model_std = Regress.iv(Regress.TSLS(), df,
         @formula(y ~ x1 + (endo ~ group1&quarter) + fe(group1)))
 
     # FE-based approach: use fe() in instruments
-    model_fe = iv(TSLS(), df,
+    model_fe = Regress.iv(Regress.TSLS(), df,
         @formula(y ~ x1 + (endo ~ fe(group1)&fe(quarter)) + fe(group1)))
 
     # Coefficients should match
@@ -66,6 +67,7 @@ end
 
 @testitem "FE-based instruments - multiple interactions" tags = [:iv, :fe] begin
     using Regress, CategoricalArrays, DataFrames, StatsBase, StableRNGs
+    using Regress: fe
     using StatsAPI: coef, stderror, r2
 
     # Create test data with categorical variables
@@ -101,13 +103,13 @@ end
     )
 
     # Standard approach with two interaction terms
-    model_std = iv(TSLS(), df,
+    model_std = Regress.iv(Regress.TSLS(), df,
         @formula(y ~
                  x1 + (endo ~ group1&quarter + group2&quarter) + fe(group1) +
                  fe(group2)))
 
     # FE-based approach
-    model_fe = iv(TSLS(), df,
+    model_fe = Regress.iv(Regress.TSLS(), df,
         @formula(y ~
                  x1 + (endo ~ fe(group1)&fe(quarter) + fe(group2)&fe(quarter)) +
                  fe(group1) + fe(group2)))
@@ -124,6 +126,7 @@ end
 
 @testitem "FE-based instruments - robust SE" tags = [:iv, :fe, :vcov] begin
     using Regress, CategoricalArrays, DataFrames, StatsBase, StableRNGs
+    using Regress: fe
     using StatsAPI: coef, stderror, vcov
     using CovarianceMatrices: HC3
 
@@ -157,9 +160,9 @@ end
         quarter = categorical(quarter)
     )
 
-    model_std = iv(TSLS(), df,
+    model_std = Regress.iv(Regress.TSLS(), df,
         @formula(y ~ x1 + (endo ~ group1&quarter) + fe(group1)))
-    model_fe = iv(TSLS(), df,
+    model_fe = Regress.iv(Regress.TSLS(), df,
         @formula(y ~ x1 + (endo ~ fe(group1)&fe(quarter)) + fe(group1)))
 
     # Apply HC3 robust standard errors
@@ -181,6 +184,7 @@ end
 
 @testitem "FE-based instruments - confidence intervals" tags = [:iv, :fe] begin
     using Regress, CategoricalArrays, DataFrames, StatsBase, StableRNGs
+    using Regress: fe
     using StatsAPI: coef, confint
 
     # Create test data with categorical variables
@@ -213,9 +217,9 @@ end
         quarter = categorical(quarter)
     )
 
-    model_std = iv(TSLS(), df,
+    model_std = Regress.iv(Regress.TSLS(), df,
         @formula(y ~ x1 + (endo ~ group1&quarter) + fe(group1)))
-    model_fe = iv(TSLS(), df,
+    model_fe = Regress.iv(Regress.TSLS(), df,
         @formula(y ~ x1 + (endo ~ fe(group1)&fe(quarter)) + fe(group1)))
 
     ci_std = confint(model_std)
@@ -227,6 +231,7 @@ end
 
 @testitem "FE-based instruments - F-statistics" tags = [:iv, :fe, :statistics] begin
     using Regress, CategoricalArrays, DataFrames, StatsBase, StableRNGs
+    using Regress: fe
     using StatsAPI: coef
 
     # Create test data with categorical variables
@@ -259,9 +264,9 @@ end
         quarter = categorical(quarter)
     )
 
-    model_std = iv(TSLS(), df,
+    model_std = Regress.iv(Regress.TSLS(), df,
         @formula(y ~ x1 + (endo ~ group1&quarter) + fe(group1)))
-    model_fe = iv(TSLS(), df,
+    model_fe = Regress.iv(Regress.TSLS(), df,
         @formula(y ~ x1 + (endo ~ fe(group1)&fe(quarter)) + fe(group1)))
 
     # Model F-statistics should match
@@ -271,6 +276,7 @@ end
 
 @testitem "FE-based instruments - performance smoke test" tags = [:iv, :fe] begin
     using Regress, CategoricalArrays, DataFrames, StatsBase, StableRNGs
+    using Regress: fe
     using StatsAPI: coef
 
     # Create test data with categorical variables
@@ -307,13 +313,13 @@ end
 
     # This is a smoke test - just ensure both run without error
     # Standard approach
-    t_std = @elapsed model_std = iv(TSLS(), df,
+    t_std = @elapsed model_std = Regress.iv(Regress.TSLS(), df,
         @formula(y ~
                  x1 + (endo ~ group1&quarter + group2&quarter) + fe(group1) +
                  fe(group2)))
 
     # FE-based approach (should be faster for large categorical instruments)
-    t_fe = @elapsed model_fe = iv(TSLS(), df,
+    t_fe = @elapsed model_fe = Regress.iv(Regress.TSLS(), df,
         @formula(y ~
                  x1 + (endo ~ fe(group1)&fe(quarter) + fe(group2)&fe(quarter)) +
                  fe(group1) + fe(group2)))
