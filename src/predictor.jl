@@ -97,8 +97,8 @@ Compute (X'X)^(-1) from QR factorization.
 Uses the relationship (X'X)^(-1) = (R'R)^(-1) = R^(-1) R^(-T).
 """
 function invchol(pp::OLSPredictorQR{T}) where {T}
-    R = pp.qr.R
-    R_inv = inv(UpperTriangular(R))
+    R = UpperTriangular(pp.qr.R)
+    R_inv = R \ I
     return Symmetric(R_inv * R_inv')
 end
 
@@ -152,6 +152,6 @@ function invchol(pp::OLSPredictorSweep{T}) where {T}
 end
 
 function coefmatrix(pp::OLSPredictorSweep{T}) where {T}
-    # Invert invXX to get X'X
-    return Symmetric(inv(pp.invXX))
+    # Solve invXX \ I to get X'X without explicit inv
+    return Symmetric(pp.invXX \ I)
 end

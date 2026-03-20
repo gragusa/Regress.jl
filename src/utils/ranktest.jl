@@ -388,12 +388,12 @@ function _compute_single_first_stage_fstat(
         # Compute meat of sandwich
         meat = _compute_meat(M, vcov_type, nobs, dof_small, dof_fes)
 
-        # Bread: inv(Z'Z)
-        invZZ = inv(ZZ_chol)
+        # Bread: (Z'Z)^{-1} via Cholesky solve
+        invZZ = ZZ_chol \ I
 
         # Sandwich vcov: invZZ * (n * Meat) * invZZ
         # Note: _compute_meat already includes scaling
-        vcov_pi = invZZ * meat * invZZ
+        vcov_pi = Symmetric(invZZ * meat * invZZ)
 
         # Wald test: chi² = pi' * inv(V) * pi
         vcov_pi_chol = cholesky(Symmetric(vcov_pi); check = false)
@@ -470,8 +470,8 @@ function _compute_robust_first_stage_fstats_batched(
     residuals_all = copy(Xendo)
     BLAS.gemm!('N', 'N', -one(T), newZ, coef_full_all, one(T), residuals_all)
 
-    # invZZ needed for sandwich - compute once
-    invZZ = inv(ZZ_chol)
+    # (Z'Z)^{-1} needed for sandwich - compute once via Cholesky solve
+    invZZ = ZZ_chol \ I
 
     # DOF for first-stage
     dof_residual_fs = max(1, n - k_total - dof_fes)

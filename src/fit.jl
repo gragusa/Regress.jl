@@ -467,11 +467,9 @@ function iv(::TSLS, Z::AbstractMatrix{<:Real}, X::AbstractMatrix{<:Real},
     catch e
         throw(ArgumentError("Instrument matrix Z is rank deficient or nearly singular"))
     end
-    ZZ_inv = inv(ZZ_chol)
-
     # Projected regressors: X̂ = P_Z * X = Z * (Z'Z)^{-1} * Z' * X
     ZX = Z_mat' * X_mat
-    X_hat = Z_mat * (ZZ_inv * ZX)
+    X_hat = Z_mat * (ZZ_chol \ ZX)
 
     # TSLS estimator: β = (X̂'X)^{-1} X̂'y = (X'P_Z X)^{-1} X'P_Z y
     # Using X̂'X = X'P_Z X and X̂'y = X'P_Z y
@@ -495,7 +493,7 @@ function iv(::TSLS, Z::AbstractMatrix{<:Real}, X::AbstractMatrix{<:Real},
         Symmetric(pinv(XhatXhat))
     end
     invXhatXhat = if XhatXhat_chol isa Cholesky
-        inv(XhatXhat_chol)
+        Symmetric(XhatXhat_chol \ I)
     else
         XhatXhat_chol  # Already a matrix from pinv
     end
