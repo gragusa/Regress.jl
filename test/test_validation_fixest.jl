@@ -46,7 +46,7 @@
     df.Z_cat = categorical(df.Z_cat)
 
     # ----- Tests -----
-    m = ols(df, @formula(y ~ x1 + x2 + endo))
+    m = Regress.ols(df, @formula(y ~ x1 + x2 + endo))
 
     # Coefficients
     @test coef(m) ≈ COEF rtol = RTOL_COEF
@@ -58,16 +58,17 @@
     @test stderror(HC1(), m) ≈ SE_HC1 rtol = RTOL_SE_HC
 
     # Standard errors - cluster(fe1)
-    m_cl1 = ols(df, @formula(y ~ x1 + x2 + endo), save_cluster = :fe1)
+    m_cl1 = Regress.ols(df, @formula(y ~ x1 + x2 + endo), save_cluster = :fe1)
     @test stderror(CR1(:fe1), m_cl1) ≈ SE_CLUSTER_FE1 rtol = RTOL_SE_CLUSTER
 
     # Standard errors - cluster(fe1, fe2)
-    m_cl2 = ols(df, @formula(y ~ x1 + x2 + endo), save_cluster = [:fe1, :fe2])
+    m_cl2 = Regress.ols(df, @formula(y ~ x1 + x2 + endo), save_cluster = [:fe1, :fe2])
     @test stderror(CR1(:fe1, :fe2), m_cl2) ≈ SE_CLUSTER_FE1_FE2 rtol = RTOL_SE_CLUSTER
 end
 
 @testitem "fixest: OLS with fe1" tags = [:ols, :fe, :validation] begin
     using Regress
+    using Regress: fe
     using DataFrames, CSV, CategoricalArrays
     using StatsBase: coef, stderror, r2
     using CovarianceMatrices: HC1, CR1
@@ -95,7 +96,7 @@ end
     df.Z_cat = categorical(df.Z_cat)
 
     # ----- Tests -----
-    m = ols(df, @formula(y ~ x1 + x2 + endo + fe(fe1)))
+    m = Regress.ols(df, @formula(y ~ x1 + x2 + endo + fe(fe1)))
 
     # Coefficients
     @test coef(m) ≈ COEF rtol = RTOL_COEF
@@ -107,16 +108,18 @@ end
     @test stderror(HC1(), m) ≈ SE_HC1 rtol = RTOL_SE_HC
 
     # Standard errors - cluster(fe1)
-    m_cl1 = ols(df, @formula(y ~ x1 + x2 + endo + fe(fe1)), save_cluster = :fe1)
+    m_cl1 = Regress.ols(df, @formula(y ~ x1 + x2 + endo + fe(fe1)), save_cluster = :fe1)
     @test stderror(CR1(:fe1), m_cl1) ≈ SE_CLUSTER_FE1 rtol = RTOL_SE_CLUSTER
 
     # Standard errors - cluster(fe1, fe2)
-    m_cl2 = ols(df, @formula(y ~ x1 + x2 + endo + fe(fe1)), save_cluster = [:fe1, :fe2])
+    m_cl2 = Regress.ols(df, @formula(y ~ x1 + x2 + endo + fe(fe1)), save_cluster = [
+        :fe1, :fe2])
     @test stderror(CR1(:fe1, :fe2), m_cl2) ≈ SE_CLUSTER_FE1_FE2 rtol = RTOL_SE_CLUSTER
 end
 
 @testitem "fixest: OLS with fe1+fe2" tags = [:ols, :fe, :validation] begin
     using Regress
+    using Regress: fe
     using DataFrames, CSV, CategoricalArrays
     using StatsBase: coef, stderror, r2
     using CovarianceMatrices: HC1, CR1
@@ -144,7 +147,7 @@ end
     df.Z_cat = categorical(df.Z_cat)
 
     # ----- Tests -----
-    m = ols(df, @formula(y ~ x1 + x2 + endo + fe(fe1) + fe(fe2)))
+    m = Regress.ols(df, @formula(y ~ x1 + x2 + endo + fe(fe1) + fe(fe2)))
 
     # Coefficients
     @test coef(m) ≈ COEF rtol = RTOL_COEF
@@ -156,11 +159,11 @@ end
     @test stderror(HC1(), m) ≈ SE_HC1 rtol = RTOL_SE_HC
 
     # Standard errors - cluster(fe1)
-    m_cl1 = ols(df, @formula(y ~ x1 + x2 + endo + fe(fe1) + fe(fe2)), save_cluster = :fe1)
+    m_cl1 = Regress.ols(df, @formula(y ~ x1 + x2 + endo + fe(fe1) + fe(fe2)), save_cluster = :fe1)
     @test stderror(CR1(:fe1), m_cl1) ≈ SE_CLUSTER_FE1 rtol = RTOL_SE_CLUSTER
 
     # Standard errors - cluster(fe1, fe2)
-    m_cl2 = ols(df, @formula(y ~ x1 + x2 + endo + fe(fe1) + fe(fe2)), save_cluster = [
+    m_cl2 = Regress.ols(df, @formula(y ~ x1 + x2 + endo + fe(fe1) + fe(fe2)), save_cluster = [
         :fe1, :fe2])
     @test stderror(CR1(:fe1, :fe2), m_cl2) ≈ SE_CLUSTER_FE1_FE2 rtol = RTOL_SE_CLUSTER
 end
@@ -200,7 +203,7 @@ end
     df.Z_cat = categorical(df.Z_cat)
 
     # ----- Tests -----
-    m = iv(TSLS(), df, @formula(y ~ x1 + x2 + (endo ~ Z_continuous)))
+    m = Regress.iv(Regress.TSLS(), df, @formula(y ~ x1 + x2 + (endo ~ Z_continuous)))
 
     # Coefficients
     @test coef(m) ≈ COEF rtol = RTOL_COEF
@@ -215,17 +218,19 @@ end
     @test stderror(HC1(), m) ≈ SE_HC1 rtol = RTOL_SE_HC
 
     # Standard errors - cluster(fe1)
-    m_cl1 = iv(TSLS(), df, @formula(y ~ x1 + x2 + (endo ~ Z_continuous)), save_cluster = :fe1)
+    m_cl1 = Regress.iv(Regress.TSLS(), df, @formula(y ~ x1 + x2 + (endo ~ Z_continuous)), save_cluster = :fe1)
     @test stderror(CR1(:fe1), m_cl1) ≈ SE_CLUSTER_FE1 rtol = RTOL_SE_CLUSTER
 
     # Standard errors - cluster(fe1, fe2)
-    m_cl2 = iv(TSLS(), df, @formula(y ~ x1 + x2 + (endo ~ Z_continuous)), save_cluster = [
-        :fe1, :fe2])
+    m_cl2 = Regress.iv(Regress.TSLS(), df, @formula(y ~ x1 + x2 + (endo ~ Z_continuous)),
+        save_cluster = [
+            :fe1, :fe2])
     @test stderror(CR1(:fe1, :fe2), m_cl2) ≈ SE_CLUSTER_FE1_FE2 rtol = RTOL_SE_CLUSTER
 end
 
 @testitem "fixest: IV continuous fe1" tags = [:iv, :fe, :validation] begin
     using Regress
+    using Regress: fe
     using DataFrames, CSV, CategoricalArrays
     using StatsBase: coef, stderror, r2
     using CovarianceMatrices: HC1, CR1
@@ -255,7 +260,8 @@ end
     df.Z_cat = categorical(df.Z_cat)
 
     # ----- Tests -----
-    m = iv(TSLS(), df, @formula(y ~ x1 + x2 + (endo ~ Z_continuous) + fe(fe1)))
+    m = Regress.iv(Regress.TSLS(), df, @formula(y ~
+                                                x1 + x2 + (endo ~ Z_continuous) + fe(fe1)))
 
     # Coefficients
     @test coef(m) ≈ COEF rtol = RTOL_COEF
@@ -270,17 +276,22 @@ end
     @test stderror(HC1(), m) ≈ SE_HC1 rtol = RTOL_SE_HC
 
     # Standard errors - cluster(fe1)
-    m_cl1 = iv(TSLS(), df, @formula(y ~ x1 + x2 + (endo ~ Z_continuous) + fe(fe1)), save_cluster = :fe1)
+    m_cl1 = Regress.iv(
+        Regress.TSLS(), df, @formula(y ~ x1 + x2 + (endo ~ Z_continuous) + fe(fe1)),
+        save_cluster = :fe1)
     @test stderror(CR1(:fe1), m_cl1) ≈ SE_CLUSTER_FE1 rtol = RTOL_SE_CLUSTER
 
     # Standard errors - cluster(fe1, fe2)
-    m_cl2 = iv(TSLS(), df, @formula(y ~ x1 + x2 + (endo ~ Z_continuous) + fe(fe1)), save_cluster = [
-        :fe1, :fe2])
+    m_cl2 = Regress.iv(
+        Regress.TSLS(), df, @formula(y ~ x1 + x2 + (endo ~ Z_continuous) + fe(fe1)),
+        save_cluster = [
+            :fe1, :fe2])
     @test stderror(CR1(:fe1, :fe2), m_cl2) ≈ SE_CLUSTER_FE1_FE2 rtol = RTOL_SE_CLUSTER
 end
 
 @testitem "fixest: IV continuous fe1+fe2" tags = [:iv, :fe, :validation] begin
     using Regress
+    using Regress: fe
     using DataFrames, CSV, CategoricalArrays
     using StatsBase: coef, stderror, r2
     using CovarianceMatrices: HC1, CR1
@@ -310,7 +321,9 @@ end
     df.Z_cat = categorical(df.Z_cat)
 
     # ----- Tests -----
-    m = iv(TSLS(), df, @formula(y ~ x1 + x2 + (endo ~ Z_continuous) + fe(fe1) + fe(fe2)))
+    m = Regress.iv(Regress.TSLS(), df, @formula(y ~
+                                                x1 + x2 + (endo ~ Z_continuous) + fe(fe1) +
+                                                fe(fe2)))
 
     # Coefficients
     @test coef(m) ≈ COEF rtol = RTOL_COEF
@@ -325,13 +338,16 @@ end
     @test stderror(HC1(), m) ≈ SE_HC1 rtol = RTOL_SE_HC
 
     # Standard errors - cluster(fe1)
-    m_cl1 = iv(
-        TSLS(), df, @formula(y ~ x1 + x2 + (endo ~ Z_continuous) + fe(fe1) + fe(fe2)), save_cluster = :fe1)
+    m_cl1 = Regress.iv(
+        Regress.TSLS(), df, @formula(y ~
+                                     x1 + x2 + (endo ~ Z_continuous) + fe(fe1) + fe(fe2)),
+        save_cluster = :fe1)
     @test stderror(CR1(:fe1), m_cl1) ≈ SE_CLUSTER_FE1 rtol = RTOL_SE_CLUSTER
 
     # Standard errors - cluster(fe1, fe2)
-    m_cl2 = iv(
-        TSLS(), df, @formula(y ~ x1 + x2 + (endo ~ Z_continuous) + fe(fe1) + fe(fe2)),
+    m_cl2 = Regress.iv(
+        Regress.TSLS(), df, @formula(y ~
+                                     x1 + x2 + (endo ~ Z_continuous) + fe(fe1) + fe(fe2)),
         save_cluster = [:fe1, :fe2])
     @test stderror(CR1(:fe1, :fe2), m_cl2) ≈ SE_CLUSTER_FE1_FE2 rtol = RTOL_SE_CLUSTER
 end
@@ -371,7 +387,7 @@ end
     df.Z_cat = categorical(df.Z_cat)
 
     # ----- Tests -----
-    m = iv(TSLS(), df, @formula(y ~ x1 + x2 + (endo ~ Z_cat)))
+    m = Regress.iv(Regress.TSLS(), df, @formula(y ~ x1 + x2 + (endo ~ Z_cat)))
 
     # Coefficients
     @test coef(m) ≈ COEF rtol = RTOL_COEF
@@ -386,17 +402,18 @@ end
     @test stderror(HC1(), m) ≈ SE_HC1 rtol = RTOL_SE_HC
 
     # Standard errors - cluster(fe1)
-    m_cl1 = iv(TSLS(), df, @formula(y ~ x1 + x2 + (endo ~ Z_cat)), save_cluster = :fe1)
+    m_cl1 = Regress.iv(Regress.TSLS(), df, @formula(y ~ x1 + x2 + (endo ~ Z_cat)), save_cluster = :fe1)
     @test stderror(CR1(:fe1), m_cl1) ≈ SE_CLUSTER_FE1 rtol = RTOL_SE_CLUSTER
 
     # Standard errors - cluster(fe1, fe2)
-    m_cl2 = iv(TSLS(), df, @formula(y ~ x1 + x2 + (endo ~ Z_cat)), save_cluster = [
+    m_cl2 = Regress.iv(Regress.TSLS(), df, @formula(y ~ x1 + x2 + (endo ~ Z_cat)), save_cluster = [
         :fe1, :fe2])
     @test stderror(CR1(:fe1, :fe2), m_cl2) ≈ SE_CLUSTER_FE1_FE2 rtol = RTOL_SE_CLUSTER
 end
 
 @testitem "fixest: IV categorical fe1" tags = [:iv, :fe, :validation] begin
     using Regress
+    using Regress: fe
     using DataFrames, CSV, CategoricalArrays
     using StatsBase: coef, stderror, r2
     using CovarianceMatrices: HC1, CR1
@@ -426,7 +443,7 @@ end
     df.Z_cat = categorical(df.Z_cat)
 
     # ----- Tests -----
-    m = iv(TSLS(), df, @formula(y ~ x1 + x2 + (endo ~ Z_cat) + fe(fe1)))
+    m = Regress.iv(Regress.TSLS(), df, @formula(y ~ x1 + x2 + (endo ~ Z_cat) + fe(fe1)))
 
     # Coefficients
     @test coef(m) ≈ COEF rtol = RTOL_COEF
@@ -441,17 +458,21 @@ end
     @test stderror(HC1(), m) ≈ SE_HC1 rtol = RTOL_SE_HC
 
     # Standard errors - cluster(fe1)
-    m_cl1 = iv(TSLS(), df, @formula(y ~ x1 + x2 + (endo ~ Z_cat) + fe(fe1)), save_cluster = :fe1)
+    m_cl1 = Regress.iv(
+        Regress.TSLS(), df, @formula(y ~ x1 + x2 + (endo ~ Z_cat) + fe(fe1)), save_cluster = :fe1)
     @test stderror(CR1(:fe1), m_cl1) ≈ SE_CLUSTER_FE1 rtol = RTOL_SE_CLUSTER
 
     # Standard errors - cluster(fe1, fe2)
-    m_cl2 = iv(TSLS(), df, @formula(y ~ x1 + x2 + (endo ~ Z_cat) + fe(fe1)), save_cluster = [
-        :fe1, :fe2])
+    m_cl2 = Regress.iv(
+        Regress.TSLS(), df, @formula(y ~ x1 + x2 + (endo ~ Z_cat) + fe(fe1)),
+        save_cluster = [
+            :fe1, :fe2])
     @test stderror(CR1(:fe1, :fe2), m_cl2) ≈ SE_CLUSTER_FE1_FE2 rtol = RTOL_SE_CLUSTER
 end
 
 @testitem "fixest: IV categorical fe1+fe2" tags = [:iv, :fe, :validation] begin
     using Regress
+    using Regress: fe
     using DataFrames, CSV, CategoricalArrays
     using StatsBase: coef, stderror, r2
     using CovarianceMatrices: HC1, CR1
@@ -481,7 +502,9 @@ end
     df.Z_cat = categorical(df.Z_cat)
 
     # ----- Tests -----
-    m = iv(TSLS(), df, @formula(y ~ x1 + x2 + (endo ~ Z_cat) + fe(fe1) + fe(fe2)))
+    m = Regress.iv(Regress.TSLS(), df, @formula(y ~
+                                                x1 + x2 + (endo ~ Z_cat) + fe(fe1) +
+                                                fe(fe2)))
 
     # Coefficients
     @test coef(m) ≈ COEF rtol = RTOL_COEF
@@ -496,12 +519,15 @@ end
     @test stderror(HC1(), m) ≈ SE_HC1 rtol = RTOL_SE_HC
 
     # Standard errors - cluster(fe1)
-    m_cl1 = iv(TSLS(), df, @formula(y ~ x1 + x2 + (endo ~ Z_cat) + fe(fe1) + fe(fe2)), save_cluster = :fe1)
+    m_cl1 = Regress.iv(
+        Regress.TSLS(), df, @formula(y ~ x1 + x2 + (endo ~ Z_cat) + fe(fe1) + fe(fe2)),
+        save_cluster = :fe1)
     @test stderror(CR1(:fe1), m_cl1) ≈ SE_CLUSTER_FE1 rtol = RTOL_SE_CLUSTER
 
     # Standard errors - cluster(fe1, fe2)
-    m_cl2 = iv(
-        TSLS(), df, @formula(y ~ x1 + x2 + (endo ~ Z_cat) + fe(fe1) + fe(fe2)), save_cluster = [
+    m_cl2 = Regress.iv(
+        Regress.TSLS(), df, @formula(y ~ x1 + x2 + (endo ~ Z_cat) + fe(fe1) + fe(fe2)),
+        save_cluster = [
             :fe1, :fe2])
     @test stderror(CR1(:fe1, :fe2), m_cl2) ≈ SE_CLUSTER_FE1_FE2 rtol = RTOL_SE_CLUSTER
 end
@@ -541,7 +567,8 @@ end
     df.Z_cat = categorical(df.Z_cat)
 
     # ----- Tests -----
-    m = iv(TSLS(), df, @formula(y ~ x1 + x2 + (endo ~ Z_continuous + Z_cat)))
+    m = Regress.iv(Regress.TSLS(), df, @formula(y ~
+                                                x1 + x2 + (endo ~ Z_continuous + Z_cat)))
 
     # Coefficients
     @test coef(m) ≈ COEF rtol = RTOL_COEF
@@ -556,17 +583,22 @@ end
     @test stderror(HC1(), m) ≈ SE_HC1 rtol = RTOL_SE_HC
 
     # Standard errors - cluster(fe1)
-    m_cl1 = iv(TSLS(), df, @formula(y ~ x1 + x2 + (endo ~ Z_continuous + Z_cat)), save_cluster = :fe1)
+    m_cl1 = Regress.iv(
+        Regress.TSLS(), df, @formula(y ~ x1 + x2 + (endo ~ Z_continuous + Z_cat)),
+        save_cluster = :fe1)
     @test stderror(CR1(:fe1), m_cl1) ≈ SE_CLUSTER_FE1 rtol = RTOL_SE_CLUSTER
 
     # Standard errors - cluster(fe1, fe2)
-    m_cl2 = iv(TSLS(), df, @formula(y ~ x1 + x2 + (endo ~ Z_continuous + Z_cat)), save_cluster = [
-        :fe1, :fe2])
+    m_cl2 = Regress.iv(
+        Regress.TSLS(), df, @formula(y ~ x1 + x2 + (endo ~ Z_continuous + Z_cat)),
+        save_cluster = [
+            :fe1, :fe2])
     @test stderror(CR1(:fe1, :fe2), m_cl2) ≈ SE_CLUSTER_FE1_FE2 rtol = RTOL_SE_CLUSTER
 end
 
 @testitem "fixest: IV both fe1" tags = [:iv, :fe, :validation] begin
     using Regress
+    using Regress: fe
     using DataFrames, CSV, CategoricalArrays
     using StatsBase: coef, stderror, r2
     using CovarianceMatrices: HC1, CR1
@@ -596,7 +628,9 @@ end
     df.Z_cat = categorical(df.Z_cat)
 
     # ----- Tests -----
-    m = iv(TSLS(), df, @formula(y ~ x1 + x2 + (endo ~ Z_continuous + Z_cat) + fe(fe1)))
+    m = Regress.iv(Regress.TSLS(), df, @formula(y ~
+                                                x1 + x2 + (endo ~ Z_continuous + Z_cat) +
+                                                fe(fe1)))
 
     # Coefficients
     @test coef(m) ≈ COEF rtol = RTOL_COEF
@@ -611,17 +645,21 @@ end
     @test stderror(HC1(), m) ≈ SE_HC1 rtol = RTOL_SE_HC
 
     # Standard errors - cluster(fe1)
-    m_cl1 = iv(TSLS(), df, @formula(y ~ x1 + x2 + (endo ~ Z_continuous + Z_cat) + fe(fe1)), save_cluster = :fe1)
+    m_cl1 = Regress.iv(
+        Regress.TSLS(), df, @formula(y ~ x1 + x2 + (endo ~ Z_continuous + Z_cat) + fe(fe1)),
+        save_cluster = :fe1)
     @test stderror(CR1(:fe1), m_cl1) ≈ SE_CLUSTER_FE1 rtol = RTOL_SE_CLUSTER
 
     # Standard errors - cluster(fe1, fe2)
-    m_cl2 = iv(TSLS(), df, @formula(y ~ x1 + x2 + (endo ~ Z_continuous + Z_cat) + fe(fe1)),
+    m_cl2 = Regress.iv(
+        Regress.TSLS(), df, @formula(y ~ x1 + x2 + (endo ~ Z_continuous + Z_cat) + fe(fe1)),
         save_cluster = [:fe1, :fe2])
     @test stderror(CR1(:fe1, :fe2), m_cl2) ≈ SE_CLUSTER_FE1_FE2 rtol = RTOL_SE_CLUSTER
 end
 
 @testitem "fixest: IV both fe1+fe2" tags = [:iv, :fe, :validation] begin
     using Regress
+    using Regress: fe
     using DataFrames, CSV, CategoricalArrays
     using StatsBase: coef, stderror, r2
     using CovarianceMatrices: HC1, CR1
@@ -651,9 +689,10 @@ end
     df.Z_cat = categorical(df.Z_cat)
 
     # ----- Tests -----
-    m = iv(TSLS(), df, @formula(y ~
-                                x1 + x2 + (endo ~ Z_continuous + Z_cat) + fe(fe1) +
-                                fe(fe2)))
+    m = Regress.iv(Regress.TSLS(), df,
+        @formula(y ~
+                 x1 + x2 + (endo ~ Z_continuous + Z_cat) + fe(fe1) +
+                 fe(fe2)))
 
     # Coefficients
     @test coef(m) ≈ COEF rtol = RTOL_COEF
@@ -668,7 +707,7 @@ end
     @test stderror(HC1(), m) ≈ SE_HC1 rtol = RTOL_SE_HC
 
     # Standard errors - cluster(fe1)
-    m_cl1 = iv(TSLS(), df,
+    m_cl1 = Regress.iv(Regress.TSLS(), df,
         @formula(y ~ x1 + x2 + (endo ~ Z_continuous + Z_cat) + fe(fe1) + fe(fe2)),
         save_cluster = :fe1)
     @test stderror(CR1(:fe1), m_cl1) ≈ SE_CLUSTER_FE1 rtol = RTOL_SE_CLUSTER
