@@ -8,7 +8,7 @@
 
     # Simple OLS
     m = @formula Sales ~ Price + NDI
-    model = ols(df, m)
+    model = Regress.ols(df, m)
 
     for hc in [HC0(), HC1(), HC2(), HC3()]
         wrapped = model + vcov(hc)
@@ -23,6 +23,7 @@ end
 
 @testitem "OLS + vcov(HC) with FE" tags = [:ols, :vcov, :hc, :fe] begin
     using Regress, CategoricalArrays, CSV, DataFrames, LinearAlgebra, StatsBase
+    using Regress: fe
     using CovarianceMatrices: HC0, HC1, HC2, HC3
 
     df = DataFrame(CSV.File(joinpath(dirname(pathof(Regress)), "../dataset/Cigar.csv")))
@@ -31,7 +32,7 @@ end
 
     # OLS with fixed effects
     m_fe = @formula Sales ~ Price + fe(State)
-    model_fe = ols(df, m_fe)
+    model_fe = Regress.ols(df, m_fe)
 
     for hc in [HC0(), HC1(), HC2(), HC3()]
         wrapped = model_fe + vcov(hc)
@@ -55,7 +56,7 @@ end
     m = @formula Sales ~ Price + NDI
 
     # OLS with cluster
-    model_cluster = ols(df, m, save_cluster = :State)
+    model_cluster = Regress.ols(df, m, save_cluster = :State)
 
     for cr in [CR0(:State), CR1(:State), CR2(:State), CR3(:State)]
         wrapped = model_cluster + vcov(cr)
@@ -67,7 +68,7 @@ end
     end
 
     # OLS with two-way clustering
-    model_cluster2 = ols(df, m, save_cluster = [:State, :Year])
+    model_cluster2 = Regress.ols(df, m, save_cluster = [:State, :Year])
 
     wrapped = model_cluster2 + vcov(CR1(:State, :Year))
     direct_vcov = vcov(CR1(:State, :Year), model_cluster2)
@@ -85,7 +86,7 @@ end
 
     # Simple OLS
     m = @formula Sales ~ Price + NDI
-    model = ols(df, m)
+    model = Regress.ols(df, m)
 
     # HAC estimators
     wrapped = model + vcov(Bartlett(4))
@@ -106,7 +107,7 @@ end
 
     # Simple IV
     m = @formula Sales ~ NDI + (Price ~ Pimin)
-    model = iv(TSLS(), df, m)
+    model = Regress.iv(Regress.TSLS(), df, m)
 
     for hc in [HC0(), HC1(), HC2()]
         wrapped = model + vcov(hc)
@@ -131,7 +132,7 @@ end
     m = @formula Sales ~ NDI + (Price ~ Pimin)
 
     # IV with cluster
-    model_cluster = iv(TSLS(), df, m, save_cluster = :State)
+    model_cluster = Regress.iv(Regress.TSLS(), df, m, save_cluster = :State)
 
     for cr in [CR0(:State), CR1(:State)]
         wrapped = model_cluster + vcov(cr)
@@ -145,6 +146,7 @@ end
 
 @testitem "IV + vcov(HC) with FE" tags = [:iv, :vcov, :hc, :fe] begin
     using Regress, CategoricalArrays, CSV, DataFrames, LinearAlgebra, StatsBase
+    using Regress: fe
     using CovarianceMatrices: HC0, HC1
 
     df = DataFrame(CSV.File(joinpath(dirname(pathof(Regress)), "../dataset/Cigar.csv")))
@@ -153,7 +155,7 @@ end
 
     # IV with FE
     m_fe = @formula Sales ~ (Price ~ Pimin) + fe(State)
-    model_fe = iv(TSLS(), df, m_fe)
+    model_fe = Regress.iv(Regress.TSLS(), df, m_fe)
 
     for hc in [HC0(), HC1()]
         wrapped = model_fe + vcov(hc)
@@ -173,7 +175,7 @@ end
 
     # Simple IV
     m = @formula Sales ~ NDI + (Price ~ Pimin)
-    model = iv(TSLS(), df, m)
+    model = Regress.iv(Regress.TSLS(), df, m)
 
     # HAC estimators for IV
     wrapped = model + vcov(Bartlett(4))
@@ -191,7 +193,7 @@ end
     df = DataFrame(CSV.File(joinpath(dirname(pathof(Regress)), "../dataset/Cigar.csv")))
 
     m = @formula Sales ~ Price + NDI
-    model = ols(df, m)
+    model = Regress.ols(df, m)
 
     # Test chaining: (model + vcov(A)) + vcov(B) should equal model + vcov(B)
     model_hc1 = model + vcov(HC1())
@@ -210,7 +212,7 @@ end
     df = DataFrame(CSV.File(joinpath(dirname(pathof(Regress)), "../dataset/Cigar.csv")))
 
     m = @formula Sales ~ Price + NDI
-    model = ols(df, m)
+    model = Regress.ols(df, m)
     wrapped = model + vcov(HC3())
 
     # Test that delegated methods return same values as original model
@@ -246,10 +248,10 @@ end
     df = DataFrame(CSV.File(joinpath(dirname(pathof(Regress)), "../dataset/Cigar.csv")))
 
     m = @formula Sales ~ NDI + (Price ~ Pimin + CPI)
-    model = iv(TSLS(), df, m)
+    model = Regress.iv(Regress.TSLS(), df, m)
 
     # Test first_stage from IVEstimator (default HC1)
-    fs = first_stage(model)
+    fs = Regress.first_stage(model)
     @test fs.vcov_type == "HR1"  # HC1 is alias for HR1
     @test fs.F_joint == model.F_kp
     @test fs.n_endogenous == 1
@@ -257,7 +259,7 @@ end
 
     # Test first_stage from IVEstimator with updated vcov
     model_hc3 = model + vcov(HC3())
-    fs_hc3 = first_stage(model_hc3)
+    fs_hc3 = Regress.first_stage(model_hc3)
     @test fs_hc3.vcov_type == "HR3"  # HC3 is alias for HR3
     @test fs_hc3.F_joint == model_hc3.F_kp
 
