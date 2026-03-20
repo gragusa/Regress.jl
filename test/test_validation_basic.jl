@@ -30,7 +30,7 @@
     V_LIML_HC1 = [0.00020058 0.0017824;
                   0.0017824 0.00571862]
 
-    m_tsls = iv(TSLS(), df, @formula(y~(x ~ z1 + z2)))
+    m_tsls = Regress.iv(Regress.TSLS(), df, @formula(y~(x ~ z1 + z2)))
 
     # Test that HC standard errors are computed correctly with proper DOF
     v_tsls_hc0 = vcov(HC0(), m_tsls)
@@ -63,7 +63,7 @@ end
     df = CSV.read(csv_path, DataFrame)
 
     m_glm = lm(@formula(y~x), df)
-    m_ols = ols(df, @formula(y~x))
+    m_ols = Regress.ols(df, @formula(y~x))
 
     # DOF should match - validates the intercept double-counting fix for OLS
     @test dof_residual(m_ols) == dof_residual(m_glm)
