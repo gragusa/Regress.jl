@@ -682,7 +682,7 @@ function fit_tsls(@nospecialize(df),
     # newZ already contains this from the first stage computation
     Z_full = newZ
     Z_fullZZ = Symmetric(Z_full' * Z_full)
-    invZ_fullZZ = Symmetric(inv(cholesky(Z_fullZZ)))
+    invZ_fullZZ = Symmetric(cholesky(Z_fullZZ) \ I)
 
     postestimation_data = PostEstimationDataIV(
         convert(Matrix{T}, Xhat), convert(Matrix{T}, X),

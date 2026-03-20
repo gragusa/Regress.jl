@@ -377,7 +377,7 @@ function fit_kclass_estimator(
     # newZ = hcat(Xexo, Z) was computed earlier for the first stage
     Z_full = newZ
     Z_fullZZ = Symmetric(Z_full' * Z_full)
-    invZ_fullZZ = Symmetric(inv(cholesky(Z_fullZZ)))
+    invZ_fullZZ = Symmetric(cholesky(Z_fullZZ) \ I)
 
     postestimation_data = PostEstimationDataIV(
         convert(Matrix{T}, Adj_reordered),  # X_fitted: use Adj for vcov moment matrix
