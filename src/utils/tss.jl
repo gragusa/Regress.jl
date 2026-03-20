@@ -61,13 +61,14 @@ end
 =============================================================================#
 
 """
-    Fstat(coef, matrix_vcov, has_intercept) -> Float64
+    Fstat(coef, matrix_vcov, has_intercept) -> T
 
 Compute the F-statistic for testing joint significance of coefficients.
 """
-function Fstat(coef::Vector{Float64}, matrix_vcov::AbstractMatrix{Float64}, has_intercept::Bool)
+function Fstat(coef::AbstractVector{T}, matrix_vcov::AbstractMatrix{T},
+        has_intercept::Bool) where {T <: AbstractFloat}
     coefF = copy(coef)
-    length(coef) == has_intercept && return NaN
+    length(coef) == has_intercept && return T(NaN)
     if has_intercept
         coefF = coefF[2:end]
         matrix_vcov = matrix_vcov[2:end, 2:end]
@@ -76,6 +77,6 @@ function Fstat(coef::Vector{Float64}, matrix_vcov::AbstractMatrix{Float64}, has_
         return (coefF' * (matrix_vcov \ coefF)) / length(coefF)
     catch
         @info "The variance-covariance matrix is not invertible. F-statistic not computed"
-        return NaN
+        return T(NaN)
     end
 end
