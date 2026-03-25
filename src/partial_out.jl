@@ -104,7 +104,8 @@ function partial_out(
     end
     if has_fes
         _, b,
-        c = solve_residuals!(eachcol(Y), feM; maxiter = maxiter, tol = tol, progress_bar = false)
+        c = solve_residuals!(
+            eachcol(Y), feM; maxiter = maxiter, tol = tol, progress_bar = false)
         append!(iterations, b)
         append!(convergeds, c)
     end
