@@ -377,9 +377,9 @@ function demean_variables!(y::AbstractVector{T},
         iterations = b
         converged = c
 
-        X, b,
+        _, b,
         c = solve_residuals!(
-            X, feM; tol = tol, maxiter = maxiter, progress_bar = progress_bar)
+            eachcol(X), feM; tol = tol, maxiter = maxiter, progress_bar = progress_bar)
 
         # Compute TSS after partialling out fixed effects
         tss_partial = zero(T)

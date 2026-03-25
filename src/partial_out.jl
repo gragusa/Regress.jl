@@ -103,8 +103,8 @@ function partial_out(
         m = mean(Y, weights, dims = 1)
     end
     if has_fes
-        Y, b,
-        c = solve_residuals!(Y, feM; maxiter = maxiter, tol = tol, progress_bar = false)
+        _, b,
+        c = solve_residuals!(eachcol(Y), feM; maxiter = maxiter, tol = tol, progress_bar = false)
         append!(iterations, b)
         append!(convergeds, c)
     end
