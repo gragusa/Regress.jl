@@ -348,7 +348,7 @@ function create_fixed_effect_solver(subfes::Vector{<:FixedEffect},
         nthreads::Integer)
     if length(subfes) > 0
         feM = AbstractFixedEffectSolver{double_precision ? Float64 : Float32}(
-            subfes, weights, Val{method}, nthreads)
+            subfes, weights, Val{method})
     else
         feM = nothing
     end
@@ -533,7 +533,7 @@ function partial_out_fixed_effects!(cols::Vector,
         sumsquares_pre = [sum(abs2, x) for x in cols]
 
         # Create FE solver
-        feM = AbstractFixedEffectSolver{T}(subfes, wts, Val{method}, nthreads)
+        feM = AbstractFixedEffectSolver{T}(subfes, wts, Val{method})
 
         # Partial out fixed effects
         _, iterations,

@@ -153,7 +153,7 @@ function _iv_first_stage_fe(
     nobs = size(Xexo, 1)
 
     # Create FE solver for instrument FEs
-    iv_feM = AbstractFixedEffectSolver{T}(iv_fes, wts, Val{method}, nthreads)
+    iv_feM = AbstractFixedEffectSolver{T}(iv_fes, wts, Val{method})
 
     # Step 1: Demean Xexo by instrument FEs
     Xexo_demeaned = copy(Xexo)
