@@ -87,13 +87,15 @@ public ols, iv, fe
 
 # IV Estimators
 # export AbstractIVEstimator
-public TSLS, LIML, Fuller, KClass
+export TSLS, LIML, Fuller, KClass
 
 # First-stage diagnostics
 # export FirstStageResult, first_stage
+export first_stage
 
 # Weak instrument test
 # export weakivtest, WeakIVTestResult
+export weakivtest
 
 # Utility functions
 # export partial_out
