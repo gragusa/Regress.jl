@@ -94,8 +94,7 @@ export TSLS, LIML, Fuller, KClass
 export first_stage
 
 # Weak instrument test
-# export weakivtest, WeakIVTestResult
-export weakivtest
+export weakivtest, WeakIVTestResult
 
 # Utility functions
 # export partial_out

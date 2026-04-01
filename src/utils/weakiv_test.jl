@@ -124,27 +124,116 @@ function weakivtest(m::IVEstimator{T}; level::Real = 0.05, eps::Real = 0.001,
     K = size(fsd.Z_res, 2)  # Number of excluded instruments
     S = nobs(m)              # Number of observations
     L = fsd.n_exo            # Number of exogenous regressors
-    has_intercept = fsd.has_intercept
 
-    # Step 1: Reconstruct y and partial out exogenous regressors
-    # TSLS residuals are y - X_original * beta (using original endogenous, not predicted).
-    # So y = residuals + X_original * beta.
+    # Reconstruct y = residuals + X * beta
     model_resid = residuals_for_vcov(m)
-    y_full = model_resid .+ pe.X_original * m.coef
-
-    # X_original = [Xexo, Xendo] where Xexo includes intercept if present
     X_orig = pe.X_original
+    y_full = model_resid .+ X_orig * m.coef
+
     k_total = size(X_orig, 2)
-    k_exo = k_total - n_endo  # includes intercept column if has_intercept
+    k_exo = k_total - n_endo
 
-    # Partial out exogenous regressors (including intercept) from y and Xendo
-    # Note: fsd.Xendo_res is the RESIDUAL of the first-stage regression (Xendo - [Xexo,Z]*Pi),
-    # NOT the demeaned endogenous variable. We need: Xendo_demeaned = Xendo - P_Xexo * Xendo
-    Xendo_orig = fsd.Xendo_orig[:, 1]  # Original endogenous variable
-    Z_res = fsd.Z_res                    # Already residualized from exogenous
+    Xendo_orig = fsd.Xendo_orig[:, 1]
+    Z_res = fsd.Z_res
 
+    return _weakivtest_core(
+        y_full, X_orig, Xendo_orig, Z_res,
+        k_exo, K, S, L, m.vcov_estimator,
+        T(level), T(eps), benchmark
+    )
+end
+
+"""
+    weakivtest(m::IVMatrixEstimator; level=0.05, eps=0.001, benchmark=:nagar) -> WeakIVTestResult
+
+Compute the Montiel-Olea-Pflueger robust weak instrument test for a matrix-based
+IV model (as used by LocalProjections.jl).
+
+Requires a single endogenous regressor.
+
+# Arguments
+- `m::IVMatrixEstimator`: A fitted IV model from matrix-based estimation
+- `level::Real`: Confidence level alpha (default: 0.05)
+- `eps::Real`: Convergence tolerance for bias optimization (default: 0.001)
+- `benchmark::Symbol`: Bias benchmark — `:nagar` (default, MOP) or `:ols` (Windmeijer OLS)
+
+# Returns
+A `WeakIVTestResult` containing effective F, robust F, critical values, etc.
+"""
+function weakivtest(m::IVMatrixEstimator{T}; level::Real = 0.05, eps::Real = 0.001,
+        benchmark::Symbol = :nagar) where {T}
+    pe = m.postestimation
+    n_endo = pe.n_endogenous
+    n_endo == 1 ||
+        error("weakivtest requires exactly one endogenous regressor, got $n_endo.")
+
+    X_orig = pe.X              # [Xexo, Xendo]
+    k_total = size(X_orig, 2)
+    k_exo = k_total - n_endo
+
+    Xendo_orig = X_orig[:, k_exo + 1]  # single endogenous column
+
+    # Extract excluded instruments from Z = [Xexo, Zinstr]
+    Z_instr = pe.Z[:, (k_exo + 1):end]
+    K = size(Z_instr, 2)
+
+    # Residualize excluded instruments from exogenous regressors
     if k_exo > 0
-        Xexo = X_orig[:, 1:k_exo]  # already includes intercept column
+        Xexo = X_orig[:, 1:k_exo]
+        QR_exo = qr(Xexo)
+        Q_exo = Matrix(QR_exo.Q)
+        Z_res = Z_instr .- Q_exo * (Q_exo' * Z_instr)
+    else
+        Z_res = copy(Z_instr)
+    end
+
+    S = nobs(m)
+    L = k_exo  # number of exogenous regressors (includes intercept column if present)
+
+    # Reconstruct y = residuals + X * beta
+    y_full = pe.residuals .+ X_orig * m.coef
+
+    return _weakivtest_core(
+        y_full, X_orig, Xendo_orig, Z_res,
+        k_exo, K, S, L, m.vcov_estimator,
+        T(level), T(eps), benchmark
+    )
+end
+
+##############################################################################
+## Core computation (shared by IVEstimator and IVMatrixEstimator methods)
+##############################################################################
+
+"""
+    _weakivtest_core(y_full, X_orig, Xendo_orig, Z_res, k_exo, K, S, L,
+                     vcov_est, level, eps, benchmark) -> WeakIVTestResult
+
+Internal computational core for the weak IV test. Both `weakivtest(::IVEstimator)`
+and `weakivtest(::IVMatrixEstimator)` delegate here after extracting data.
+
+# Arguments
+- `y_full`: Reconstructed response vector (residuals + X*β)
+- `X_orig`: Original regressor matrix [Xexo, Xendo]
+- `Xendo_orig`: Original endogenous variable (vector)
+- `Z_res`: Excluded instruments residualized from exogenous regressors
+- `k_exo`: Number of exogenous regressors (including intercept column if present)
+- `K`: Number of excluded instruments
+- `S`: Number of observations
+- `L`: Number of exogenous regressors for DOF computation
+- `vcov_est`: Variance-covariance estimator
+- `level`: Confidence level alpha
+- `eps`: Convergence tolerance
+- `benchmark`: Bias benchmark (:nagar or :ols)
+"""
+function _weakivtest_core(
+        y_full::Vector{T}, X_orig::Matrix{T},
+        Xendo_orig::Vector{T}, Z_res::Matrix{T},
+        k_exo::Int, K::Int, S::Int, L::Int,
+        vcov_est, level::T, eps::T, benchmark::Symbol
+) where {T}
+    # Step 1: Partial out exogenous regressors from y and Xendo
+    if k_exo > 0
+        Xexo = X_orig[:, 1:k_exo]
         QR_exo = qr(Xexo)
         Q_exo = Matrix(QR_exo.Q)
         y_res = y_full .- Q_exo * (Q_exo' * y_full)
@@ -170,9 +259,7 @@ function weakivtest(m::IVEstimator{T}; level::Real = 0.05, eps::Real = 0.001,
     res_y = y_res .- Zs * dhat
 
     # Step 4: Compute Omega (unadjusted cross-product, DOF-adjusted)
-    # Stata: dof_omega = S - K - L_stata - 1 (with constant) or S - K - L_stata (noconstant)
-    # Our L = fsd.n_exo includes the intercept column when present.
-    # So dof_omega = S - K - L matches Stata's S - K - L_stata - 1.
+    # dof_omega = S - K - L where L includes intercept column when present
     dof_omega = S - K - L
 
     res_matrix = hcat(res_y, res_endo)  # n × 2
@@ -180,10 +267,6 @@ function weakivtest(m::IVEstimator{T}; level::Real = 0.05, eps::Real = 0.001,
     Omega = Omega_unscaled ./ dof_omega
 
     # Step 5: Compute W matrix
-    # Stata: avar returns r(S) = (1/n) Σ m_i m_i' (HC0 for "robust")
-    # Then: W = r(S) * S / dof_omega / clustdfadj = meat / dof_omega / clustdfadj
-    vcov_est = m.vcov_estimator
-
     # Build stacked moment matrix: [res_y .* Zs, res_endo .* Zs]
     M_stacked = hcat(res_y .* Zs, res_endo .* Zs)  # n × 2K
 
@@ -203,15 +286,13 @@ function weakivtest(m::IVEstimator{T}; level::Real = 0.05, eps::Real = 0.001,
     W_2 = W[(K + 1):(2K), (K + 1):(2K)]
 
     # Step 7: Compute LIML kappa
-    # Stata uses Omega_raw = res'res / S (before DOF adjustment) for kappa computation
-    Omega_raw = Omega_unscaled ./ S  # 2 × 2, unscaled by S
+    Omega_raw = Omega_unscaled ./ S
     Omega_raw_mhalf = _matrix_power_sym(Omega_raw, -0.5)
     ww = hcat(y_res, Xendo_demeaned)
     ww_mat = (ww' * ww) ./ S
     kappa_val = minimum(eigvals(Symmetric(Omega_raw_mhalf * ww_mat * Omega_raw_mhalf)))
 
     # Step 8: Compute estimator coefficients
-    # TSLS: btsls = (pihat'pihat)^{-1} pihat'dhat
     pipi = dot(pihat, pihat)
     btsls_val = dot(pihat, dhat) / pipi
 
@@ -221,18 +302,13 @@ function weakivtest(m::IVEstimator{T}; level::Real = 0.05, eps::Real = 0.001,
     limlnum = dot(xhatl, y_res) / S
     bliml_val = limlnum / limlden
 
-    # GMMf: bgmmf = (pihat'W_2^{-1}pihat)^{-1} pihat'W_2^{-1}dhat
+    # GMMf
     W_2_inv = inv(Symmetric(W_2))
     piW2inv = W_2_inv * pihat
     bgmmf_val = dot(pihat, W_2_inv * dhat) / dot(pihat, piW2inv)
 
     # Step 9: Compute standard errors
-    # Stata computes avar of estimator-specific residuals projected on Z,
-    # then applies the sandwich formula for each estimator.
-    # The avar output S_1 is r(S) from Stata's avar command (= meat/n).
-    # We compute raw meat / n to match.
-
-    # TSLS SE: se = sqrt( (pi'pi)^{-1} pi'S_1*pi (pi'pi)^{-1} / S )
+    # TSLS SE
     res_tsls = y_res .- Xendo_demeaned .* btsls_val
     S_1tsls = _weakiv_compute_avar_residuals(res_tsls, Zs, vcov_est, S)
     sebtsls_val = sqrt(
@@ -291,22 +367,18 @@ function weakivtest(m::IVEstimator{T}; level::Real = 0.05, eps::Real = 0.001,
     end
 
     # Step 12: Compute critical values
-    # tau values: 5%, 10%, 20%, 30% -> x = 1/tau = 20, 10, 5, 3.33
     tau_x = (T(20), T(10), T(5), T(10 / 3))
 
-    # TSLS critical values (Patnaik approximation)
     cv_TSLS = ntuple(i -> begin
             x = tau_x[i] * B_TSLS
             _patnaik_critical_value(W_2, T(level), x)
         end, 4)
 
-    # LIML critical values (Patnaik approximation)
     cv_LIML = ntuple(i -> begin
             x = tau_x[i] * B_LIML
             _patnaik_critical_value(W_2, T(level), x)
         end, 4)
 
-    # GMMf critical values (noncentral chi-squared)
     cv_GMMf = ntuple(i -> begin
             x_gmmf = tau_x[i] * B_GMMf * K
             _invnchisq(T(K), x_gmmf, T(1) - T(level)) / K

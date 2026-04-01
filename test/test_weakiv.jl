@@ -155,6 +155,60 @@ end
     @test_throws ErrorException Regress.weakivtest(m)
 end
 
+@testitem "weakivtest: IVMatrixEstimator matches IVEstimator" tags = [:iv, :weakiv] begin
+    using Regress
+    using CSV
+    using DataFrames
+    using StatsModels
+
+    mroz_path = joinpath(@__DIR__, "data", "mroz.csv")
+    if !isfile(mroz_path)
+        @warn "mroz.csv not found, skipping"
+        return
+    end
+    df = CSV.read(mroz_path, DataFrame)
+
+    # Fit via formula API (IVEstimator)
+    m_formula = Regress.iv(
+        Regress.TSLS(), df, @formula(lwage ~
+                                     exper + expersq +
+                                     (educ ~ age + kidslt6 + kidsge6)))
+    r_formula = Regress.weakivtest(m_formula)
+
+    # Fit via matrix API (IVMatrixEstimator) with the same data
+    # Build matrices manually: X = [intercept, exper, expersq, educ], Z = [intercept, exper, expersq, age, kidslt6, kidsge6]
+    df_complete = dropmissing(df, [
+        :lwage, :exper, :expersq, :educ, :age, :kidslt6, :kidsge6])
+    n = nrow(df_complete)
+    intercept = ones(n)
+    X = hcat(intercept, Float64.(df_complete.exper), Float64.(df_complete.expersq),
+        Float64.(df_complete.educ))
+    Z = hcat(intercept, Float64.(df_complete.exper), Float64.(df_complete.expersq),
+        Float64.(df_complete.age), Float64.(df_complete.kidslt6),
+        Float64.(df_complete.kidsge6))
+    y = Float64.(df_complete.lwage)
+
+    m_matrix = Regress.iv(Regress.TSLS(), Z, X, y; has_intercept = false, n_endogenous = 1)
+    r_matrix = Regress.weakivtest(m_matrix)
+
+    # Results should match
+    @test r_matrix.F_eff ≈ r_formula.F_eff atol = 1e-8
+    @test r_matrix.F_robust ≈ r_formula.F_robust atol = 1e-8
+    @test r_matrix.F_nonrobust ≈ r_formula.F_nonrobust atol = 1e-8
+    @test r_matrix.btsls ≈ r_formula.btsls atol = 1e-8
+    @test r_matrix.sebtsls ≈ r_formula.sebtsls atol = 1e-8
+    @test r_matrix.bliml ≈ r_formula.bliml atol = 1e-8
+    @test r_matrix.sebliml ≈ r_formula.sebliml atol = 1e-8
+    @test r_matrix.bgmmf ≈ r_formula.bgmmf atol = 1e-8
+    @test r_matrix.sebgmmf ≈ r_formula.sebgmmf atol = 1e-8
+    @test r_matrix.kappa ≈ r_formula.kappa atol = 1e-8
+    @test all(r_matrix.cv_TSLS .≈ r_formula.cv_TSLS)
+    @test all(r_matrix.cv_LIML .≈ r_formula.cv_LIML)
+    @test all(r_matrix.cv_GMMf .≈ r_formula.cv_GMMf)
+    @test r_matrix.K == r_formula.K
+    @test r_matrix.N == r_formula.N
+end
+
 @testitem "weakivtest: just-identified (K=1)" tags = [:iv, :weakiv] begin
     using Regress
     using DataFrames
