@@ -101,6 +101,7 @@ Container for post-estimation data required for IV variance-covariance calculati
 # Fields
 - `X_fitted::Matrix{T}`: Design matrix used for inference (predicted endogenous for TSLS, Adj for K-class)
 - `X_original::Matrix{T}`: Original regressor matrix [Xexo, Xendo]
+- `y::Vector{T}`: Response vector (demeaned if FE present)
 - `crossx::Cholesky{T, Matrix{T}}`: Cholesky factorization of X'X
 - `invXX::Symmetric{T, Matrix{T}}`: Inverse of X'X (or inv(A) for K-class)
 - `weights::AbstractWeights`: Weights used in estimation
@@ -119,6 +120,7 @@ Use `has_kclass_adj(pe)` to check if K-class adjustment matrix is available.
 struct PostEstimationDataIV{T}
     X_fitted::Matrix{T}         # Predicted/adjusted endogenous used for inference (X̂ for TSLS, Adj for K-class)
     X_original::Matrix{T}       # Original regressors [Xexo, Xendo]
+    y::Vector{T}                # Response vector (demeaned if FE present)
     crossx::Cholesky{T, Matrix{T}}
     invXX::Symmetric{T, Matrix{T}}  # (X̂'X̂)^{-1}
     weights::AbstractWeights

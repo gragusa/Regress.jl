@@ -386,6 +386,7 @@ function fit_kclass_estimator(
     postestimation_data = PostEstimationDataIV(
         convert(Matrix{T}, Adj_reordered),  # X_fitted: use Adj for vcov moment matrix
         convert(Matrix{T}, X),               # X_original: original X
+        convert(Vector{T}, y),               # y: response vector
         cholesky(Symmetric(X' * X)),        # crossx
         invA_reordered,                      # invXX: inv(A) for K-class
         wts,

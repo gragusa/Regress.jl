@@ -690,6 +690,7 @@ function fit_tsls(@nospecialize(df),
 
     postestimation_data = PostEstimationDataIV(
         convert(Matrix{T}, Xhat), convert(Matrix{T}, X),
+        convert(Vector{T}, y),
         cholesky(Symmetric(XhatXhat)), invXhatXhat, wts, cluster_data,
         basis_coef, first_stage_data,
         Matrix{T}(undef, 0, 0), T(NaN),
