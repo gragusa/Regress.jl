@@ -159,7 +159,6 @@ end
     using Regress
     using CSV
     using DataFrames
-    using StatsModels
 
     mroz_path = joinpath(@__DIR__, "data", "mroz.csv")
     if !isfile(mroz_path)
