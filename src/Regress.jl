@@ -13,8 +13,8 @@ using FixedEffects: FixedEffects, AbstractFixedEffectSolver, FixedEffect,
                     solve_coefficients!, solve_residuals!
 using LinearAlgebra: LinearAlgebra, BLAS, Cholesky, ColumnNorm, Hermitian, I,
                      Symmetric, UpperTriangular, cholesky, cholesky!, diag,
-                     diagm, eigvals, issuccess, ldiv!, mul!, qr, rank, rmul!,
-                     svd, tr
+                     diagm, dot, eigvals, issuccess, ldiv!, mul!, qr, rank,
+                     rmul!, svd, tr
 using PrecompileTools: PrecompileTools, @compile_workload
 using Printf: Printf, @printf, @sprintf
 using Reexport: Reexport, @reexport
@@ -90,8 +90,7 @@ public ols, iv, fe
 export TSLS, LIML, Fuller, KClass
 
 # First-stage diagnostics
-# export FirstStageResult, first_stage
-export first_stage
+export first_stage, FirstStageIV
 
 # Weak instrument test
 export weakivtest, WeakIVTestResult

@@ -69,6 +69,58 @@ struct FirstStageResult{T <: AbstractFloat}
 end
 
 """
+    FirstStageIV{T, M}
+
+First-stage regression results for matrix-based IV estimation.
+
+Contains full OLS regression models for each endogenous variable,
+plus Kleibergen-Paap and non-robust F-statistics.
+
+# Fields
+- `models::Vector{M}`: OLS models (one per endogenous variable)
+- `endogenous_names::Vector{String}`: Names of endogenous variables
+- `instrument_names::Vector{String}`: Names of excluded instruments
+- `F_kp::T`: Kleibergen-Paap joint F-statistic
+- `p_kp::T`: K-P p-value
+- `F_nonrobust::Vector{T}`: Non-robust F per endogenous variable
+
+# Example
+```julia
+m = iv(TSLS(), Z, X, y; n_endogenous=1)
+fs = first_stage(m)
+coef(fs.models[1])       # first-stage coefficients
+stderror(fs.models[1])   # standard errors
+fitted(fs.models[1])     # predicted endogenous
+fs.F_kp                  # Kleibergen-Paap F
+fs.F_nonrobust           # non-robust F
+```
+"""
+struct FirstStageIV{T <: AbstractFloat, M <: OLSMatrixEstimator}
+    models::Vector{M}
+    endogenous_names::Vector{String}
+    instrument_names::Vector{String}
+    F_kp::T
+    p_kp::T
+    F_nonrobust::Vector{T}
+end
+
+function Base.show(io::IO, fs::FirstStageIV{T}) where {T}
+    n_endo = length(fs.models)
+    println(io, "First-Stage IV Regressions ($n_endo endogenous)")
+    println(io, "─" ^ 60)
+
+    for (j, name) in enumerate(fs.endogenous_names)
+        m = fs.models[j]
+        @printf(io, "  %-20s  R² = %.4f   F(nonrobust) = %.3f\n",
+            name, r2(m), fs.F_nonrobust[j])
+    end
+
+    println(io, "─" ^ 60)
+    @printf(io, "Kleibergen-Paap F:  %.4f   (p = %.4f)\n", fs.F_kp, fs.p_kp)
+    println(io, "Excluded instruments: ", join(fs.instrument_names, ", "))
+end
+
+"""
     has_first_stage_data(fsd::FirstStageData) -> Bool
 
 Check if FirstStageData has actual data (not an empty sentinel).
@@ -1808,86 +1860,106 @@ end
 ##############################################################################
 
 """
-    first_stage(m::IVMatrixEstimator)
+    first_stage(m::IVMatrixEstimator; endogenous_names=nothing, instrument_names=nothing) -> FirstStageIV
 
-Compute first-stage F-statistic for IV matrix estimator.
-Returns a FirstStageResult with joint F-statistic.
+Compute first-stage OLS regressions and diagnostics for an IV matrix estimator.
+
+Returns a `FirstStageIV` containing:
+- Full OLS models (one per endogenous variable) with `coef`, `stderror`, `fitted`, `residuals`, `r2`
+- Kleibergen-Paap joint F-statistic
+- Non-robust F-statistic per endogenous variable (matching `weakivtest`)
+
+# Keyword Arguments
+- `endogenous_names`: Names for endogenous variables (default: `["endo_1", ...]`)
+- `instrument_names`: Names for excluded instruments (default: `["inst_1", ...]`)
+
+# Example
+```julia
+m = iv(TSLS(), Z, X, y; n_endogenous=1)
+fs = first_stage(m)
+coef(fs.models[1])       # first-stage coefficients
+stderror(fs.models[1])   # standard errors
+fitted(fs.models[1])     # predicted endogenous
+fs.F_kp                  # Kleibergen-Paap F
+fs.F_nonrobust           # non-robust F (matching weakivtest)
+```
 """
-function first_stage(m::IVMatrixEstimator{T}) where {T}
+function first_stage(m::IVMatrixEstimator{T};
+        endogenous_names::Union{Vector{String}, Nothing} = nothing,
+        instrument_names::Union{Vector{String}, Nothing} = nothing) where {T}
     pe = m.postestimation
     n_endo = pe.n_endogenous
+    n_endo > 0 || error("Model has no endogenous variables.")
 
-    if n_endo == 0
-        return FirstStageResult{T}(
-            T(NaN), T(NaN), String[], T[], T[], 0, 0, "N/A"
-        )
-    end
-
-    # Extract data
-    Z = pe.Z
     X = pe.X
-    n = size(X, 1)
+    Z = pe.Z
+    S = nobs(m)
     k_total = size(X, 2)
     k_exo = k_total - n_endo
-    k_z = size(Z, 2) - k_exo  # Number of excluded instruments
+    K = size(Z, 2) - k_exo  # number of excluded instruments
 
-    # First stage: regress each endogenous var on Z
-    # F-stat tests whether excluded instruments have joint significance
-
-    # Simple approach: compute partial F-stat for excluded instruments
-    # For single endogenous: F = (R² / k_z) / ((1 - R²) / (n - k_z - k_exo - 1))
-
-    # Compute projected values
-    ZZ = Z' * Z
-    ZZ_inv = try
-        inv(cholesky(Symmetric(ZZ)))
-    catch
-        pinv(ZZ)
-    end
-    P_Z = Z * ZZ_inv * Z'
-
-    # For each endogenous variable, compute first-stage R²
     Xendo = X[:, (k_exo + 1):end]
-    Xendo_hat = P_Z * Xendo
+    Z_instr = Z[:, (k_exo + 1):end]
 
-    # Joint F-statistic (Cragg-Donald style for simplicity)
-    # This is an approximation; full K-P would require more complex computation
-    F_values = T[]
-    p_values = T[]
-    endo_names = ["endo_$i" for i in 1:n_endo]
+    # Default names
+    endo_names = endogenous_names === nothing ?
+                 ["endo_$i" for i in 1:n_endo] : endogenous_names
+    instr_names = instrument_names === nothing ?
+                  ["inst_$i" for i in 1:K] : instrument_names
 
-    for i in 1:n_endo
-        x_endo = Xendo[:, i]
-        x_hat = Xendo_hat[:, i]
+    # Step 1: Run first-stage OLS regressions (xendo_j on full Z)
+    fs_models = [ols(Z, Xendo[:, i]; has_intercept = m.has_intercept) for i in 1:n_endo]
 
-        # Explained SS by instruments
-        ess = sum(abs2, x_hat .- mean(x_hat))
-        tss_endo = sum(abs2, x_endo .- mean(x_endo))
-        rss_endo = tss_endo - ess
-
-        # F-statistic
-        df1 = k_z
-        df2 = n - k_z - k_exo - (m.has_intercept ? 1 : 0)
-        F_val = (ess / df1) / (rss_endo / max(df2, 1))
-        p_val = fdistccdf(df1, df2, F_val)
-
-        push!(F_values, F_val)
-        push!(p_values, p_val)
+    # Step 2: Compute residualized data for F-statistics
+    # Partial out exogenous regressors from excluded instruments and endogenous
+    if k_exo > 0
+        Xexo = X[:, 1:k_exo]
+        QR_exo = qr(Xexo)
+        Q_exo = Matrix(QR_exo.Q)
+        Z_res = Z_instr .- Q_exo * (Q_exo' * Z_instr)
+        Xendo_demeaned = Xendo .- Q_exo * (Q_exo' * Xendo)
+    else
+        Z_res = copy(Z_instr)
+        Xendo_demeaned = copy(Xendo)
     end
 
-    # Joint F is minimum of individual F-stats (conservative)
-    F_joint = minimum(F_values)
-    p_joint = maximum(p_values)
+    # Step 3: Extract Pi (first-stage coefficients for excluded instruments only)
+    # Full coef = [coef_exo; coef_instr], we need coef_instr (K × n_endo)
+    Pi = Matrix{T}(undef, K, n_endo)
+    Xendo_res = Matrix{T}(undef, S, n_endo)
+    for i in 1:n_endo
+        Pi[:, i] = coef(fs_models[i])[(k_exo + 1):end]
+        Xendo_res[:, i] = residuals(fs_models[i])
+    end
 
-    return FirstStageResult{T}(
-        F_joint,
-        p_joint,
-        endo_names,
-        F_values,
-        p_values,
-        n_endo,
-        k_z,
-        string(typeof(m.vcov_estimator))
+    # Step 4: Kleibergen-Paap F-statistic
+    dof_small = k_total  # total parameters in main model
+    F_kp,
+    p_kp = compute_first_stage_fstat(
+        Xendo_res, Z_res, Pi,
+        CovarianceMatrices.HR1(), S, dof_small, 0
+    )
+
+    # Step 5: Non-robust F per endogenous variable (matching weakivtest)
+    # F_nonrobust = S * π̂'π̂ / (K * ω₂₂)
+    # where π̂ are reduced-form coefficients on orthogonalized instruments
+    QR_Z = qr(Z_res)
+    Zs = Matrix(QR_Z.Q)[:, 1:K] .* sqrt(T(S))
+    L = k_exo
+    dof_omega = S - K - L
+
+    F_nonrobust = Vector{T}(undef, n_endo)
+    for i in 1:n_endo
+        pihat = (Zs' * Xendo_demeaned[:, i]) ./ T(S)
+        res_i = Xendo_demeaned[:, i] .- Zs * pihat
+        omega_22 = dot(res_i, res_i) / dof_omega
+        pipi = dot(pihat, pihat)
+        F_nonrobust[i] = S * pipi / (K * omega_22)
+    end
+
+    return FirstStageIV{T, eltype(fs_models)}(
+        fs_models, endo_names, instr_names,
+        F_kp, p_kp, F_nonrobust
     )
 end
 
