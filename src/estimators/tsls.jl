@@ -603,8 +603,8 @@ function fit_tsls(@nospecialize(df),
     ## First-Stage F-Statistics
     ##########################################################################
 
-    F_kp, p_kp = T(NaN), T(NaN)
-    F_kp_per_endo, p_kp_per_endo = T[], T[]
+    F_first_stage_nonrobust, p_first_stage_nonrobust = T[], T[]
+    F_first_stage_robust, p_first_stage_robust = T[], T[]
     first_stage_data = empty_first_stage_data(T)
 
     if first_stage && k_endo_final > 0
@@ -626,9 +626,12 @@ function fit_tsls(@nospecialize(df),
                 k_exo_final, data_prep.has_intercept)
         end
 
-        F_kp, p_kp = fstats.F_kp, fstats.p_kp
-        F_kp_per_endo, p_kp_per_endo = fstats.F_kp_per_endo, fstats.p_kp_per_endo
         first_stage_data = fstats.first_stage_data
+        F_first_stage_robust,
+        p_first_stage_robust = fstats.F_kp_per_endo, fstats.p_kp_per_endo
+        F_first_stage_nonrobust,
+        p_first_stage_nonrobust,
+        _, _ = _compute_first_stage_f_iid(first_stage_data, data_prep.nobs, dof_fes_local)
     end
 
     ##########################################################################
@@ -742,7 +745,8 @@ function fit_tsls(@nospecialize(df),
         rss, tss_total,
         iterations, converged, r2_within,
         CovarianceMatrices.HC1(), inf.vcov_matrix, inf.se, inf.t_stats, inf.p_values,
-        inf.F_stat_robust, inf.p_val_robust, F_kp, p_kp,
-        F_kp_per_endo, p_kp_per_endo
+        inf.F_stat_robust, inf.p_val_robust,
+        F_first_stage_nonrobust, p_first_stage_nonrobust,
+        F_first_stage_robust, p_first_stage_robust
     )
 end

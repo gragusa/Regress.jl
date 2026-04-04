@@ -258,9 +258,10 @@ function fit_kclass_estimator(
     ## First-Stage F-Statistics (if requested)
     ##############################################################################
 
-    F_kp, p_kp = T(NaN), T(NaN)
-    F_kp_per_endo = T[]
-    p_kp_per_endo = T[]
+    F_first_stage_nonrobust = T[]
+    p_first_stage_nonrobust = T[]
+    F_first_stage_robust = T[]
+    p_first_stage_robust = T[]
     first_stage_data = empty_first_stage_data(T)
     newZ = hcat(Xexo, Z)  # Needed for PostEstimationData leverage computation
 
@@ -291,9 +292,12 @@ function fit_kclass_estimator(
             data_prep.nobs, dof_fes_local, endo_names_final,
             k_exo_final, data_prep.has_intercept)
 
-        F_kp, p_kp = fstats.F_kp, fstats.p_kp
-        F_kp_per_endo, p_kp_per_endo = fstats.F_kp_per_endo, fstats.p_kp_per_endo
         first_stage_data = fstats.first_stage_data
+        F_first_stage_robust,
+        p_first_stage_robust = fstats.F_kp_per_endo, fstats.p_kp_per_endo
+        F_first_stage_nonrobust,
+        p_first_stage_nonrobust,
+        _, _ = _compute_first_stage_f_iid(first_stage_data, data_prep.nobs, dof_fes_local)
     end
 
     ##############################################################################
@@ -470,8 +474,9 @@ function fit_kclass_estimator(
         rss, tss_total,
         iterations, converged, r2_within,
         default_vcov, vcov_matrix, se, t_stats, p_values,
-        F_stat_robust, p_val_robust, F_kp, p_kp,
-        F_kp_per_endo, p_kp_per_endo
+        F_stat_robust, p_val_robust,
+        F_first_stage_nonrobust, p_first_stage_nonrobust,
+        F_first_stage_robust, p_first_stage_robust
     )
 end
 

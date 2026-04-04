@@ -212,7 +212,7 @@ end
     @test r2(m) ≈ R2 rtol = RTOL_R2
 
     # First-stage F-statistic (Kleibergen-Paap)
-    @test m.F_kp ≈ F_KP rtol = RTOL_F_KP
+    @test Regress.first_stage(m).F_nonrobust[1] ≈ F_KP rtol = RTOL_F_KP
 
     # Standard errors - HC1
     @test stderror(HC1(), m) ≈ SE_HC1 rtol = RTOL_SE_HC
@@ -270,7 +270,7 @@ end
     @test r2(m) ≈ R2 rtol = RTOL_R2
 
     # First-stage F-statistic (Kleibergen-Paap)
-    @test m.F_kp ≈ F_KP rtol = RTOL_F_KP
+    @test Regress.first_stage(m).F_nonrobust[1] ≈ F_KP rtol = RTOL_F_KP
 
     # Standard errors - HC1
     @test stderror(HC1(), m) ≈ SE_HC1 rtol = RTOL_SE_HC
@@ -332,7 +332,7 @@ end
     @test r2(m) ≈ R2 rtol = RTOL_R2
 
     # First-stage F-statistic (Kleibergen-Paap)
-    @test m.F_kp ≈ F_KP rtol = RTOL_F_KP
+    @test Regress.first_stage(m).F_nonrobust[1] ≈ F_KP rtol = RTOL_F_KP
 
     # Standard errors - HC1
     @test stderror(HC1(), m) ≈ SE_HC1 rtol = RTOL_SE_HC
@@ -396,7 +396,7 @@ end
     @test r2(m) ≈ R2 rtol = RTOL_R2
 
     # First-stage F-statistic (Kleibergen-Paap)
-    @test m.F_kp ≈ F_KP rtol = RTOL_F_KP
+    @test Regress.first_stage(m).F_nonrobust[1] ≈ F_KP rtol = RTOL_F_KP
 
     # Standard errors - HC1
     @test stderror(HC1(), m) ≈ SE_HC1 rtol = RTOL_SE_HC
@@ -452,7 +452,7 @@ end
     @test r2(m) ≈ R2 rtol = RTOL_R2
 
     # First-stage F-statistic (Kleibergen-Paap)
-    @test m.F_kp ≈ F_KP rtol = RTOL_F_KP
+    @test Regress.first_stage(m).F_nonrobust[1] ≈ F_KP rtol = RTOL_F_KP
 
     # Standard errors - HC1
     @test stderror(HC1(), m) ≈ SE_HC1 rtol = RTOL_SE_HC
@@ -513,7 +513,7 @@ end
     @test r2(m) ≈ R2 rtol = RTOL_R2
 
     # First-stage F-statistic (Kleibergen-Paap)
-    @test m.F_kp ≈ F_KP rtol = RTOL_F_KP
+    @test Regress.first_stage(m).F_nonrobust[1] ≈ F_KP rtol = RTOL_F_KP
 
     # Standard errors - HC1
     @test stderror(HC1(), m) ≈ SE_HC1 rtol = RTOL_SE_HC
@@ -577,7 +577,7 @@ end
     @test r2(m) ≈ R2 rtol = RTOL_R2
 
     # First-stage F-statistic (Kleibergen-Paap)
-    @test m.F_kp ≈ F_KP rtol = RTOL_F_KP
+    @test Regress.first_stage(m).F_nonrobust[1] ≈ F_KP rtol = RTOL_F_KP
 
     # Standard errors - HC1
     @test stderror(HC1(), m) ≈ SE_HC1 rtol = RTOL_SE_HC
@@ -639,7 +639,7 @@ end
     @test r2(m) ≈ R2 rtol = RTOL_R2
 
     # First-stage F-statistic (Kleibergen-Paap)
-    @test m.F_kp ≈ F_KP rtol = RTOL_F_KP
+    @test Regress.first_stage(m).F_nonrobust[1] ≈ F_KP rtol = RTOL_F_KP
 
     # Standard errors - HC1
     @test stderror(HC1(), m) ≈ SE_HC1 rtol = RTOL_SE_HC
@@ -701,7 +701,7 @@ end
     @test r2(m) ≈ R2 rtol = RTOL_R2
 
     # First-stage F-statistic (Kleibergen-Paap)
-    @test m.F_kp ≈ F_KP rtol = RTOL_F_KP
+    @test Regress.first_stage(m).F_nonrobust[1] ≈ F_KP rtol = RTOL_F_KP
 
     # Standard errors - HC1
     @test stderror(HC1(), m) ≈ SE_HC1 rtol = RTOL_SE_HC

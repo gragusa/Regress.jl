@@ -40,29 +40,33 @@ Container for first-stage regression diagnostics from IV estimation.
 Returned by `first_stage(model)`.
 
 # Fields
-- `F_joint::T`: Joint first-stage F-statistic (Kleibergen-Paap)
-- `p_joint::T`: p-value of joint F-statistic
 - `endogenous_names::Vector{String}`: Names of endogenous variables
-- `F_per_endo::Vector{T}`: F-statistic for each endogenous variable
-- `p_per_endo::Vector{T}`: p-value for each endogenous variable
+- `F_nonrobust::Vector{T}`: Homoskedastic first-stage F-statistic for each endogenous variable
+- `p_nonrobust::Vector{T}`: P-value of the homoskedastic F-statistic
+- `F_robust::Vector{T}`: Robust first-stage F-statistic for each endogenous variable
+- `p_robust::Vector{T}`: P-value of the robust F-statistic
+- `df1::Int`: Numerator degrees of freedom (number of excluded instruments)
+- `df2::Int`: Denominator degrees of freedom (first-stage residual df)
 - `n_endogenous::Int`: Number of endogenous variables
 - `n_instruments::Int`: Number of excluded instruments
-- `vcov_type::String`: Variance estimator used (e.g., "HC1", "HC3")
+- `vcov_type::String`: Variance estimator used for `F_robust`
 
 # Examples
 ```julia
 model = iv(TSLS(), df, @formula(y ~ x + (endo ~ z1 + z2)))
 fs = first_stage(model)
-fs.F_joint           # Joint F-statistic
-fs.F_per_endo        # Per-endogenous F-statistics
+fs.F_nonrobust       # Homoskedastic first-stage F-statistics
+fs.F_robust          # Robust first-stage F-statistics
 ```
 """
 struct FirstStageResult{T <: AbstractFloat}
-    F_joint::T
-    p_joint::T
     endogenous_names::Vector{String}
-    F_per_endo::Vector{T}
-    p_per_endo::Vector{T}
+    F_nonrobust::Vector{T}
+    p_nonrobust::Vector{T}
+    F_robust::Vector{T}
+    p_robust::Vector{T}
+    df1::Int
+    df2::Int
     n_endogenous::Int
     n_instruments::Int
     vcov_type::String
@@ -74,15 +78,19 @@ end
 First-stage regression results for matrix-based IV estimation.
 
 Contains full OLS regression models for each endogenous variable,
-plus Kleibergen-Paap and non-robust F-statistics.
+plus fixest-style non-robust and robust first-stage F-statistics.
 
 # Fields
 - `models::Vector{M}`: OLS models (one per endogenous variable)
 - `endogenous_names::Vector{String}`: Names of endogenous variables
 - `instrument_names::Vector{String}`: Names of excluded instruments
-- `F_kp::T`: Kleibergen-Paap joint F-statistic
-- `p_kp::T`: K-P p-value
 - `F_nonrobust::Vector{T}`: Non-robust F per endogenous variable
+- `p_nonrobust::Vector{T}`: P-values for the non-robust F-statistics
+- `F_robust::Vector{T}`: Robust F per endogenous variable using the model's vcov
+- `p_robust::Vector{T}`: P-values for the robust F-statistics
+- `df1::Int`: Numerator degrees of freedom
+- `df2::Int`: Denominator degrees of freedom
+- `vcov_type::String`: Variance estimator used for `F_robust`
 
 # Example
 ```julia
@@ -91,17 +99,21 @@ fs = first_stage(m)
 coef(fs.models[1])       # first-stage coefficients
 stderror(fs.models[1])   # standard errors
 fitted(fs.models[1])     # predicted endogenous
-fs.F_kp                  # Kleibergen-Paap F
 fs.F_nonrobust           # non-robust F
+fs.F_robust              # robust F
 ```
 """
 struct FirstStageIV{T <: AbstractFloat, M <: OLSMatrixEstimator}
     models::Vector{M}
     endogenous_names::Vector{String}
     instrument_names::Vector{String}
-    F_kp::T
-    p_kp::T
     F_nonrobust::Vector{T}
+    p_nonrobust::Vector{T}
+    F_robust::Vector{T}
+    p_robust::Vector{T}
+    df1::Int
+    df2::Int
+    vcov_type::String
 end
 
 function Base.show(io::IO, fs::FirstStageIV{T}) where {T}
@@ -111,12 +123,12 @@ function Base.show(io::IO, fs::FirstStageIV{T}) where {T}
 
     for (j, name) in enumerate(fs.endogenous_names)
         m = fs.models[j]
-        @printf(io, "  %-20s  R² = %.4f   F(nonrobust) = %.3f\n",
-            name, r2(m), fs.F_nonrobust[j])
+        @printf(io, "  %-20s  R² = %.4f   F(nonrobust) = %.3f   F(%s) = %.3f\n",
+            name, r2(m), fs.F_nonrobust[j], fs.vcov_type, fs.F_robust[j])
     end
 
     println(io, "─" ^ 60)
-    @printf(io, "Kleibergen-Paap F:  %.4f   (p = %.4f)\n", fs.F_kp, fs.p_kp)
+    @printf(io, "DoF: (%d, %d)\n", fs.df1, fs.df2)
     println(io, "Excluded instruments: ", join(fs.instrument_names, ", "))
 end
 
@@ -261,10 +273,10 @@ struct IVEstimator{
     # Test statistics (computed with vcov_estimator)
     F::T                    # F-statistic (Wald test)
     p::T                    # P-value of F-stat
-    F_kp::T                 # Kleibergen-Paap first-stage F-stat (joint)
-    p_kp::T                 # P-value of first-stage F-stat (joint)
-    F_kp_per_endo::Vector{T}  # Per-endogenous first-stage F-statistics
-    p_kp_per_endo::Vector{T}  # Per-endogenous first-stage p-values
+    F_first_stage_nonrobust::Vector{T}
+    p_first_stage_nonrobust::Vector{T}
+    F_first_stage_robust::Vector{T}
+    p_first_stage_robust::Vector{T}
 end
 
 has_iv(::IVEstimator) = true
@@ -969,38 +981,10 @@ _resolve_cr_vcov(vcov_type, m::IVEstimator) = vcov_type
 """
     recompute_first_stage_fstat(m::IVEstimator, vcov_type)
 
-Recompute joint Kleibergen-Paap F-statistic using a different vcov estimator.
-Requires model to have stored first-stage data.
-
-# Returns
-- `(F_kp, p_kp)`: First-stage F-statistic and p-value with the new vcov
+Recompute robust per-endogenous first-stage F-statistics using a different vcov
+estimator. Requires model to have stored first-stage data.
 """
 function recompute_first_stage_fstat(m::IVEstimator{T}, vcov_type) where {T}
-    pe = m.postestimation
-    isnothing(pe) && return T(NaN), T(NaN)
-    !has_first_stage_data(pe.first_stage_data) && return T(NaN), T(NaN)
-
-    fsd = pe.first_stage_data
-    dof_fes_val = dof_fes(m)
-
-    # Resolve CR symbols to actual cluster vectors
-    resolved_vcov = _resolve_cr_vcov(vcov_type, m)
-
-    return compute_first_stage_fstat(
-        fsd.Xendo_res, fsd.Z_res, fsd.Pi,
-        resolved_vcov, nobs(m), dof(m), dof_fes_val
-    )
-end
-
-"""
-    recompute_per_endogenous_fstats(m::IVEstimator, vcov_type)
-
-Recompute per-endogenous F-statistics using a different vcov estimator.
-
-# Returns
-- `(F_stats, p_values)`: Vectors of F-statistics and p-values per endogenous variable
-"""
-function recompute_per_endogenous_fstats(m::IVEstimator{T}, vcov_type) where {T}
     pe = m.postestimation
     isnothing(pe) && return T[], T[]
     !has_first_stage_data(pe.first_stage_data) && return T[], T[]
@@ -1017,6 +1001,24 @@ function recompute_per_endogenous_fstats(m::IVEstimator{T}, vcov_type) where {T}
         Xendo_orig = fsd.Xendo_orig,
         newZ = fsd.newZ
     )
+end
+
+"""
+    first_stage_df(m::IVEstimator)
+
+Return the numerator and denominator degrees of freedom used by the first-stage
+F-tests.
+"""
+function first_stage_df(m::IVEstimator)
+    pe = m.postestimation
+    isnothing(pe) && return (0, 0)
+    fsd = pe.first_stage_data
+    !has_first_stage_data(fsd) && return (0, 0)
+
+    n_excl = size(fsd.Z_res, 2)
+    df1 = n_excl
+    df2 = nobs(m) - fsd.n_exo - n_excl - dof_fes(m)
+    return (df1, df2)
 end
 
 ##############################################################################
@@ -1042,7 +1044,7 @@ model = iv(TSLS(), df, @formula(y ~ x + (endo ~ z)))
 # Heteroskedasticity-robust
 model_hc3 = model + vcov(HC3())
 stderror(model_hc3)  # Uses precomputed HC3 standard errors
-model_hc3.F_kp       # First-stage F recomputed with HC3
+first_stage(model_hc3).F_robust  # First-stage F recomputed with HC3
 
 # Cluster-robust
 model_cr = iv(TSLS(), df, @formula(y ~ x + (endo ~ z)), save_cluster = :firm)
@@ -1058,11 +1060,8 @@ function Base.:+(m::IVEstimator{T, E, V1, P}, v::VcovSpec{V2}) where {T, E, V1, 
     # Use shared helper for stats
     se, t_stats, p_values, F_stat, p_val = _calculate_vcov_stats(m, vcov_mat)
 
-    # Recompute first-stage F with this vcov type
-    F_kp, p_kp = recompute_first_stage_fstat(m, v.source)
-
-    # Recompute per-endogenous F-stats
-    F_kp_per_endo, p_kp_per_endo = recompute_per_endogenous_fstats(m, v.source)
+    # Recompute robust first-stage F with this vcov type
+    F_first_stage_robust, p_first_stage_robust = recompute_first_stage_fstat(m, v.source)
 
     # Deep copy the vcov estimator to avoid aliasing
     vcov_copy = deepcopy_vcov(v.source)
@@ -1079,7 +1078,8 @@ function Base.:+(m::IVEstimator{T, E, V1, P}, v::VcovSpec{V2}) where {T, E, V1, 
         m.iterations, m.converged, m.r2_within,
         vcov_copy, Symmetric(vcov_mat), se, t_stats, p_values,
         F_stat, p_val,
-        F_kp, p_kp, F_kp_per_endo, p_kp_per_endo
+        m.F_first_stage_nonrobust, m.p_first_stage_nonrobust,
+        F_first_stage_robust, p_first_stage_robust
     )
 end
 
@@ -1093,20 +1093,14 @@ end
     first_stage(m::IVEstimator) -> FirstStageResult
 
 Return first-stage diagnostics for an IV model.
-Uses the variance estimator stored in the model.
-
-# Returns
-A `FirstStageResult` struct containing:
-- Joint Kleibergen-Paap F-statistic and p-value
-- Per-endogenous F-statistics and p-values
-- Metadata (number of instruments, variance estimator type)
+Uses the variance estimator stored in the model for the robust F-statistics.
 
 # Examples
 ```julia
 model = iv(TSLS(), df, @formula(y ~ x + (endo ~ z1 + z2)))
 fs = first_stage(model)
-fs.F_joint           # Joint F-statistic
-fs.F_per_endo        # Per-endogenous F-stats
+fs.F_nonrobust       # Homoskedastic first-stage F-statistics
+fs.F_robust          # Robust first-stage F-statistics
 ```
 
 See also: [`FirstStageResult`](@ref)
@@ -1122,13 +1116,19 @@ function first_stage(m::IVEstimator{T}) where {T}
     # Get vcov type name
     vcov_name = string(typeof(m.vcov_estimator).name.name)
 
+    df1, df2 = first_stage_df(m)
+
+    endogenous_names = copy(fsd.endogenous_names[1:length(m.F_first_stage_nonrobust)])
+
     FirstStageResult{T}(
-        m.F_kp,
-        m.p_kp,
-        fsd.endogenous_names,
-        m.F_kp_per_endo,
-        m.p_kp_per_endo,
-        length(fsd.endogenous_names),
+        endogenous_names,
+        m.F_first_stage_nonrobust,
+        m.p_first_stage_nonrobust,
+        m.F_first_stage_robust,
+        m.p_first_stage_robust,
+        df1,
+        df2,
+        length(endogenous_names),
         size(fsd.Z_res, 2),
         vcov_name
     )
@@ -1143,30 +1143,30 @@ end
 function Base.show(io::IO, fs::FirstStageResult{T}) where {T}
     # Calculate dynamic width based on longest endogenous name
     max_name_len = maximum(length, fs.endogenous_names; init = 10)
-    totwidth = max(60, max_name_len + 35)
+    totwidth = max(60, max_name_len + 40)
 
     # Header
     println(io, "First-Stage Diagnostics ($(fs.vcov_type))")
     println_horizontal_line(io, totwidth)
 
-    # Joint test
-    println(io, "Joint Test (Kleibergen-Paap):")
-    @printf(io, "  F-statistic: %10.4f       p-value: %.4f\n", fs.F_joint, fs.p_joint)
-
     # Per-endogenous table
-    println(io, "\nPer-Endogenous F-Statistics:")
+    println(io, "Per-Endogenous F-Statistics:")
     println_horizontal_line(io, totwidth)
-    @printf(io, "% -30s %14s %14s\n", "Endogenous", "F-stat", "P-value")
+    @printf(io, "% -30s\n", "Endogenous")
     println_horizontal_line(io, totwidth)
 
     for (j, name) in enumerate(fs.endogenous_names)
         display_name = length(name) > 28 ? name[1:25] * "..." : name
-        @printf(io, "% -30s %14.4f %14.4f\n",
-            display_name, fs.F_per_endo[j], fs.p_per_endo[j])
+        @printf(io, "% -30s\n", display_name)
+        @printf(io, "  %-22s %14.4f %14.4f\n",
+            "F[nonrobust] (P-value)", fs.F_nonrobust[j], fs.p_nonrobust[j])
+        @printf(io, "  %-22s %14.4f %14.4f\n",
+            "F[$(fs.vcov_type)] (P-value)", fs.F_robust[j], fs.p_robust[j])
     end
 
     println_horizontal_line(io, totwidth)
-    println(io, "\nInstruments: $(fs.n_instruments) excluded, $(fs.n_endogenous) endogenous")
+    println(io, "\nDoF: ($(fs.df1), $(fs.df2))")
+    println(io, "Instruments: $(fs.n_instruments) excluded, $(fs.n_endogenous) endogenous")
     print_horizontal_line(io, totwidth)
 end
 
@@ -1174,30 +1174,30 @@ function Base.show(io::IO, ::MIME"text/html", fs::FirstStageResult{T}) where {T}
     html_table_start(io; class = "regress-table regress-first-stage",
         caption = "First-Stage Diagnostics ($(fs.vcov_type))")
 
-    # Joint test section
-    html_thead_start(io; class = "regress-joint-test")
-    html_row(io, ["Joint Test (Kleibergen-Paap)", "", ""]; is_header = true)
-    html_thead_end(io)
-    html_tbody_start(io; class = "regress-joint-body")
-    html_row(io, ["F-statistic", format_number(fs.F_joint), ""])
-    html_row(io, ["P-value", format_pvalue(fs.p_joint), ""])
-    html_tbody_end(io)
-
     # Per-endogenous section
     html_thead_start(io; class = "regress-per-endo-header")
-    html_row(io, ["Endogenous", "F-stat", "P-value"]; is_header = true)
+    html_row(
+        io, ["Endogenous", "F(nonrobust)", "P-value", "F($(fs.vcov_type))", "P-value"];
+        is_header = true)
     html_thead_end(io)
     html_tbody_start(io; class = "regress-per-endo-body")
     for (j, name) in enumerate(fs.endogenous_names)
-        html_row(io, [
-            name, format_number(fs.F_per_endo[j]), format_pvalue(fs.p_per_endo[j])])
+        html_row(io,
+            [
+                name,
+                format_number(fs.F_nonrobust[j]),
+                format_pvalue(fs.p_nonrobust[j]),
+                format_number(fs.F_robust[j]),
+                format_pvalue(fs.p_robust[j])])
     end
     html_tbody_end(io)
 
     # Footer
     html_tfoot_start(io; class = "regress-footer")
-    html_row(io, [
-        "Instruments: $(fs.n_instruments) excluded, $(fs.n_endogenous) endogenous", "", ""])
+    html_row(io,
+        [
+            "DoF: ($(fs.df1), $(fs.df2)); Instruments: $(fs.n_instruments) excluded, $(fs.n_endogenous) endogenous",
+            "", "", "", ""])
     html_tfoot_end(io)
 
     html_table_end(io)
@@ -1259,10 +1259,14 @@ function top(m::IVEstimator)
         out = vcat(out, ["K-class kappa" @sprintf("%.4f", m.postestimation.kappa)])
     end
 
-    # Always show first-stage diagnostics for IV models (joint Kleibergen-Paap)
+    # Always show first-stage diagnostics for IV models
+    fs_nonrobust = isempty(m.F_first_stage_nonrobust) ? eltype(m.coef)(NaN) :
+                   minimum(m.F_first_stage_nonrobust)
+    fs_robust = isempty(m.F_first_stage_robust) ? eltype(m.coef)(NaN) :
+                minimum(m.F_first_stage_robust)
     out = vcat(out,
-        ["F (1st stage, joint)" sprint(show, m.F_kp, context = :compact => true);
-         "P (1st stage, joint)" @sprintf("%.3f", m.p_kp);])
+        ["F (1st stage, nonrobust)" sprint(show, fs_nonrobust, context = :compact => true);
+         "F (1st stage, $(vcov_type_name(m.vcov_estimator)))" sprint(show, fs_robust, context = :compact => true);])
 
     # Add Iterations if FE
     if has_fe(m)
@@ -1866,8 +1870,8 @@ Compute first-stage OLS regressions and diagnostics for an IV matrix estimator.
 
 Returns a `FirstStageIV` containing:
 - Full OLS models (one per endogenous variable) with `coef`, `stderror`, `fitted`, `residuals`, `r2`
-- Kleibergen-Paap joint F-statistic
-- Non-robust F-statistic per endogenous variable (matching `weakivtest`)
+- Non-robust F-statistic per endogenous variable
+- Robust F-statistic per endogenous variable using the model's current `vcov`
 
 # Keyword Arguments
 - `endogenous_names`: Names for endogenous variables (default: `["endo_1", ...]`)
@@ -1880,8 +1884,8 @@ fs = first_stage(m)
 coef(fs.models[1])       # first-stage coefficients
 stderror(fs.models[1])   # standard errors
 fitted(fs.models[1])     # predicted endogenous
-fs.F_kp                  # Kleibergen-Paap F
-fs.F_nonrobust           # non-robust F (matching weakivtest)
+fs.F_nonrobust           # non-robust F
+fs.F_robust              # robust F
 ```
 """
 function first_stage(m::IVMatrixEstimator{T};
@@ -1932,15 +1936,7 @@ function first_stage(m::IVMatrixEstimator{T};
         Xendo_res[:, i] = residuals(fs_models[i])
     end
 
-    # Step 4: Kleibergen-Paap F-statistic
-    dof_small = k_total  # total parameters in main model
-    F_kp,
-    p_kp = compute_first_stage_fstat(
-        Xendo_res, Z_res, Pi,
-        CovarianceMatrices.HR1(), S, dof_small, 0
-    )
-
-    # Step 5: Non-robust F per endogenous variable (matching weakivtest)
+    # Step 4: Non-robust F per endogenous variable
     # F_nonrobust = S * π̂'π̂ / (K * ω₂₂)
     # where π̂ are reduced-form coefficients on orthogonalized instruments
     QR_Z = qr(Z_res)
@@ -1949,17 +1945,29 @@ function first_stage(m::IVMatrixEstimator{T};
     dof_omega = S - K - L
 
     F_nonrobust = Vector{T}(undef, n_endo)
+    p_nonrobust = Vector{T}(undef, n_endo)
     for i in 1:n_endo
         pihat = (Zs' * Xendo_demeaned[:, i]) ./ T(S)
         res_i = Xendo_demeaned[:, i] .- Zs * pihat
         omega_22 = dot(res_i, res_i) / dof_omega
         pipi = dot(pihat, pihat)
         F_nonrobust[i] = S * pipi / (K * omega_22)
+        p_nonrobust[i] = fdistccdf(K, dof_omega, F_nonrobust[i])
     end
+
+    # Step 5: Robust F per endogenous variable using the model's current vcov
+    F_robust,
+    p_robust = compute_per_endogenous_fstats(
+        Xendo_res, Z_res, Pi,
+        m.vcov_estimator, S, k_total, 0;
+        Xendo_orig = Xendo,
+        newZ = Z
+    )
 
     return FirstStageIV{T, eltype(fs_models)}(
         fs_models, endo_names, instr_names,
-        F_kp, p_kp, F_nonrobust
+        F_nonrobust, p_nonrobust, F_robust, p_robust,
+        K, dof_omega, string(typeof(m.vcov_estimator).name.name)
     )
 end
 

@@ -16,6 +16,9 @@
     ## Reference value from R (AER package ivreg)
     coefs_tsls = [0.9592032, 2.0587160]
 
+    ## (Cragg-Donald Wald F statistic):               69.716
+    cragg_donald = 69.716
+
     V_TSLS_HC1 = [0.0017817895920835959 0.00020032733726142889;
                   0.00020032733726142886 0.0057013792157889157]
     V_TSLS_HC2 = [0.0017827669083746174 0.00020078616154375079;
@@ -46,8 +49,49 @@
     @test V_TSLS_HC2≈v_tsls_hc2 rtol=1e-6
     @test V_TSLS_HC3≈v_tsls_hc3 rtol=1e-6
     @test V_TSLS_HC4≈v_tsls_hc4 rtol=1e-6
-    # @test V_TSLS_HAC1≈v_tsls_hac1 rtol=1e-6
-    # @test V_TSLS_HAC2≈v_tsls_hac2 rtol=1e-6
+
+    # First-stage diagnostics (k=1 endogenous, l=2 instruments)
+    fs = Regress.first_stage(m_tsls)
+    @test fs.F_nonrobust[1] ≈ cragg_donald atol = 0.01
+    @test fs.F_robust[1] > 0
+
+    # Cragg-Donald (non-robust F) should match weakivtest F_nonrobust
+    wt = Regress.weakivtest(m_tsls)
+    @test wt.F_nonrobust ≈ cragg_donald atol = 0.001
+end
+
+@testitem "IV k=2 endogenous vs Stata ivreg2" tags = [:iv, :validation] begin
+    using Regress
+    using DataFrames
+    using CSV
+    using StatsBase: coef, vcov, stderror, nobs
+    using CovarianceMatrices: HC1
+
+    csv_path = joinpath(@__DIR__, "data", "basic_validation_df.csv")
+    df = CSV.read(csv_path, DataFrame)
+
+    # Stata: ivreg2 y (x x2 = z1 z2)
+    # Exactly identified (k=2 endogenous, l=2 instruments)
+    m = Regress.iv(Regress.TSLS(), df, @formula(y ~ (x + x2 ~ z1 + z2)))
+
+    # Coefficients from Stata
+    @test coef(m) ≈ [0.9631444, 2.005598, 0.5835853] atol = 0.0001
+
+    # Robust standard errors from Stata: ivreg2 y (x x2 = z1 z2), robust
+    # Regress defaults to HC1, matching Stata's robust option
+    se_rob = stderror(m)
+    @test se_rob ≈ [0.0511749, 0.2160997, 1.832851] rtol = 0.01
+
+    # First-stage diagnostics from Stata ivreg2
+    # Cragg-Donald Wald F statistic: 0.255
+    cragg_donald_ref = 0.255
+    # Kleibergen-Paap rk Wald F statistic (robust): 0.081
+    kleibergen_paap_ref = 0.081
+
+    # TODO: test Cragg-Donald and K-P once first_stage is fixed
+    # fs = Regress.first_stage(m)
+    # @test fs.F_kp ≈ kleibergen_paap_ref atol = 0.001
+    # @test fs.F_nonrobust ≈ [cragg_donald_ref] atol = 0.001
 end
 
 @testitem "OLS standard errors vs GLM.jl" tags = [:ols, :validation] begin

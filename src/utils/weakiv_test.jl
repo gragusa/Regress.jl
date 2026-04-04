@@ -969,44 +969,65 @@ end
 
 function Base.show(io::IO, r::WeakIVTestResult{T}) where {T}
     level_pct = round(Int, r.level * 100)
+    same_tsls_liml = r.cv_TSLS == r.cv_LIML
+    same_all = same_tsls_liml && r.cv_TSLS == r.cv_GMMf
+    colw = 12
 
     println(io)
     println(io, "Montiel-Pflueger robust weak instrument test")
     println(io, "─" ^ 54)
-    @printf(io, "btsls:                        %12.4f\n", r.btsls)
-    @printf(io, "sebtsls:                      %12.4f\n", r.sebtsls)
-    @printf(io, "bliml:                        %12.4f\n", r.bliml)
-    @printf(io, "sebliml:                      %12.4f\n", r.sebliml)
+    @printf(io, "TSLS coefficient (SE):        %8.4f (%8.4f)\n", r.btsls, r.sebtsls)
+    @printf(io, "LIML coefficient (SE):        %8.4f (%8.4f)\n", r.bliml, r.sebliml)
+    @printf(io, "GMMf coefficient (SE):        %8.4f (%8.4f)\n", r.bgmmf, r.sebgmmf)
     @printf(io, "kappa:                        %12.4f\n", r.kappa)
-    @printf(io, "Non-Robust F statistic:       %12.3f\n", r.F_nonrobust)
-    @printf(io, "Effective F statistic:        %12.3f\n", r.F_eff)
+    @printf(io, "F[nonrobust]:                 %12.3f\n", r.F_nonrobust)
+    @printf(io, "F[effective]:                 %12.3f\n", r.F_eff)
+    @printf(io, "F[robust]:                    %12.3f\n", r.F_robust)
     @printf(io, "Confidence level alpha:       %9d%%\n", level_pct)
     println(io, "─" ^ 54)
     println(io)
-    println(io, "─" ^ 54)
-    @printf(io, "%-24s %12s %12s\n", "Critical Values", "TSLS", "LIML")
-    println(io, "─" ^ 54)
-    println(io, "% of Worst Case Bias")
-    @printf(io, "tau=5%%                   %12.3f %12.3f\n", r.cv_TSLS[1], r.cv_LIML[1])
-    @printf(io, "tau=10%%                  %12.3f %12.3f\n", r.cv_TSLS[2], r.cv_LIML[2])
-    @printf(io, "tau=20%%                  %12.3f %12.3f\n", r.cv_TSLS[3], r.cv_LIML[3])
-    @printf(io, "tau=30%%                  %12.3f %12.3f\n", r.cv_TSLS[4], r.cv_LIML[4])
-    println(io, "─" ^ 54)
-
-    println(io, "─" ^ 54)
-    @printf(io, "bgmmf:                        %12.4f\n", r.bgmmf)
-    @printf(io, "sebgmmf:                      %12.4f\n", r.sebgmmf)
-    @printf(io, "Robust F statistic:           %12.3f\n", r.F_robust)
-    @printf(io, "Confidence level alpha:       %9d%%\n", level_pct)
-    println(io, "─" ^ 54)
+    println(io, "Use:")
+    if same_all
+        println(io, "  Compare F[effective] or F[robust] to the common critical values below.")
+    else
+        println(io, "  Compare F[effective] to TSLS/LIML critical values.")
+        println(io, "  Compare F[robust] to GMMf critical values.")
+    end
+    println(io, "  If F exceeds the critical value at tau, weak-IV bias is below that tau bound.")
     println(io)
     println(io, "─" ^ 54)
-    @printf(io, "%-24s %12s\n", "Critical Values", "GMMf")
-    println(io, "─" ^ 54)
-    println(io, "% of Worst Case Bias")
-    @printf(io, "tau=5%%                   %12.3f\n", r.cv_GMMf[1])
-    @printf(io, "tau=10%%                  %12.3f\n", r.cv_GMMf[2])
-    @printf(io, "tau=20%%                  %12.3f\n", r.cv_GMMf[3])
-    @printf(io, "tau=30%%                  %12.3f\n", r.cv_GMMf[4])
+    if same_all
+        @printf(io, "%-10s %*s\n", "tau", colw, "Common")
+        println(io, "─" ^ 54)
+        @printf(io, "%-10s %*.3f\n", "tau=5%", colw, r.cv_TSLS[1])
+        @printf(io, "%-10s %*.3f\n", "tau=10%", colw, r.cv_TSLS[2])
+        @printf(io, "%-10s %*.3f\n", "tau=20%", colw, r.cv_TSLS[3])
+        @printf(io, "%-10s %*.3f\n", "tau=30%", colw, r.cv_TSLS[4])
+    elseif same_tsls_liml
+        @printf(io, "%-10s %*s %*s\n", "tau", colw, "TSLS/LIML", colw, "GMMf")
+        println(io, "─" ^ 54)
+        @printf(io, "%-10s %*.3f %*.3f\n", "tau=5%", colw, r.cv_TSLS[1], colw, r.cv_GMMf[1])
+        @printf(io, "%-10s %*.3f %*.3f\n", "tau=10%", colw, r.cv_TSLS[2], colw,
+            r.cv_GMMf[2])
+        @printf(io, "%-10s %*.3f %*.3f\n", "tau=20%", colw, r.cv_TSLS[3], colw,
+            r.cv_GMMf[3])
+        @printf(io, "%-10s %*.3f %*.3f\n", "tau=30%", colw, r.cv_TSLS[4], colw,
+            r.cv_GMMf[4])
+    else
+        @printf(io, "%-10s %*s %*s %*s\n", "tau", colw, "TSLS", colw, "LIML", colw, "GMMf")
+        println(io, "─" ^ 54)
+        @printf(io,
+            "%-10s %*.3f %*.3f %*.3f\n", "tau=5%", colw, r.cv_TSLS[1], colw, r.cv_LIML[1], colw,
+            r.cv_GMMf[1])
+        @printf(io,
+            "%-10s %*.3f %*.3f %*.3f\n", "tau=10%", colw, r.cv_TSLS[2], colw, r.cv_LIML[2], colw,
+            r.cv_GMMf[2])
+        @printf(io,
+            "%-10s %*.3f %*.3f %*.3f\n", "tau=20%", colw, r.cv_TSLS[3], colw, r.cv_LIML[3], colw,
+            r.cv_GMMf[3])
+        @printf(io,
+            "%-10s %*.3f %*.3f %*.3f\n", "tau=30%", colw, r.cv_TSLS[4], colw, r.cv_LIML[4], colw,
+            r.cv_GMMf[4])
+    end
     println(io, "─" ^ 54)
 end

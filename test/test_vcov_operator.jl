@@ -253,7 +253,8 @@ end
     # Test first_stage from IVEstimator (default HC1)
     fs = Regress.first_stage(model)
     @test fs.vcov_type == "HR1"  # HC1 is alias for HR1
-    @test fs.F_joint == model.F_kp
+    @test fs.F_nonrobust == model.F_first_stage_nonrobust
+    @test fs.F_robust == model.F_first_stage_robust
     @test fs.n_endogenous == 1
     @test fs.n_instruments == 2
 
@@ -261,8 +262,10 @@ end
     model_hc3 = model + vcov(HC3())
     fs_hc3 = Regress.first_stage(model_hc3)
     @test fs_hc3.vcov_type == "HR3"  # HC3 is alias for HR3
-    @test fs_hc3.F_joint == model_hc3.F_kp
+    @test fs_hc3.F_nonrobust == model_hc3.F_first_stage_nonrobust
+    @test fs_hc3.F_robust == model_hc3.F_first_stage_robust
 
-    # F-stats should differ between HC1 and HC3
-    @test fs.F_joint != fs_hc3.F_joint
+    # Robust F-stats should differ between HC1 and HC3, but non-robust should not
+    @test fs.F_nonrobust == fs_hc3.F_nonrobust
+    @test fs.F_robust != fs_hc3.F_robust
 end

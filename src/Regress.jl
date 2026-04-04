@@ -67,6 +67,9 @@ include("utils/covariance.jl")
 # Weak instrument test: Montiel-Olea-Pflueger weak instrument test
 include("utils/weakiv_test.jl")
 
+# IV diagnostic tests: Wu-Hausman, Sargan, IID first-stage F
+include("utils/iv_diagnostics.jl")
+
 # Estimator implementations
 include("estimators/tsls.jl")  # TSLS implementation
 include("estimators/kclass.jl")  # K-class estimators: LIML, Fuller, KClass
@@ -94,6 +97,10 @@ export first_stage, FirstStageIV
 
 # Weak instrument test
 export weakivtest, WeakIVTestResult
+
+# IV diagnostic tests
+export first_stage_f, wu_hausman, sargan
+export FirstStageFResult, WuHausmanResult, SarganResult
 
 # Utility functions
 # export partial_out
