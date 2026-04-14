@@ -502,6 +502,11 @@ function fit_tsls(@nospecialize(df),
     formula_schema = FormulaTerm(formula_schema.lhs, MatrixTerm(Tuple(schema_terms)))
     coef_names = vcat(coefnames_exo, coefnames_endo)
 
+    # Filter rows with NaN (e.g. from lags() producing NaN for out-of-bounds entries)
+    y, (Xexo, Xendo, Z), wts, subfes, nobs_eff,
+    has_nan_rows, nan_rows = _filter_nan_rows(
+        y, (Xexo, Xendo, Z), wts, subfes)
+
     # Compute TSS and validate
     tss_total = tss(y, data_prep.has_intercept | data_prep.has_fe_intercept, wts)
     all(isfinite, wts) || throw("Weights are not finite")
@@ -605,6 +610,7 @@ function fit_tsls(@nospecialize(df),
 
     F_first_stage_nonrobust, p_first_stage_nonrobust = T[], T[]
     F_first_stage_robust, p_first_stage_robust = T[], T[]
+    F_kp_joint, p_kp_joint = T(NaN), T(NaN)
     first_stage_data = empty_first_stage_data(T)
 
     if first_stage && k_endo_final > 0
@@ -617,12 +623,12 @@ function fit_tsls(@nospecialize(df),
 
         if has_fe_iv
             fstats = _iv_first_stage_fstats_fe(
-                Xendo, Xendo_hat, iv_fes, newZ, data_prep.nobs, k_exo_final,
+                Xendo, Xendo_hat, iv_fes, newZ, nobs_eff, k_exo_final,
                 endo_names_final, data_prep.has_intercept)
         else
             fstats = _iv_first_stage_fstats_standard(
                 Xendo, newZ, Pi, XexoXexo, XexoZ, ZZ, X,
-                data_prep.nobs, dof_fes_local, endo_names_final,
+                nobs_eff, dof_fes_local, endo_names_final,
                 k_exo_final, data_prep.has_intercept)
         end
 
@@ -631,7 +637,8 @@ function fit_tsls(@nospecialize(df),
         p_first_stage_robust = fstats.F_kp_per_endo, fstats.p_kp_per_endo
         F_first_stage_nonrobust,
         p_first_stage_nonrobust,
-        _, _ = _compute_first_stage_f_iid(first_stage_data, data_prep.nobs, dof_fes_local)
+        _, _ = _compute_first_stage_f_iid(first_stage_data, nobs_eff, dof_fes_local)
+        F_kp_joint, p_kp_joint = fstats.F_kp, fstats.p_kp
     end
 
     ##########################################################################
@@ -645,7 +652,7 @@ function fit_tsls(@nospecialize(df),
     dof_fes = sum(ngroups_fes)
 
     # dof_residual uses all parameters in X (intercept is in X when no FE)
-    dof_residual = max(1, data_prep.nobs - size(X, 2) - dof_fes - dof_add)
+    dof_residual = max(1, nobs_eff - size(X, 2) - dof_fes - dof_add)
     # dof_model excludes intercept (for F-test numerator DOF)
     dof_model = size(X, 2) - (data_prep.has_intercept & !data_prep.has_fe_intercept)
 
@@ -719,8 +726,12 @@ function fit_tsls(@nospecialize(df),
         end
     end
 
-    esample_final = data_prep.esample == Colon() ? trues(data_prep.nrows) :
-                    data_prep.esample
+    esample_final = data_prep.esample isa Colon ? trues(data_prep.nrows) :
+                    BitVector(data_prep.esample)
+    if has_nan_rows
+        idx = findall(esample_final)
+        esample_final[idx[nan_rows]] .= false
+    end
 
     ##########################################################################
     ## Compute Inference
@@ -728,7 +739,7 @@ function fit_tsls(@nospecialize(df),
 
     inf = _iv_compute_inference(
         convert(Matrix{T}, Xhat), residuals_raw, invXhatXhat, basis_coef, coef,
-        data_prep.nobs, dof_model, dof_fes, dof_residual, data_prep.formula_origin)
+        nobs_eff, dof_model, dof_fes, dof_residual, data_prep.formula_origin)
 
     ##########################################################################
     ## Return IVEstimator
@@ -741,12 +752,13 @@ function fit_tsls(@nospecialize(df),
         postestimation_data,
         data_prep.fekeys, coef_names, response_name,
         data_prep.formula_origin, formula_schema, contrasts,
-        data_prep.nobs, dof_model, dof_fes, dof_residual,
+        nobs_eff, dof_model, dof_fes, dof_residual,
         rss, tss_total,
         iterations, converged, r2_within,
         CovarianceMatrices.HC1(), inf.vcov_matrix, inf.se, inf.t_stats, inf.p_values,
         inf.F_stat_robust, inf.p_val_robust,
         F_first_stage_nonrobust, p_first_stage_nonrobust,
-        F_first_stage_robust, p_first_stage_robust
+        F_first_stage_robust, p_first_stage_robust,
+        F_kp_joint, p_kp_joint
     )
 end

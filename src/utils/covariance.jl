@@ -781,8 +781,8 @@ end
 @noinline residualadjustment(k::CM.CR0, r::OLSModel) = 1.0
 @noinline residualadjustment(k::CM.CR1, r::OLSModel) = 1.0
 
-# HAC (kernel) estimators - no residual adjustment needed
-@noinline residualadjustment(k::CM.HAC, r::OLSModel) = 1.0
+# Correlated estimators (HAC, EWC, DriscollKraay, VARHAC, etc.) - no residual adjustment needed
+@noinline residualadjustment(k::CM.Correlated, r::OLSModel) = 1.0
 
 """
     _get_group_ranges(g)
@@ -1073,8 +1073,8 @@ function CM.vcov(k::CM.AbstractAsymptoticVarianceEstimator, m::OLSEstimator; dof
         #   - FE nested in cluster variable are NOT counted in K
         #   - FE NOT nested in cluster variable ARE counted in K
         _cluster_robust_scale(k, m, n)
-    elseif k isa CM.HAC
-        # HAC: Apply DOF correction n/(n-p) to match CovarianceMatrices/GLM behavior
+    elseif k isa CM.Correlated
+        # Correlated (HAC, EWC, etc.): Apply DOF correction n/(n-p)
         # p_total includes both model parameters and fixed effects DOF
         p_total = dof(m) + dof_fes(m)
         n * n / (n - p_total)
@@ -1261,8 +1261,8 @@ function CM.vcov(k::CM.AbstractAsymptoticVarianceEstimator, m::OLSMatrixEstimato
         K = dof(m)
         K_adj = (n - 1) / (n - K)
         convert(Float64, n * G_adj * K_adj)
-    elseif k isa CM.HAC
-        # HAC: Apply DOF correction n/(n-p) to match CovarianceMatrices/GLM behavior
+    elseif k isa CM.Correlated
+        # Correlated (HAC, EWC, etc.): Apply DOF correction n/(n-p)
         # For matrix estimator, no fixed effects so p = dof(m)
         p = dof(m)
         n * n / (n - p)

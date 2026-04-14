@@ -51,7 +51,7 @@ critical values at various bias thresholds, and metadata.
 - `K::Int`: Number of excluded instruments
 - `N::Int`: Number of observations
 """
-struct WeakIVTestResult{T}
+struct WeakIVTestResult{T} <: AbstractTest
     # Test statistics
     F_eff::T
     F_nonrobust::T

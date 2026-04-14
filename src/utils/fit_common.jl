@@ -568,3 +568,41 @@ function partial_out_fixed_effects!(cols::Vector,
 
     return feM, iterations, converged, tss_partial, oldy, oldX
 end
+
+##############################################################################
+##
+## NaN Row Filtering (shared by OLS, TSLS, K-class)
+##
+##############################################################################
+
+"""
+    _filter_nan_rows(y, matrices, wts, subfes)
+
+Filter rows containing NaN from response `y` and design matrices (e.g. from `lags()`).
+Returns `(y, matrices, wts, subfes, nobs_eff, has_nan_rows, nan_rows)`.
+`matrices` is a tuple of matrices; the returned tuple preserves the same order.
+"""
+function _filter_nan_rows(y::Vector{T}, matrices::NTuple{N, Matrix{T}},
+        wts, subfes) where {T, N}
+    nan_rows = isnan.(y)
+    for M in matrices
+        size(M, 2) > 0 && (nan_rows .|= vec(any(isnan, M, dims = 2)))
+    end
+    has_nan_rows = any(nan_rows)
+    nobs_eff = length(y)
+    if !has_nan_rows
+        return y, matrices, wts, subfes, nobs_eff, false, nan_rows
+    end
+    keep = .!nan_rows
+    y = y[keep]
+    filtered = ntuple(i -> matrices[i][keep, :], Val(N))
+    nobs_eff = sum(keep)
+    if !(wts isa UnitWeights)
+        wts = Weights(Vector(wts)[keep])
+    else
+        wts = uweights(nobs_eff)
+    end
+    subfes = isempty(subfes) ? subfes :
+             FixedEffect[fe[keep] for fe in subfes]
+    return y, filtered, wts, subfes, nobs_eff, true, nan_rows
+end

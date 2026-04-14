@@ -18,7 +18,7 @@
     using Regress
     using DataFrames, CSV, CategoricalArrays
     using StatsBase: coef, stderror, r2
-    using CovarianceMatrices: HC1, CR1
+    using Regress: HC1, CR1
 
     # Tolerances
     RTOL_COEF = 1e-6
@@ -71,7 +71,7 @@ end
     using Regress: fe
     using DataFrames, CSV, CategoricalArrays
     using StatsBase: coef, stderror, r2
-    using CovarianceMatrices: HC1, CR1
+    using Regress: HC1, CR1
 
     # Tolerances
     RTOL_COEF = 1e-6
@@ -122,7 +122,7 @@ end
     using Regress: fe
     using DataFrames, CSV, CategoricalArrays
     using StatsBase: coef, stderror, r2
-    using CovarianceMatrices: HC1, CR1
+    using Regress: HC1, CR1
 
     # Tolerances
     RTOL_COEF = 1e-6
@@ -172,20 +172,20 @@ end
     using Regress
     using DataFrames, CSV, CategoricalArrays
     using StatsBase: coef, stderror, r2
-    using CovarianceMatrices: HC1, CR1
+    using Regress: HC1, CR1
 
     # Tolerances
     RTOL_COEF = 1e-6
     RTOL_SE_HC = 1e-6
     RTOL_SE_CLUSTER = 1e-6
     RTOL_R2 = 1e-6
-    RTOL_F_KP = 1e-6
+    RTOL_F_IID = 1e-6
 
     # ----- Reference values from R fixest -----
     # Coefficients: (Intercept), x1, x2, fit_endo
     COEF = [1.426078709850737, 0.5022110369396626, 0.31777225217776084, 2.0533383199942645]
     R2 = 0.7970527457662797
-    F_KP = 135.55368890700018
+    F_IID = 290.9503015727274
 
     # Standard errors by vcov type
     # Note: HC1 SE computed with DOF convention that counts intercept (dof_res = n - k)
@@ -211,8 +211,8 @@ end
     # R-squared
     @test r2(m) ≈ R2 rtol = RTOL_R2
 
-    # First-stage F-statistic (Kleibergen-Paap)
-    @test Regress.first_stage(m).F_nonrobust[1] ≈ F_KP rtol = RTOL_F_KP
+    # First-stage F-statistic (IID)
+    @test Regress.first_stage(m).F_nonrobust[1] ≈ F_IID rtol = RTOL_F_IID
 
     # Standard errors - HC1
     @test stderror(HC1(), m) ≈ SE_HC1 rtol = RTOL_SE_HC
@@ -233,20 +233,20 @@ end
     using Regress: fe
     using DataFrames, CSV, CategoricalArrays
     using StatsBase: coef, stderror, r2
-    using CovarianceMatrices: HC1, CR1
+    using Regress: HC1, CR1
 
     # Tolerances
     RTOL_COEF = 1e-6
     RTOL_SE_HC = 1e-6
     RTOL_SE_CLUSTER = 1e-6
     RTOL_R2 = 1e-6
-    RTOL_F_KP = 1e-6
+    RTOL_F_IID = 1e-6
 
     # ----- Reference values from R fixest -----
     # Coefficients: x1, x2, fit_endo (no intercept with FE)
     COEF = [0.517192834221396, 0.3000057923783143, 2.0316203354076725]
     R2 = 0.832384325466159
-    F_KP = 145.51765918382873
+    F_IID = 320.60480351691064
 
     # Standard errors by vcov type
     SE_HC1 = [0.06077896542330189, 0.04991147808908014, 0.07880872705581633]
@@ -269,8 +269,8 @@ end
     # R-squared
     @test r2(m) ≈ R2 rtol = RTOL_R2
 
-    # First-stage F-statistic (Kleibergen-Paap)
-    @test Regress.first_stage(m).F_nonrobust[1] ≈ F_KP rtol = RTOL_F_KP
+    # First-stage F-statistic (IID)
+    @test Regress.first_stage(m).F_nonrobust[1] ≈ F_IID rtol = RTOL_F_IID
 
     # Standard errors - HC1
     @test stderror(HC1(), m) ≈ SE_HC1 rtol = RTOL_SE_HC
@@ -294,20 +294,20 @@ end
     using Regress: fe
     using DataFrames, CSV, CategoricalArrays
     using StatsBase: coef, stderror, r2
-    using CovarianceMatrices: HC1, CR1
+    using Regress: HC1, CR1
 
     # Tolerances
     RTOL_COEF = 1e-6
     RTOL_SE_HC = 1e-6
     RTOL_SE_CLUSTER = 1e-6
     RTOL_R2 = 1e-6
-    RTOL_F_KP = 1e-6
+    RTOL_F_IID = 1e-6
 
     # ----- Reference values from R fixest -----
     # Coefficients: x1, x2, fit_endo (no intercept with FE)
     COEF = [0.5061660563758806, 0.30523155864404355, 2.0222299546040468]
     R2 = 0.9216172253226353
-    F_KP = 145.19326049090716
+    F_IID = 316.4247374994751
 
     # Standard errors by vcov type
     SE_HC1 = [0.04297204886952502, 0.035058367355121675, 0.056918952667222356]
@@ -331,8 +331,8 @@ end
     # R-squared
     @test r2(m) ≈ R2 rtol = RTOL_R2
 
-    # First-stage F-statistic (Kleibergen-Paap)
-    @test Regress.first_stage(m).F_nonrobust[1] ≈ F_KP rtol = RTOL_F_KP
+    # First-stage F-statistic (IID)
+    @test Regress.first_stage(m).F_nonrobust[1] ≈ F_IID rtol = RTOL_F_IID
 
     # Standard errors - HC1
     @test stderror(HC1(), m) ≈ SE_HC1 rtol = RTOL_SE_HC
@@ -356,20 +356,20 @@ end
     using Regress
     using DataFrames, CSV, CategoricalArrays
     using StatsBase: coef, stderror, r2
-    using CovarianceMatrices: HC1, CR1
+    using Regress: HC1, CR1
 
     # Tolerances
     RTOL_COEF = 1e-6
     RTOL_SE_HC = 1e-6
     RTOL_SE_CLUSTER = 1e-6
     RTOL_R2 = 1e-6
-    RTOL_F_KP = 1e-6
+    RTOL_F_IID = 1e-6
 
     # ----- Reference values from R fixest -----
     # Coefficients: (Intercept), x1, x2, fit_endo
     COEF = [1.4449688608098197, 0.5111036193727284, 0.3184713859664605, 2.028561669636886]
     R2 = 0.7946588621680999
-    F_KP = 24.35925856663632
+    F_IID = 30.067717609367953
 
     # Standard errors by vcov type
     # Note: HC1 SE computed with DOF convention that counts intercept (dof_res = n - k)
@@ -395,8 +395,8 @@ end
     # R-squared
     @test r2(m) ≈ R2 rtol = RTOL_R2
 
-    # First-stage F-statistic (Kleibergen-Paap)
-    @test Regress.first_stage(m).F_nonrobust[1] ≈ F_KP rtol = RTOL_F_KP
+    # First-stage F-statistic (IID)
+    @test Regress.first_stage(m).F_nonrobust[1] ≈ F_IID rtol = RTOL_F_IID
 
     # Standard errors - HC1
     @test stderror(HC1(), m) ≈ SE_HC1 rtol = RTOL_SE_HC
@@ -416,20 +416,20 @@ end
     using Regress: fe
     using DataFrames, CSV, CategoricalArrays
     using StatsBase: coef, stderror, r2
-    using CovarianceMatrices: HC1, CR1
+    using Regress: HC1, CR1
 
     # Tolerances
     RTOL_COEF = 1e-6
     RTOL_SE_HC = 1e-6
     RTOL_SE_CLUSTER = 1e-6
     RTOL_R2 = 1e-6
-    RTOL_F_KP = 1e-6
+    RTOL_F_IID = 1e-6
 
     # ----- Reference values from R fixest -----
     # Coefficients: x1, x2, fit_endo (no intercept with FE)
     COEF = [0.5206045994953721, 0.3001680802913261, 2.0223390331838935]
     R2 = 0.8318476170503317
-    F_KP = 25.903487111101313
+    F_IID = 33.01547709081618
 
     # Standard errors by vcov type
     SE_HC1 = [0.06956941203475926, 0.04977094038737541, 0.11884473120651287]
@@ -451,8 +451,8 @@ end
     # R-squared
     @test r2(m) ≈ R2 rtol = RTOL_R2
 
-    # First-stage F-statistic (Kleibergen-Paap)
-    @test Regress.first_stage(m).F_nonrobust[1] ≈ F_KP rtol = RTOL_F_KP
+    # First-stage F-statistic (IID)
+    @test Regress.first_stage(m).F_nonrobust[1] ≈ F_IID rtol = RTOL_F_IID
 
     # Standard errors - HC1
     @test stderror(HC1(), m) ≈ SE_HC1 rtol = RTOL_SE_HC
@@ -475,20 +475,20 @@ end
     using Regress: fe
     using DataFrames, CSV, CategoricalArrays
     using StatsBase: coef, stderror, r2
-    using CovarianceMatrices: HC1, CR1
+    using Regress: HC1, CR1
 
     # Tolerances
     RTOL_COEF = 1e-6
     RTOL_SE_HC = 1e-6
     RTOL_SE_CLUSTER = 1e-6
     RTOL_R2 = 1e-6
-    RTOL_F_KP = 1e-6
+    RTOL_F_IID = 1e-6
 
     # ----- Reference values from R fixest -----
     # Coefficients: x1, x2, fit_endo (no intercept with FE)
     COEF = [0.47887536778475115, 0.3035932600900931, 2.0960967017271352]
     R2 = 0.9258190793878247
-    F_KP = 24.896281475208674
+    F_IID = 32.06047455139025
 
     # Standard errors by vcov type
     SE_HC1 = [0.047837964392560675, 0.034156247365691846, 0.08042873148888426]
@@ -512,8 +512,8 @@ end
     # R-squared
     @test r2(m) ≈ R2 rtol = RTOL_R2
 
-    # First-stage F-statistic (Kleibergen-Paap)
-    @test Regress.first_stage(m).F_nonrobust[1] ≈ F_KP rtol = RTOL_F_KP
+    # First-stage F-statistic (IID)
+    @test Regress.first_stage(m).F_nonrobust[1] ≈ F_IID rtol = RTOL_F_IID
 
     # Standard errors - HC1
     @test stderror(HC1(), m) ≈ SE_HC1 rtol = RTOL_SE_HC
@@ -536,20 +536,20 @@ end
     using Regress
     using DataFrames, CSV, CategoricalArrays
     using StatsBase: coef, stderror, r2
-    using CovarianceMatrices: HC1, CR1
+    using Regress: HC1, CR1
 
     # Tolerances
     RTOL_COEF = 1e-6
     RTOL_SE_HC = 1e-6
     RTOL_SE_CLUSTER = 1e-6
     RTOL_R2 = 1e-6
-    RTOL_F_KP = 1e-6
+    RTOL_F_IID = 1e-6
 
     # ----- Reference values from R fixest -----
     # Coefficients: (Intercept), x1, x2, fit_endo
     COEF = [1.4304839335133355, 0.5042848062091939, 0.3179352916746909, 2.0475603520642744]
     R2 = 0.7965074141689706
-    F_KP = 41.46776399951962
+    F_IID = 103.8605561494657
 
     # Standard errors by vcov type
     # Note: HC1 SE computed with DOF convention that counts intercept (dof_res = n - k)
@@ -576,8 +576,8 @@ end
     # R-squared
     @test r2(m) ≈ R2 rtol = RTOL_R2
 
-    # First-stage F-statistic (Kleibergen-Paap)
-    @test Regress.first_stage(m).F_nonrobust[1] ≈ F_KP rtol = RTOL_F_KP
+    # First-stage F-statistic (IID)
+    @test Regress.first_stage(m).F_nonrobust[1] ≈ F_IID rtol = RTOL_F_IID
 
     # Standard errors - HC1
     @test stderror(HC1(), m) ≈ SE_HC1 rtol = RTOL_SE_HC
@@ -601,20 +601,20 @@ end
     using Regress: fe
     using DataFrames, CSV, CategoricalArrays
     using StatsBase: coef, stderror, r2
-    using CovarianceMatrices: HC1, CR1
+    using Regress: HC1, CR1
 
     # Tolerances
     RTOL_COEF = 1e-6
     RTOL_SE_HC = 1e-6
     RTOL_SE_CLUSTER = 1e-6
     RTOL_R2 = 1e-6
-    RTOL_F_KP = 1e-6
+    RTOL_F_IID = 1e-6
 
     # ----- Reference values from R fixest -----
     # Coefficients: x1, x2, fit_endo (no intercept with FE)
     COEF = [0.5166978714883292, 0.2999822484171923, 2.0329668227378943]
     R2 = 0.8324606828041137
-    F_KP = 43.486936945756945
+    F_IID = 119.21439932462302
 
     # Standard errors by vcov type
     SE_HC1 = [0.058224459538328215, 0.04982056618001574, 0.06147995587425259]
@@ -638,8 +638,8 @@ end
     # R-squared
     @test r2(m) ≈ R2 rtol = RTOL_R2
 
-    # First-stage F-statistic (Kleibergen-Paap)
-    @test Regress.first_stage(m).F_nonrobust[1] ≈ F_KP rtol = RTOL_F_KP
+    # First-stage F-statistic (IID)
+    @test Regress.first_stage(m).F_nonrobust[1] ≈ F_IID rtol = RTOL_F_IID
 
     # Standard errors - HC1
     @test stderror(HC1(), m) ≈ SE_HC1 rtol = RTOL_SE_HC
@@ -662,20 +662,20 @@ end
     using Regress: fe
     using DataFrames, CSV, CategoricalArrays
     using StatsBase: coef, stderror, r2
-    using CovarianceMatrices: HC1, CR1
+    using Regress: HC1, CR1
 
     # Tolerances
     RTOL_COEF = 1e-6
     RTOL_SE_HC = 1e-6
     RTOL_SE_CLUSTER = 1e-6
     RTOL_R2 = 1e-6
-    RTOL_F_KP = 1e-6
+    RTOL_F_IID = 1e-6
 
     # ----- Reference values from R fixest -----
     # Coefficients: x1, x2, fit_endo (no intercept with FE)
     COEF = [0.4965363222169623, 0.3046534721111661, 2.0482944174190525]
     R2 = 0.9232298394541512
-    F_KP = 43.43219369557059
+    F_IID = 117.34077475155085
 
     # Standard errors by vcov type
     SE_HC1 = [0.04085757225868013, 0.034699376630850265, 0.044274945728549696]
@@ -700,8 +700,8 @@ end
     # R-squared
     @test r2(m) ≈ R2 rtol = RTOL_R2
 
-    # First-stage F-statistic (Kleibergen-Paap)
-    @test Regress.first_stage(m).F_nonrobust[1] ≈ F_KP rtol = RTOL_F_KP
+    # First-stage F-statistic (IID)
+    @test Regress.first_stage(m).F_nonrobust[1] ≈ F_IID rtol = RTOL_F_IID
 
     # Standard errors - HC1
     @test stderror(HC1(), m) ≈ SE_HC1 rtol = RTOL_SE_HC

@@ -179,19 +179,18 @@ function _compute_meat(
         scale = n / dof_residual
         return scale * (moment_matrix' * moment_matrix)
     elseif vcov_type isa Union{CovarianceMatrices.CR0, CovarianceMatrices.CR1}
-        # Cluster-robust - vcov_type.g contains actual cluster vectors (not symbols)
-        clusters = vcov_type.g[1]
-        unique_clusters = unique(clusters)
-        n_clusters = length(unique_clusters)
+        # Cluster-robust - vcov_type.g[1] is a Clustering struct
+        clustering = vcov_type.g[1]
+        groups = clustering.groups       # Vector{Int}, 1-indexed
+        n_clusters = clustering.ngroups
+        p = size(moment_matrix, 2)
 
-        # Create mapping from cluster value to index
-        cluster_to_idx = Dict(c => i for (i, c) in enumerate(unique_clusters))
-
-        # Sum moments within clusters
-        cluster_sums = zeros(T, n_clusters, size(moment_matrix, 2))
-        for (i, c) in enumerate(clusters)
-            idx = cluster_to_idx[c]
-            cluster_sums[idx, :] .+= moment_matrix[i, :]
+        # Sum moments within clusters (column-major loop)
+        cluster_sums = zeros(T, n_clusters, p)
+        @inbounds for j in 1:p
+            for i in 1:n
+                cluster_sums[groups[i], j] += moment_matrix[i, j]
+            end
         end
 
         meat = cluster_sums' * cluster_sums
@@ -297,145 +296,48 @@ function compute_per_endogenous_fstats(
         Xendo_orig::Union{Matrix{T}, Nothing} = nothing,
         newZ::Union{Matrix{T}, Nothing} = nothing
 ) where {T <: AbstractFloat}
-    k = size(Xendo_res, 2)  # Number of endogenous variables
     l = size(Z_res, 2)      # Number of excluded instruments
 
-    # Use original data for robust F-stats if available
-    use_original = !isnothing(Xendo_orig) && !isnothing(newZ) &&
-                   !(vcov_type isa CovarianceMatrices.Uncorrelated)
-
-    if use_original
-        # Use batched version for better performance - computes ZZ etc. only once
-        return _compute_robust_first_stage_fstats_batched(
-            newZ, Xendo_orig, l, vcov_type, nobs, dof_small, dof_fes
+    if !isnothing(Xendo_orig) && !isnothing(newZ)
+        return _compute_first_stage_fstats_via_ols(
+            newZ, Xendo_orig, l, vcov_type, dof_fes
         )
     else
-        # Fall back to per-variable computation for classical F-test
-        F_stats = Vector{T}(undef, k)
-        p_values = Vector{T}(undef, k)
-
-        for j in 1:k
-            residuals_j = Xendo_res[:, j] .- Z_res * Pi[:, j]
-            F_j,
-            p_j = _compute_single_first_stage_fstat(
-                Z_res, Pi[:, j], residuals_j, vcov_type, nobs, dof_small, dof_fes
-            )
-            F_stats[j] = F_j
-            p_values[j] = p_j
-        end
-
-        return F_stats, p_values
+        throw(ArgumentError(
+            "compute_per_endogenous_fstats requires Xendo_orig and newZ; " *
+            "these must be provided from FirstStageData"))
     end
 end
 
 """
-    _compute_single_first_stage_fstat(Z, pi, residuals, vcov_type, nobs, dof_small, dof_fes)
+    _compute_first_stage_fstats_via_ols(newZ, Xendo, n_instruments, vcov_type, dof_fes)
 
-Compute F-statistic for a single first-stage regression.
+Compute first-stage F-statistics by constructing lightweight OLSMatrixEstimator models
+from pre-computed first-stage data and delegating variance computation to CovarianceMatrices.jl.
 
-Tests H0: pi = 0 (all excluded instrument coefficients are zero).
-
-# Arguments
-- `Z::Matrix{T}`: Instrument matrix (n × l)
-- `pi::Vector{T}`: First-stage coefficient vector (l × 1)
-- `residuals::Vector{T}`: First-stage residuals (n × 1)
-- `vcov_type`: Variance estimator type
-- `nobs::Int`: Number of observations
-- `dof_small::Int`: Degrees of freedom
-- `dof_fes::Int`: Degrees of freedom absorbed by FE
-
-# Returns
-- `(F, p)`: F-statistic and p-value
-"""
-function _compute_single_first_stage_fstat(
-        Z::Matrix{T},
-        pi::Vector{T},
-        residuals::Vector{T},
-        vcov_type,
-        nobs::Int,
-        dof_small::Int,
-        dof_fes::Int
-) where {T <: AbstractFloat}
-    l = length(pi)  # Number of excluded instruments
-
-    l == 0 && return T(NaN), T(NaN)
-
-    dof_residual = max(1, nobs - dof_small - dof_fes)
-
-    # Compute Z'Z and its Cholesky
-    ZZ = Symmetric(Z' * Z)
-    ZZ_chol = cholesky(ZZ; check = false)
-    !issuccess(ZZ_chol) && return T(NaN), T(NaN)
-
-    # Note: HR0/HR1 (= HC0/HC1) are heteroskedasticity-robust estimators.
-    # Only truly homoskedastic estimators (Uncorrelated) should use classical F-test.
-    if vcov_type isa CovarianceMatrices.Uncorrelated
-        # Classical F-test (homoskedastic): F = (pi' * Z'Z * pi) / (l * s²)
-        rss = sum(abs2, residuals)
-        s2 = rss / dof_residual
-
-        # Wald test: chi² = pi' * (Z'Z) * pi / s²
-        chi2 = (pi' * ZZ * pi) / s2
-        F = chi2 / l
-
-        p = fdistccdf(l, dof_residual, F)
-        return F, p
-    else
-        # Robust F-test (HC0/HC1/HC2/HC3/cluster) using sandwich variance
-        # Build moment matrix for this first-stage: M = Z .* residuals
-        M = Z .* residuals
-
-        # Compute meat of sandwich
-        meat = _compute_meat(M, vcov_type, nobs, dof_small, dof_fes)
-
-        # Bread: (Z'Z)^{-1} via Cholesky solve
-        invZZ = ZZ_chol \ I
-
-        # Sandwich vcov: invZZ * (n * Meat) * invZZ
-        # Note: _compute_meat already includes scaling
-        vcov_pi = Symmetric(invZZ * meat * invZZ)
-
-        # Wald test: chi² = pi' * inv(V) * pi
-        vcov_pi_chol = cholesky(Symmetric(vcov_pi); check = false)
-        !issuccess(vcov_pi_chol) && return T(NaN), T(NaN)
-
-        chi2 = pi' * (vcov_pi_chol \ pi)
-        F = chi2 / l
-
-        p = fdistccdf(l, dof_residual, F)
-        return F, p
-    end
-end
-
-"""
-    _compute_robust_first_stage_fstats_batched(newZ, Xendo, n_instruments, vcov_type, nobs, dof_small, dof_fes)
-
-Batched version that computes robust F-statistics for ALL endogenous variables at once.
-Avoids redundant computation of ZZ, ZZ_chol, invZZ which are shared across all k endogenous.
+No refitting is performed — ZZ factorization is computed once and shared across all
+endogenous variables. Per-endogenous cost is one matvec (for fitted values) plus the
+CovarianceMatrices sandwich formula.
 
 # Arguments
 - `newZ::Matrix{T}`: Full first-stage design matrix [Xexo, Z] (n × (k_exo + l))
 - `Xendo::Matrix{T}`: Original endogenous variables (n × k)
 - `n_instruments::Int`: Number of excluded instruments (l)
-- `vcov_type`: Variance estimator type (HC0/HC1/etc.)
-- `nobs::Int`: Number of observations
-- `dof_small::Int`: Total DOF for second-stage
-- `dof_fes::Int`: Degrees of freedom absorbed by FE
+- `vcov_type`: Any variance estimator supported by CovarianceMatrices.jl
+- `dof_fes::Int`: Degrees of freedom absorbed by fixed effects
 
 # Returns
 - `(F_stats, p_values)`: Vectors of F-statistics and p-values, one per endogenous
 """
-function _compute_robust_first_stage_fstats_batched(
+function _compute_first_stage_fstats_via_ols(
         newZ::Matrix{T},
         Xendo::Matrix{T},
         n_instruments::Int,
         vcov_type,
-        nobs::Int,
-        dof_small::Int,
         dof_fes::Int
 ) where {T <: AbstractFloat}
-    n, k_total = size(newZ)  # k_total = k_exo + l
-    k = size(Xendo, 2)       # Number of endogenous variables
+    n, k_total = size(newZ)
+    k = size(Xendo, 2)
     l = n_instruments
     k_exo = k_total - l
 
@@ -448,7 +350,7 @@ function _compute_robust_first_stage_fstats_batched(
         return F_stats, p_values
     end
 
-    # Compute ZZ and its factorization ONCE for all endogenous
+    # Compute ZZ factorization ONCE for all endogenous
     ZZ = Matrix{T}(undef, k_total, k_total)
     BLAS.syrk!('U', 'T', one(T), newZ, zero(T), ZZ)
     ZZ_sym = Symmetric(ZZ, :U)
@@ -459,65 +361,56 @@ function _compute_robust_first_stage_fstats_batched(
         return F_stats, p_values
     end
 
-    # Compute Zy for ALL endogenous at once: newZ' * Xendo is k_total × k
-    Zy_all = newZ' * Xendo  # k_total × k
-
-    # Compute all coefficients at once: coef_full_all is k_total × k
-    coef_full_all = ZZ_chol \ Zy_all
-
-    # Compute all residuals at once: Xendo - newZ * coef_full_all is n × k
-    # Use in-place update: residuals_all = Xendo - newZ * coef_full_all
-    residuals_all = copy(Xendo)
-    BLAS.gemm!('N', 'N', -one(T), newZ, coef_full_all, one(T), residuals_all)
-
-    # (Z'Z)^{-1} needed for sandwich - compute once via Cholesky solve
-    invZZ = ZZ_chol \ I
+    # Compute all coefficients at once: coef_all is k_total × k
+    coef_all = ZZ_chol \ (newZ' * Xendo)
 
     # DOF for first-stage
+    dof_fs = k_total
     dof_residual_fs = max(1, n - k_total - dof_fes)
-
-    # Pre-allocate buffers reused across all endogenous variables
-    M = Matrix{T}(undef, n, k_total)
-    meat_buf = Matrix{T}(undef, k_total, k_total)
-    vcov_full = Matrix{T}(undef, k_total, k_total)
-    tmp_buf = Matrix{T}(undef, k_total, k_total)
-    pi_tmp = Vector{T}(undef, l)
 
     # Process each endogenous variable
     for j in 1:k
-        residuals_j = @view residuals_all[:, j]
+        y_j = Xendo[:, j]
+        beta_j = coef_all[:, j]
+        mu_j = newZ * beta_j  # fitted values (one matvec per endogenous)
 
-        # Build moment matrix in-place: M = newZ .* residuals_j
-        @inbounds for col in 1:k_total
-            @simd for row in 1:n
-                M[row, col] = newZ[row, col] * residuals_j[row]
-            end
+        # Construct lightweight OLSMatrixEstimator wrapping pre-computed data
+        rr = OLSResponse(y_j, mu_j, T[], T[], :first_stage)
+        pp = OLSPredictorChol{T}(newZ, newZ, beta_j, ZZ_chol)
+        rss_j = sum(abs2, y_j .- mu_j)
+        tss_j = sum(abs2, y_j .- mean(y_j))
+        basis = trues(k_total)
+
+        fs_model = OLSMatrixEstimator{T, OLSPredictorChol{T}, typeof(vcov_type)}(
+            rr, pp, basis,
+            n, dof_fs, dof_residual_fs,
+            T(rss_j), T(tss_j), T(1 - rss_j / tss_j), true,
+            vcov_type, Symmetric(Matrix{T}(undef, k_total, k_total)),  # placeholder
+            Vector{T}(undef, k_total), Vector{T}(undef, k_total), Vector{T}(undef, k_total)
+        )
+
+        # Use CovarianceMatrices to compute vcov — handles all HC/HAC/CR/EWC types
+        vcov_matrix = try
+            CovarianceMatrices.vcov(vcov_type, fs_model)
+        catch
+            F_stats[j] = T(NaN)
+            p_values[j] = T(NaN)
+            continue
         end
 
-        # Compute meat of sandwich using pre-allocated buffer
-        _compute_meat_inplace!(meat_buf, M, vcov_type, nobs, k_total, dof_fes)
+        # Extract instrument coefficient block (last l × l)
+        vcov_pi = Symmetric(vcov_matrix[(k_exo + 1):end, (k_exo + 1):end])
+        pi_j = beta_j[(k_exo + 1):end]
 
-        # Full sandwich vcov: vcov_full = invZZ * meat * invZZ
-        # Use tmp_buf for intermediate result
-        mul!(tmp_buf, invZZ, meat_buf)
-        mul!(vcov_full, tmp_buf, invZZ)
-
-        # Extract instrument coefficient variances (last l × l block)
-        vcov_pi = @view vcov_full[(k_exo + 1):end, (k_exo + 1):end]
-        pi_j = @view coef_full_all[(k_exo + 1):end, j]
-
-        # Wald test: chi² = pi' * inv(V_pi) * pi
-        vcov_pi_chol = cholesky(Symmetric(vcov_pi); check = false)
+        # Wald test: F = (pi' * inv(V_pi) * pi) / l
+        vcov_pi_chol = cholesky(vcov_pi; check = false)
         if !issuccess(vcov_pi_chol)
             F_stats[j] = T(NaN)
             p_values[j] = T(NaN)
             continue
         end
 
-        # Copy pi_j to avoid issues with views in ldiv!
-        copyto!(pi_tmp, pi_j)
-        ldiv!(vcov_pi_chol, pi_tmp)
-        chi2 = dot(pi_j, pi_tmp)
+        chi2 = pi_j' * (vcov_pi_chol \ pi_j)
         F_j = chi2 / l
 
         F_stats[j] = F_j
@@ -525,54 +418,4 @@ function _compute_robust_first_stage_fstats_batched(
     end
 
     return F_stats, p_values
-end
-
-"""
-    _compute_meat_inplace!(dest, moment_matrix, vcov_type, nobs, dof_small, dof_fes)
-
-In-place version of _compute_meat that writes result to dest.
-"""
-function _compute_meat_inplace!(
-        dest::Matrix{T},
-        moment_matrix::Matrix{T},
-        vcov_type,
-        nobs::Int,
-        dof_small::Int,
-        dof_fes::Int
-) where {T <: AbstractFloat}
-    n = size(moment_matrix, 1)
-
-    if vcov_type isa CovarianceMatrices.HR0
-        # No adjustment: dest = M' * M
-        BLAS.syrk!('U', 'T', one(T), moment_matrix, zero(T), dest)
-        # Copy upper to lower
-        @inbounds for j in 1:size(dest, 2), i in (j + 1):size(dest, 1)
-
-            dest[i, j] = dest[j, i]
-        end
-    elseif vcov_type isa CovarianceMatrices.HR1
-        # HC1 adjustment
-        dof_residual = max(1, n - dof_small - dof_fes)
-        scale = T(n) / T(dof_residual)
-        BLAS.syrk!('U', 'T', scale, moment_matrix, zero(T), dest)
-        @inbounds for j in 1:size(dest, 2), i in (j + 1):size(dest, 1)
-
-            dest[i, j] = dest[j, i]
-        end
-    elseif vcov_type isa Union{CovarianceMatrices.CR0, CovarianceMatrices.CR1}
-        # Cluster-robust - fall back to allocating version for simplicity
-        meat = _compute_meat(moment_matrix, vcov_type, nobs, dof_small, dof_fes)
-        copyto!(dest, meat)
-    else
-        # Default: use HC1-like computation
-        dof_residual = max(1, n - dof_small - dof_fes)
-        scale = T(n) / T(dof_residual)
-        BLAS.syrk!('U', 'T', scale, moment_matrix, zero(T), dest)
-        @inbounds for j in 1:size(dest, 2), i in (j + 1):size(dest, 1)
-
-            dest[i, j] = dest[j, i]
-        end
-    end
-
-    return dest
 end
