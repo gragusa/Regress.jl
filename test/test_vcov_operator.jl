@@ -1,6 +1,6 @@
 @testitem "OLS + vcov(HC)" tags = [:ols, :vcov, :hc, :smoke] begin
     using Regress, CategoricalArrays, CSV, DataFrames, LinearAlgebra, StatsBase
-    using CovarianceMatrices: HC0, HC1, HC2, HC3
+    using Regress: HC0, HC1, HC2, HC3
 
     df = DataFrame(CSV.File(joinpath(dirname(pathof(Regress)), "../dataset/Cigar.csv")))
     df.StateC = categorical(df.State)
@@ -24,7 +24,7 @@ end
 @testitem "OLS + vcov(HC) with FE" tags = [:ols, :vcov, :hc, :fe] begin
     using Regress, CategoricalArrays, CSV, DataFrames, LinearAlgebra, StatsBase
     using Regress: fe
-    using CovarianceMatrices: HC0, HC1, HC2, HC3
+    using Regress: HC0, HC1, HC2, HC3
 
     df = DataFrame(CSV.File(joinpath(dirname(pathof(Regress)), "../dataset/Cigar.csv")))
     df.StateC = categorical(df.State)
@@ -46,7 +46,7 @@ end
 
 @testitem "OLS + vcov(CR)" tags = [:ols, :vcov, :cluster] begin
     using Regress, CategoricalArrays, CSV, DataFrames, LinearAlgebra, StatsBase
-    using CovarianceMatrices: CR0, CR1, CR2, CR3
+    using Regress: CR0, CR1, CR2, CR3
 
     df = DataFrame(CSV.File(joinpath(dirname(pathof(Regress)), "../dataset/Cigar.csv")))
     df.StateC = categorical(df.State)
@@ -80,7 +80,7 @@ end
 
 @testitem "OLS + vcov(HAC)" tags = [:ols, :vcov] begin
     using Regress, CategoricalArrays, CSV, DataFrames, LinearAlgebra, StatsBase
-    using CovarianceMatrices: Bartlett
+    using Regress: Bartlett
 
     df = DataFrame(CSV.File(joinpath(dirname(pathof(Regress)), "../dataset/Cigar.csv")))
 
@@ -99,7 +99,7 @@ end
 
 @testitem "IV + vcov(HC)" tags = [:iv, :vcov, :hc] begin
     using Regress, CategoricalArrays, CSV, DataFrames, LinearAlgebra, StatsBase
-    using CovarianceMatrices: HC0, HC1, HC2
+    using Regress: HC0, HC1, HC2
 
     df = DataFrame(CSV.File(joinpath(dirname(pathof(Regress)), "../dataset/Cigar.csv")))
     df.StateC = categorical(df.State)
@@ -122,7 +122,7 @@ end
 
 @testitem "IV + vcov(CR)" tags = [:iv, :vcov, :cluster] begin
     using Regress, CategoricalArrays, CSV, DataFrames, LinearAlgebra, StatsBase
-    using CovarianceMatrices: CR0, CR1
+    using Regress: CR0, CR1
 
     df = DataFrame(CSV.File(joinpath(dirname(pathof(Regress)), "../dataset/Cigar.csv")))
     df.StateC = categorical(df.State)
@@ -147,7 +147,7 @@ end
 @testitem "IV + vcov(HC) with FE" tags = [:iv, :vcov, :hc, :fe] begin
     using Regress, CategoricalArrays, CSV, DataFrames, LinearAlgebra, StatsBase
     using Regress: fe
-    using CovarianceMatrices: HC0, HC1
+    using Regress: HC0, HC1
 
     df = DataFrame(CSV.File(joinpath(dirname(pathof(Regress)), "../dataset/Cigar.csv")))
     df.StateC = categorical(df.State)
@@ -169,7 +169,7 @@ end
 
 @testitem "IV + vcov(HAC)" tags = [:iv, :vcov] begin
     using Regress, CategoricalArrays, CSV, DataFrames, LinearAlgebra, StatsBase
-    using CovarianceMatrices: Bartlett
+    using Regress: Bartlett
 
     df = DataFrame(CSV.File(joinpath(dirname(pathof(Regress)), "../dataset/Cigar.csv")))
 
@@ -188,7 +188,7 @@ end
 
 @testitem "vcov chaining" tags = [:vcov, :smoke] begin
     using Regress, CategoricalArrays, CSV, DataFrames, LinearAlgebra, StatsBase
-    using CovarianceMatrices: HC1, HC3
+    using Regress: HC1, HC3
 
     df = DataFrame(CSV.File(joinpath(dirname(pathof(Regress)), "../dataset/Cigar.csv")))
 
@@ -207,7 +207,7 @@ end
 
 @testitem "StatsAPI methods" tags = [:vcov, :smoke] begin
     using Regress, CategoricalArrays, CSV, DataFrames, LinearAlgebra, StatsBase
-    using CovarianceMatrices: HC3
+    using Regress: HC3
 
     df = DataFrame(CSV.File(joinpath(dirname(pathof(Regress)), "../dataset/Cigar.csv")))
 
@@ -243,7 +243,7 @@ end
 
 @testitem "first_stage with vcov" tags = [:iv, :vcov] begin
     using Regress, CategoricalArrays, CSV, DataFrames
-    using CovarianceMatrices: HC3
+    using Regress: HC3
 
     df = DataFrame(CSV.File(joinpath(dirname(pathof(Regress)), "../dataset/Cigar.csv")))
 

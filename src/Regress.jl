@@ -92,15 +92,23 @@ public ols, iv, fe
 # export AbstractIVEstimator
 export TSLS, LIML, Fuller, KClass
 
-# First-stage diagnostics
+# Formula terms
+export lags, LagTerm
+
+# First-stage diagnostics (new API)
+export AbstractTest, FirstStageFTest, Homoskedastic
+export first_stage_F_iid, first_stage_F_robust, first_stage_F_KP
+
+# First-stage diagnostics (deprecated, kept for compatibility)
 export first_stage, FirstStageIV
+export first_stage_f, FirstStageFResult
 
 # Weak instrument test
 export weakivtest, WeakIVTestResult
 
 # IV diagnostic tests
-export first_stage_f, wu_hausman, sargan
-export FirstStageFResult, WuHausmanResult, SarganResult
+export wu_hausman, sargan
+export WuHausmanResult, SarganResult
 
 # Utility functions
 # export partial_out

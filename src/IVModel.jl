@@ -1,5 +1,97 @@
 ##############################################################################
 ##
+## Abstract Test Types
+##
+##############################################################################
+
+"""
+    AbstractTest
+
+Abstract supertype for test result types (first-stage F-tests, weak IV tests, etc.).
+"""
+abstract type AbstractTest end
+
+"""
+    Homoskedastic
+
+Sentinel type indicating the IID (homoskedastic) variance assumption.
+Used as the `K` type parameter in `FirstStageFTest{T, Homoskedastic}`.
+"""
+struct Homoskedastic end
+
+"""
+    FirstStageFTest{T, K} <: AbstractTest
+
+First-stage F-test result. Parametric on:
+- `T`: `Float64` (single endogenous or joint KP) or `Vector{Float64}` (multiple endogenous)
+- `K`: variance estimator type — `Homoskedastic` for IID, or a CovarianceMatrices type for robust/KP
+
+# Fields
+- `stat::T`: F-statistic value(s)
+- `df1::Int`: numerator degrees of freedom
+- `df2::Int`: denominator degrees of freedom (0 for asymptotic KP)
+- `p::T`: p-value(s)
+- `type::Symbol`: `:iid`, `:robust`, or `:kp`
+- `vcov_estimator::K`: variance estimator used
+- `endo_names::Vector{String}`: endogenous variable names
+
+# Examples
+```julia
+m = iv(TSLS(), df, @formula(y ~ x + (endo ~ z1 + z2)))
+first_stage_F_iid(m)      # IID F-test
+first_stage_F_robust(m)   # Robust Wald F-test
+first_stage_F_KP(m)       # Kleibergen-Paap rk Wald F-test
+```
+"""
+struct FirstStageFTest{T, K} <: AbstractTest
+    stat::T
+    df1::Int
+    df2::Int
+    p::T
+    type::Symbol
+    vcov_estimator::K
+    endo_names::Vector{String}
+end
+
+function Base.show(io::IO, f::FirstStageFTest{<:Real})
+    type_str = if f.type == :iid
+        "First-stage F-test (IID)"
+    elseif f.type == :kp
+        "Kleibergen-Paap rk Wald F-test"
+    else
+        vcov_name = string(typeof(f.vcov_estimator).name.name)
+        "First-stage F-test (robust, $vcov_name)"
+    end
+    println(io, type_str)
+    name = isempty(f.endo_names) ? "joint" : f.endo_names[1]
+    p_str = f.p < 0.001 ? "p < 0.001" : @sprintf("p = %.4f", f.p)
+    if f.df2 > 0
+        @printf(io, "  %s: F(%d, %d) = %.4f  (%s)\n", name, f.df1, f.df2, f.stat, p_str)
+    else
+        @printf(io, "  %s: F = %.4f, df = %d  (%s)\n", name, f.stat, f.df1, p_str)
+    end
+end
+
+function Base.show(io::IO, f::FirstStageFTest{<:AbstractVector})
+    type_str = if f.type == :iid
+        "First-stage F-test (IID)"
+    else
+        vcov_name = string(typeof(f.vcov_estimator).name.name)
+        "First-stage F-test (robust, $vcov_name)"
+    end
+    if f.df2 > 0
+        println(io, "$type_str, F($(f.df1), $(f.df2)):")
+    else
+        println(io, "$type_str:")
+    end
+    for (j, name) in enumerate(f.endo_names)
+        p_str = f.p[j] < 0.001 ? "p < 0.001" : @sprintf("p = %.4f", f.p[j])
+        @printf(io, "  %s: F = %.4f  (%s)\n", name, f.stat[j], p_str)
+    end
+end
+
+##############################################################################
+##
 ## Type IVEstimator (for IV estimation)
 ##
 ##############################################################################
@@ -277,6 +369,8 @@ struct IVEstimator{
     p_first_stage_nonrobust::Vector{T}
     F_first_stage_robust::Vector{T}
     p_first_stage_robust::Vector{T}
+    F_kp::T                 # Joint Kleibergen-Paap rk Wald F-statistic
+    p_kp::T                 # P-value of joint KP test
 end
 
 has_iv(::IVEstimator) = true
@@ -491,8 +585,8 @@ end
 @noinline residualadjustment(k::_CM.CR0, m::IVEstimator) = 1.0
 @noinline residualadjustment(k::_CM.CR1, m::IVEstimator) = 1.0
 
-# HAC (kernel) estimators - no residual adjustment needed
-@noinline residualadjustment(k::_CM.HAC, m::IVEstimator) = 1.0
+# Correlated estimators (HAC, EWC, DriscollKraay, VARHAC, etc.) - no residual adjustment needed
+@noinline residualadjustment(k::_CM.Correlated, m::IVEstimator) = 1.0
 
 # CR2 and CR3 for IV - leverage-adjusted cluster-robust
 function residualadjustment(k::_CM.CR2, m::IVEstimator)
@@ -1079,13 +1173,98 @@ function Base.:+(m::IVEstimator{T, E, V1, P}, v::VcovSpec{V2}) where {T, E, V1, 
         vcov_copy, Symmetric(vcov_mat), se, t_stats, p_values,
         F_stat, p_val,
         m.F_first_stage_nonrobust, m.p_first_stage_nonrobust,
-        F_first_stage_robust, p_first_stage_robust
+        F_first_stage_robust, p_first_stage_robust,
+        m.F_kp, m.p_kp  # KP stat doesn't change with vcov
     )
 end
 
 ##############################################################################
 ##
-## first_stage() - Return first-stage diagnostics as a struct
+## New First-Stage F-Test API
+##
+##############################################################################
+
+"""
+    first_stage_F_iid(m::IVEstimator) -> FirstStageFTest
+
+IID (homoskedastic) first-stage F-test. Equation-by-equation SSR-based F-test.
+"""
+function first_stage_F_iid(m::IVEstimator{T}) where {T}
+    pe = m.postestimation
+    F_vec = m.F_first_stage_nonrobust
+    p_vec = m.p_first_stage_nonrobust
+
+    df1, df2 = first_stage_df(m)
+    endo_names = if !isnothing(pe) && has_first_stage_data(pe.first_stage_data)
+        pe.first_stage_data.endogenous_names
+    else
+        String["endo$i" for i in 1:length(F_vec)]
+    end
+
+    if length(F_vec) == 1
+        return FirstStageFTest{T, Homoskedastic}(
+            F_vec[1], df1, df2, p_vec[1], :iid, Homoskedastic(), endo_names)
+    else
+        return FirstStageFTest{Vector{T}, Homoskedastic}(
+            F_vec, df1, df2, p_vec, :iid, Homoskedastic(), endo_names)
+    end
+end
+
+"""
+    first_stage_F_robust(m::IVEstimator) -> FirstStageFTest
+
+Robust Wald first-stage F-test using the model's current variance estimator.
+"""
+function first_stage_F_robust(m::IVEstimator{T}) where {T}
+    pe = m.postestimation
+    F_vec = m.F_first_stage_robust
+    p_vec = m.p_first_stage_robust
+
+    df1, df2 = first_stage_df(m)
+    endo_names = if !isnothing(pe) && has_first_stage_data(pe.first_stage_data)
+        pe.first_stage_data.endogenous_names
+    else
+        String["endo$i" for i in 1:length(F_vec)]
+    end
+
+    vcov_est = m.vcov_estimator
+
+    if length(F_vec) == 1
+        return FirstStageFTest{T, typeof(vcov_est)}(
+            F_vec[1], df1, df2, p_vec[1], :robust, vcov_est, endo_names)
+    else
+        return FirstStageFTest{Vector{T}, typeof(vcov_est)}(
+            F_vec, df1, df2, p_vec, :robust, vcov_est, endo_names)
+    end
+end
+
+"""
+    first_stage_F_KP(m::IVEstimator) -> FirstStageFTest
+
+Joint Kleibergen-Paap rk Wald F-test for under-identification.
+"""
+function first_stage_F_KP(m::IVEstimator{T}) where {T}
+    pe = m.postestimation
+    endo_names = if !isnothing(pe) && has_first_stage_data(pe.first_stage_data)
+        pe.first_stage_data.endogenous_names
+    else
+        String[]
+    end
+
+    n_excl = if !isnothing(pe) && has_first_stage_data(pe.first_stage_data)
+        size(pe.first_stage_data.Z_res, 2)
+    else
+        0
+    end
+
+    # KP is asymptotically χ²(df)/ℓ, use df2=0 to signal asymptotic
+    return FirstStageFTest{T, typeof(m.vcov_estimator)}(
+        m.F_kp, n_excl, 0, m.p_kp, :kp, m.vcov_estimator, endo_names)
+end
+
+##############################################################################
+##
+## first_stage() - Return first-stage diagnostics as a struct (DEPRECATED)
 ##
 ##############################################################################
 
@@ -1738,8 +1917,8 @@ end
     return @. sqrt(T(1) / (T(1) - h)^δ)
 end
 
-# HAC (Bartlett, Parzen, etc.) - no adjustment needed
-@noinline residualadjustment(k::_CM.HAC, m::IVMatrixEstimator) = 1.0
+# Correlated estimators (HAC, EWC, DriscollKraay, VARHAC, etc.) - no adjustment needed
+@noinline residualadjustment(k::_CM.Correlated, m::IVMatrixEstimator) = 1.0
 
 # CR (cluster-robust) - no individual residual adjustment needed (handled in aVar)
 @noinline residualadjustment(k::_CM.CR0, m::IVMatrixEstimator) = 1.0

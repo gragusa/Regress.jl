@@ -100,6 +100,11 @@ function fit_ols(@nospecialize(df),
     X = convert(Matrix{T}, modelmatrix(formula_schema, subdf))
     response_name, coef_names = coefnames(formula_schema)
 
+    # Filter rows with NaN (e.g. from lags() producing NaN for out-of-bounds entries)
+    y, (X,), wts, subfes, nobs_eff,
+    has_nan_rows, nan_rows = _filter_nan_rows(
+        y, (X,), wts, subfes)
+
     # Build response object (fitted values will be set after solve)
     rr = build_response(y, wts, Symbol(response_name))
 
@@ -192,7 +197,7 @@ function fit_ols(@nospecialize(df),
     ngroups_fes = [nunique(fe) for fe in subfes]
     dof_fes = sum(ngroups_fes)
     dof_model = sum(basis_coef)  # Only non-collinear coefficients
-    dof_residual = max(1, data_prep.nobs - dof_model - dof_fes - dof_add)
+    dof_residual = max(1, nobs_eff - dof_model - dof_fes - dof_add)
 
     # R-squared
     r2 = 1 - rss / tss_total
@@ -261,8 +266,13 @@ function fit_ols(@nospecialize(df),
     ##############################################################################
 
     # Handle Colon case for esample
-    esample_final = data_prep.esample == Colon() ? trues(data_prep.nrows) :
-                    data_prep.esample
+    esample_final = data_prep.esample isa Colon ? trues(data_prep.nrows) :
+                    BitVector(data_prep.esample)
+    # Update esample to reflect NaN-filtered rows (e.g. from lags())
+    if has_nan_rows
+        idx = findall(esample_final)
+        esample_final[idx[nan_rows]] .= false
+    end
 
     ##############################################################################
     ## Convert coefficient names to strings
@@ -288,7 +298,7 @@ function fit_ols(@nospecialize(df),
     vcov_matrix = if save_matrices
         compute_hc1_vcov_direct(
             pp.X, residuals_vcov, invXX, basis_coef,
-            data_prep.nobs, dof_model, dof_fes, dof_residual
+            nobs_eff, dof_model, dof_fes, dof_residual
         )
     else
         # Minimal mode: can't compute vcov without X
@@ -331,7 +341,7 @@ function fit_ols(@nospecialize(df),
         data_prep.formula_origin, formula_schema, contrasts,
         esample_final,
         coef_names_str, basis_coef,
-        data_prep.nobs, dof_model, dof_fes, dof_residual,
+        nobs_eff, dof_model, dof_fes, dof_residual,
         T(tss_total), T(tss_partial), T(rss),
         T(r2), T(r2_within),
         data_prep.has_intercept,

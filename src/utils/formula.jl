@@ -292,3 +292,100 @@ end
 # Backward compatibility aliases for tests
 const _multiply = _multiply_columns
 const _parse_fixedeffect = _parse_fixedeffect_term
+
+##############################################################################
+##
+## Lag Term (lags)
+##
+##############################################################################
+
+"""
+    _lag_vector(v::AbstractVector, n::Int; default=NaN)
+
+Shift vector `v` by `n` positions, filling leading entries with `default`.
+"""
+function _lag_vector(v::AbstractVector, n::Int; default = NaN)
+    T = promote_type(eltype(v), typeof(default))
+    out = Vector{T}(undef, length(v))
+    @inbounds for i in eachindex(out)
+        out[i] = i <= n ? default : v[i - n]
+    end
+    return out
+end
+
+"""
+    lags(term, n)
+
+Create multiple lag columns from 1 to n. Used in formulas like
+`@formula(y ~ lags(x, 5))` to create a matrix with lag(x,1), ..., lag(x,5).
+"""
+lags(t::T, n::Int) where {T <: AbstractTerm} = LagTerm{T}(t, n)
+
+struct LagTerm{T <: AbstractTerm} <: AbstractTerm
+    term::T
+    nsteps::Int
+end
+
+StatsModels.terms(t::LagTerm) = StatsModels.terms(t.term)
+StatsModels.needs_schema(::LagTerm) = false
+
+function _parse_lags_args(t::FunctionTerm)
+    if length(t.args) == 1
+        return (first(t.args), 1)
+    elseif length(t.args) == 2
+        term, param_arg = t.args
+        (param_arg isa ConstantTerm) ||
+            throw(ArgumentError("lags parameter must be a number (got $param_arg)"))
+        return (term, param_arg.n)
+    else
+        throw(ArgumentError("lags() requires 1 or 2 arguments"))
+    end
+end
+
+function _termvars_lags(t::FunctionTerm)
+    length(t.args) >= 1 && return StatsModels.termvars(t.args[1])
+    return Symbol[]
+end
+
+function StatsModels.apply_schema(
+        t::FunctionTerm{typeof(lags)}, sch::StatsModels.Schema, ctx::Type)
+    term, nsteps = _parse_lags_args(t)
+    term = apply_schema(term, sch, ctx)
+    return LagTerm{typeof(term)}(term, nsteps)
+end
+
+function StatsModels.apply_schema(t::LagTerm, sch::StatsModels.Schema, ctx::Type)
+    term = apply_schema(t.term, sch, ctx)
+    LagTerm{typeof(term)}(term, t.nsteps)
+end
+
+function StatsModels.modelcols(ll::LagTerm, d::Tables.ColumnTable)
+    original_cols = StatsModels.modelcols(ll.term, d)
+    original_cols isa AbstractVector || throw(ArgumentError(
+        "lags() requires a single-column term; got a multi-column term " *
+        "(e.g., interaction or categorical). Apply lags to each variable separately."))
+    n = length(original_cols)
+    nsteps = ll.nsteps
+    result = Matrix{eltype(original_cols)}(undef, n, nsteps)
+    for i in 1:nsteps
+        result[:, i] = _lag_vector(original_cols, i; default = NaN)
+    end
+    return result
+end
+
+StatsModels.width(ll::LagTerm) = ll.nsteps
+
+StatsModels.termvars(t::FunctionTerm{typeof(lags)}) = _termvars_lags(t)
+StatsModels.termvars(ll::LagTerm) = StatsModels.termvars(ll.term)
+
+function Base.show(io::IO, ll::LagTerm)
+    print(io, "lags($(ll.term), $(ll.nsteps))")
+end
+
+function StatsModels.coefnames(ll::LagTerm)
+    base_name = StatsModels.coefnames(ll.term)
+    if base_name isa AbstractVector
+        base_name = base_name[1]
+    end
+    return [base_name * "_lag$i" for i in 1:ll.nsteps]
+end

@@ -116,6 +116,11 @@ function fit_kclass_estimator(
 
     coef_names = vcat(coefnames_exo, coefnames_endo)
 
+    # Filter rows with NaN (e.g. from lags() producing NaN for out-of-bounds entries)
+    y, (Xexo, Xendo, Z), wts, subfes, nobs_eff,
+    has_nan_rows, nan_rows = _filter_nan_rows(
+        y, (Xexo, Xendo, Z), wts, subfes)
+
     # Compute total sum of squares
     tss_total = tss(y, data_prep.has_intercept | data_prep.has_fe_intercept, wts)
 
@@ -207,7 +212,7 @@ function fit_kclass_estimator(
     elseif estimator isa Fuller
         kappa_liml = _liml_kappa(y, Xendo, Z, Xexo)
         # Fuller adjustment: kappa = kappa_liml - a/(n - L - p)
-        n = data_prep.nobs
+        n = nobs_eff
         L = k_z_final  # Number of excluded instruments
         p = k_exo_final  # Number of exogenous variables
         adj_denom = n - L - p
@@ -262,6 +267,7 @@ function fit_kclass_estimator(
     p_first_stage_nonrobust = T[]
     F_first_stage_robust = T[]
     p_first_stage_robust = T[]
+    F_kp_joint, p_kp_joint = T(NaN), T(NaN)
     first_stage_data = empty_first_stage_data(T)
     newZ = hcat(Xexo, Z)  # Needed for PostEstimationData leverage computation
 
@@ -289,7 +295,7 @@ function fit_kclass_estimator(
 
         fstats = _iv_first_stage_fstats_standard(
             Xendo, newZ, Pi, XexoXexo, XexoZ, ZZ, X,
-            data_prep.nobs, dof_fes_local, endo_names_final,
+            nobs_eff, dof_fes_local, endo_names_final,
             k_exo_final, data_prep.has_intercept)
 
         first_stage_data = fstats.first_stage_data
@@ -297,7 +303,8 @@ function fit_kclass_estimator(
         p_first_stage_robust = fstats.F_kp_per_endo, fstats.p_kp_per_endo
         F_first_stage_nonrobust,
         p_first_stage_nonrobust,
-        _, _ = _compute_first_stage_f_iid(first_stage_data, data_prep.nobs, dof_fes_local)
+        _, _ = _compute_first_stage_f_iid(first_stage_data, nobs_eff, dof_fes_local)
+        F_kp_joint, p_kp_joint = fstats.F_kp, fstats.p_kp
     end
 
     ##############################################################################
@@ -316,7 +323,7 @@ function fit_kclass_estimator(
     # Degrees of freedom
     ngroups_fes = [nunique(fe) for fe in subfes]
     dof_fes = sum(ngroups_fes)
-    dof_residual = max(1, data_prep.nobs - size(X, 2) - dof_fes - dof_add)
+    dof_residual = max(1, nobs_eff - size(X, 2) - dof_fes - dof_add)
 
     # R-squared (use raw weighted residuals for RSS)
     rss = sum(abs2, residuals_raw)
@@ -422,8 +429,12 @@ function fit_kclass_estimator(
         end
     end
 
-    esample_final = data_prep.esample == Colon() ? trues(data_prep.nrows) :
-                    data_prep.esample
+    esample_final = data_prep.esample isa Colon ? trues(data_prep.nrows) :
+                    BitVector(data_prep.esample)
+    if has_nan_rows
+        idx = findall(esample_final)
+        esample_final[idx[nan_rows]] .= false
+    end
 
     ##############################################################################
     ## Compute Default Vcov (HC1) and Related Statistics
@@ -433,7 +444,7 @@ function fit_kclass_estimator(
     # and the "meat" uses Adj (stored in X field of postestimation_data)
 
     # Compute HC1 vcov: invA * (Adj .* u)' * (Adj .* u) * invA * scale
-    n = data_prep.nobs
+    n = nobs_eff
     k = size(X, 2)
     scale = n / dof_residual
 
@@ -470,13 +481,14 @@ function fit_kclass_estimator(
         postestimation_data,
         data_prep.fekeys, coef_names, response_name,
         data_prep.formula_origin, formula_schema, contrasts,
-        data_prep.nobs, dof_model, dof_fes, dof_residual,
+        nobs_eff, dof_model, dof_fes, dof_residual,
         rss, tss_total,
         iterations, converged, r2_within,
         default_vcov, vcov_matrix, se, t_stats, p_values,
         F_stat_robust, p_val_robust,
         F_first_stage_nonrobust, p_first_stage_nonrobust,
-        F_first_stage_robust, p_first_stage_robust
+        F_first_stage_robust, p_first_stage_robust,
+        F_kp_joint, p_kp_joint
     )
 end
 
