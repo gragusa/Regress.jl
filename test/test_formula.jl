@@ -300,3 +300,41 @@ end
     @test all(isnan, res_full[.!m6.esample])
     @test length(residuals(m6)) == sum(m6.esample)
 end
+
+@testitem "lags - dynamic lag count from variable" tags = [:formula, :lags] begin
+    using DataFrames
+    using Regress
+    using StableRNGs
+    using StatsModels: @formula
+
+    # GitHub issue #12: `lags(r, j)` where `j` is bound at top level.
+    # `@formula` rewrites a free symbol into a `Term`, so the count is
+    # resolved by evaluating the original expression in `Main`.
+    Core.eval(Main, :(using DataFrames, Regress, StableRNGs))
+    Core.eval(Main, :(using StatsModels: @formula))
+    Core.eval(Main, quote
+        rng_top = StableRNG(2026)
+        df_top = DataFrame(r = randn(rng_top, 60))
+        j_top = 3
+        m_var = Regress.ols(df_top, @formula(r ~ Regress.lags(r, j_top)))
+    end)
+    @test length(Core.eval(Main, :(coef(m_var)))) == 4
+
+    Core.eval(Main, quote
+        results = Int[]
+        for k in (2, 4, 6)
+            global j_top = k
+            m_loop = Regress.ols(df_top,
+                @formula(r ~ Regress.lags(r, j_top)))
+            push!(results, length(coef(m_loop)) - 1)
+        end
+    end)
+    @test Core.eval(Main, :results) == [2, 4, 6]
+
+    Core.eval(Main, quote
+        maxlag_top = 4
+        m_arith = Regress.ols(df_top,
+            @formula(r ~ Regress.lags(r, maxlag_top + 1)))
+    end)
+    @test length(Core.eval(Main, :(coef(m_arith)))) == 6
+end
