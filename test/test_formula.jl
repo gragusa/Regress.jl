@@ -26,8 +26,10 @@
     for data in [df, csvfile]
         @test _parse_fixedeffect(data, term(:Price)) === nothing
         @test _parse_fixedeffect(data, ConstantTerm(1)) === nothing
-        @test _eq(_parse_fixedeffect(data, fe(:State)),
-            (FixedEffect(data.State), :fe_State, [:State]))
+        @test _eq(
+            _parse_fixedeffect(data, fe(:State)),
+            (FixedEffect(data.State), :fe_State, [:State])
+        )
 
         @test parse_fixedeffect(data, ()) == (FixedEffect[], Symbol[], Symbol[])
 
@@ -41,21 +43,35 @@
         f = @formula(y ~ 1 + Price + fe(State))
         ts1 = f.rhs
         ts2 = term(1) + term(:Price) + fe(:State)
-        @test _eq(parse_fixedeffect(data, f),
-            ([FixedEffect(data.State)], [:fe_State], [:State]))
-        @test _eq(parse_fixedeffect(data, ts1),
-            ([FixedEffect(data.State)], [:fe_State], [:State]))
+        @test _eq(
+            parse_fixedeffect(data, f),
+            ([FixedEffect(data.State)], [:fe_State], [:State])
+        )
+        @test _eq(
+            parse_fixedeffect(data, ts1),
+            ([FixedEffect(data.State)], [:fe_State], [:State])
+        )
         @test _eq(parse_fixedeffect(data, ts2), parse_fixedeffect(data, ts1))
 
         f = @formula(y ~ Price + fe(State) + fe(Year))
         ts1 = f.rhs
         ts2 = term(:Price) + fe(:State) + fe(:Year)
-        @test _eq(parse_fixedeffect(data, f),
-            ([FixedEffect(data.State), FixedEffect(data.Year)],
-                [:fe_State, :fe_Year], [:State, :Year]))
-        @test _eq(parse_fixedeffect(data, ts1),
-            ([FixedEffect(data.State), FixedEffect(data.Year)],
-                [:fe_State, :fe_Year], [:State, :Year]))
+        @test _eq(
+            parse_fixedeffect(data, f),
+            (
+                [FixedEffect(data.State), FixedEffect(data.Year)],
+                [:fe_State, :fe_Year],
+                [:State, :Year]
+            )
+        )
+        @test _eq(
+            parse_fixedeffect(data, ts1),
+            (
+                [FixedEffect(data.State), FixedEffect(data.Year)],
+                [:fe_State, :fe_Year],
+                [:State, :Year]
+            )
+        )
         @test _eq(parse_fixedeffect(data, ts2), parse_fixedeffect(data, ts1))
     end
 end
@@ -81,40 +97,71 @@ end
 
     # Any table type supporting the Tables.jl interface should work
     for data in [df, csvfile]
-        @test _eq(_parse_fixedeffect(data, fe(:State)&term(:Year)),
-            (FixedEffect(data.State, interaction = _multiply(data, [:Year])),
-                Symbol("fe_State&Year"), [:State]))
-        @test _eq(_parse_fixedeffect(data, fe(:State)&fe(:Year)),
+        @test _eq(
+            _parse_fixedeffect(data, fe(:State) & term(:Year)),
             (
-                FixedEffect(data.State, data.Year), Symbol("fe_State&fe_Year"), [
-                    :State, :Year]))
+                FixedEffect(data.State, interaction = _multiply(data, [:Year])),
+                Symbol("fe_State&Year"),
+                [:State]
+            )
+        )
+        @test _eq(
+            _parse_fixedeffect(data, fe(:State) & fe(:Year)),
+            (
+                FixedEffect(data.State, data.Year),
+                Symbol("fe_State&fe_Year"),
+                [:State, :Year]
+            )
+        )
 
-        f = @formula(y ~ Price + fe(State)&Year)
+        f = @formula(y ~ Price + fe(State) & Year)
         ts1 = f.rhs
-        ts2 = term(:Price) + fe(:State)&term(:Year)
-        @test _eq(parse_fixedeffect(data, f),
-            ([FixedEffect(data.State, interaction = _multiply(data, [:Year]))],
-                [Symbol("fe_State&Year")], [:State]))
-        @test _eq(parse_fixedeffect(data, ts1),
-            ([FixedEffect(data.State, interaction = _multiply(data, [:Year]))],
-                [Symbol("fe_State&Year")], [:State]))
+        ts2 = term(:Price) + fe(:State) & term(:Year)
+        @test _eq(
+            parse_fixedeffect(data, f),
+            (
+                [FixedEffect(data.State, interaction = _multiply(data, [:Year]))],
+                [Symbol("fe_State&Year")],
+                [:State]
+            )
+        )
+        @test _eq(
+            parse_fixedeffect(data, ts1),
+            (
+                [FixedEffect(data.State, interaction = _multiply(data, [:Year]))],
+                [Symbol("fe_State&Year")],
+                [:State]
+            )
+        )
         @test _eq(parse_fixedeffect(data, ts2), parse_fixedeffect(data, ts1))
 
-        f = @formula(y ~ Price + fe(State)*fe(Year))
+        f = @formula(y ~ Price + fe(State) * fe(Year))
         ts1 = f.rhs
-        ts2 = term(:Price) + fe(:State) + fe(:Year) + fe(:State)&fe(:Year)
-        @test _eq(parse_fixedeffect(data, f),
+        ts2 = term(:Price) + fe(:State) + fe(:Year) + fe(:State) & fe(:Year)
+        @test _eq(
+            parse_fixedeffect(data, f),
             (
                 [
-                    FixedEffect(data.State), FixedEffect(data.Year), FixedEffect(data.State, data.Year)],
+                    FixedEffect(data.State),
+                    FixedEffect(data.Year),
+                    FixedEffect(data.State, data.Year)
+                ],
                 [:fe_State, :fe_Year, Symbol("fe_State&fe_Year")],
-                [:State, :Year]))
-        @test _eq(parse_fixedeffect(data, ts1),
+                [:State, :Year]
+            )
+        )
+        @test _eq(
+            parse_fixedeffect(data, ts1),
             (
                 [
-                    FixedEffect(data.State), FixedEffect(data.Year), FixedEffect(data.State, data.Year)],
+                    FixedEffect(data.State),
+                    FixedEffect(data.Year),
+                    FixedEffect(data.State, data.Year)
+                ],
                 [:fe_State, :fe_Year, Symbol("fe_State&fe_Year")],
-                [:State, :Year]))
+                [:State, :Year]
+            )
+        )
         @test _eq(parse_fixedeffect(data, ts2), parse_fixedeffect(data, ts1))
     end
 end
@@ -161,10 +208,7 @@ end
     nlags = 3
     # Valid rows: nlags+1 to n (rows where all lags are available)
     valid = (nlags + 1):n
-    X_manual = hcat(ones(length(valid)),
-        x[valid .- 1],
-        x[valid .- 2],
-        x[valid .- 3])
+    X_manual = hcat(ones(length(valid)), x[valid .- 1], x[valid .- 2], x[valid .- 3])
     beta_manual = X_manual \ y[valid]
 
     m = Regress.ols(df, @formula(y ~ lags(x, 3)))
@@ -177,10 +221,7 @@ end
     df2 = DataFrame(w = w, ypos = ypos)
 
     logy = log.(ypos)
-    X_manual2 = hcat(ones(length(valid)),
-        logy[valid .- 1],
-        logy[valid .- 2],
-        logy[valid .- 3])
+    X_manual2 = hcat(ones(length(valid)), logy[valid .- 1], logy[valid .- 2], logy[valid .- 3])
     beta_manual2 = X_manual2 \ w[valid]
 
     m2 = Regress.ols(df2, @formula(w ~ lags(log(ypos), 3)))
@@ -202,10 +243,7 @@ end
 
     # Verify against manual
     valid2 = 3:n
-    X_manual3 = hcat(ones(length(valid2)),
-        z[valid2],
-        x[valid2 .- 1],
-        x[valid2 .- 2])
+    X_manual3 = hcat(ones(length(valid2)), z[valid2], x[valid2 .- 1], x[valid2 .- 2])
     beta_manual3 = X_manual3 \ y[valid2]
     @test coef(m3) ≈ beta_manual3
 
@@ -218,11 +256,13 @@ end
 
     logabsx = log.(abs.(xpos))
     valid5 = (nlags + 1):n
-    X_manual5 = hcat(ones(length(valid5)),
+    X_manual5 = hcat(
+        ones(length(valid5)),
         logabsx[valid5 .- 1],
         logabsx[valid5 .- 2],
         logabsx[valid5 .- 3],
-        log.(xpos[valid5]))
+        log.(xpos[valid5])
+    )
     beta_manual5 = X_manual5 \ y[valid5]
     @test coef(m5) ≈ beta_manual5
 
@@ -299,4 +339,44 @@ end
     @test all(!isnan, res_full[m6.esample])
     @test all(isnan, res_full[.!m6.esample])
     @test length(residuals(m6)) == sum(m6.esample)
+end
+
+@testitem "lags - dynamic lag count from variable" tags = [:formula, :lags] begin
+    using DataFrames
+    using Regress
+    using StableRNGs
+
+    # GitHub issue #12: `lags(r, j)` where `j` is bound at top level.
+    # `@formula` rewrites a free symbol into a `Term`, so the count is
+    # resolved by evaluating the original expression in `Main`.
+    Core.eval(Main, :(using DataFrames, Regress, StableRNGs))
+    Core.eval(Main, quote
+        rng_top = StableRNG(2026)
+        df_top = DataFrame(r = randn(rng_top, 60))
+        j_top = 3
+        m_var = Regress.ols(df_top, @formula(r ~ Regress.lags(r, j_top)))
+    end)
+    @test length(Core.eval(Main, :(coef(m_var)))) == 4
+
+    Core.eval(
+        Main,
+        quote
+            results = Int[]
+            for k in (2, 4, 6)
+                global j_top = k
+                m_loop = Regress.ols(df_top, @formula(r ~ Regress.lags(r, j_top)))
+                push!(results, length(coef(m_loop)) - 1)
+            end
+        end
+    )
+    @test Core.eval(Main, :results) == [2, 4, 6]
+
+    Core.eval(
+        Main,
+        quote
+            maxlag_top = 4
+            m_arith = Regress.ols(df_top, @formula(r ~ Regress.lags(r, maxlag_top + 1)))
+        end
+    )
+    @test length(Core.eval(Main, :(coef(m_arith)))) == 6
 end
