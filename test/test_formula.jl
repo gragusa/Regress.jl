@@ -350,7 +350,6 @@ end
     # `@formula` rewrites a free symbol into a `Term`, so the count is
     # resolved by evaluating the original expression in `Main`.
     Core.eval(Main, :(using DataFrames, Regress, StableRNGs))
-    Core.eval(Main, :(using StatsModels: @formula))
     Core.eval(Main, quote
         rng_top = StableRNG(2026)
         df_top = DataFrame(r = randn(rng_top, 60))
