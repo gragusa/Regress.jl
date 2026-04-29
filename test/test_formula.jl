@@ -345,7 +345,6 @@ end
     using DataFrames
     using Regress
     using StableRNGs
-    using StatsModels: term
 
     rng = StableRNG(2026)
     df = DataFrame(r = randn(rng, 60))
