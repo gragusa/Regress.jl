@@ -319,16 +319,16 @@ end
 Create multiple lag columns from 1 to n. Used in formulas like
 `@formula(y ~ lags(x, 5))` to create a matrix with lag(x,1), ..., lag(x,5).
 
-The lag count `n` may be supplied as an integer literal or as a binding
-defined at top level (`Main`), e.g.
+Inside `@formula`, the second argument must be an integer literal —
+`@formula` rewrites free symbols as `Term` nodes representing data
+columns, so `lags(x, j)` cannot pick up `j` from the surrounding scope.
+To use a dynamic lag count (e.g. inside a loop), build the formula
+programmatically:
 
-    j = 3
-    ols(df, @formula(y ~ lags(x, j)))      # uses j == 3
-    ols(df, @formula(y ~ lags(x, j + 1)))  # uses 4
-
-Bindings defined inside a `let`/function scope are not visible to the
-formula machinery; assign them at top level (or interpolate via a wrapper
-that constructs the term directly with `term(:x)`) when looping.
+    for j in 1:4
+        f = term(:y) ~ term(1) + lags(term(:x), j)
+        ols(df, f)
+    end
 """
 lags(t::T, n::Int) where {T <: AbstractTerm} = LagTerm{T}(t, n)
 
@@ -351,38 +351,15 @@ function _parse_lags_args(t::FunctionTerm)
         if param_arg isa ConstantTerm
             return (term, param_arg.n)
         else
-            # The user passed something that `@formula` did not fold into a
-            # constant — e.g., `lags(x, j)` or `lags(x, j+1)` where `j` is
-            # bound in the calling scope. `@formula` rewrites such symbols
-            # into `Term`/`FunctionTerm` nodes, so resolve the original
-            # expression captured in `exorig` against `Main`.
-            n = _resolve_lag_count(t, param_arg)
-            return (term, n)
+            throw(ArgumentError(
+                "lags() inside @formula requires an integer literal as the " *
+                "second argument; got `$(t.exorig)`. To use a dynamic lag " *
+                "count, build the formula programmatically, e.g. " *
+                "`term(:y) ~ term(1) + lags(term(:x), j)`."))
         end
     else
         throw(ArgumentError("lags() requires 1 or 2 arguments"))
     end
-end
-
-function _resolve_lag_count(t::FunctionTerm, param)
-    expr = t.exorig
-    if !(expr isa Expr && expr.head === :call && length(expr.args) >= 3)
-        throw(ArgumentError(
-            "lags parameter must be a number or evaluate to one; got $(param)"))
-    end
-    arg_expr = expr.args[3]
-    val = try
-        Base.eval(Main, arg_expr)
-    catch err
-        throw(ArgumentError(
-            "lags() second argument `$(arg_expr)` could not be resolved " *
-            "from Main: $(sprint(showerror, err)). Pass an integer literal " *
-            "or define the variable at top level."))
-    end
-    val isa Integer ||
-        throw(ArgumentError("lags() second argument must evaluate to an " *
-                            "integer; got $(typeof(val))"))
-    return Int(val)
 end
 
 function _termvars_lags(t::FunctionTerm)
