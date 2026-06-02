@@ -79,9 +79,10 @@ function main()
         "BLAS Threads" => BLAS.get_num_threads(),
         "MKL Active" => is_mkl,
         "R fixest Threads" => nthreads,
-        "Description" => is_mkl ?
-                         "Using Intel MKL for optimized BLAS operations" :
-                         "MKL not available - using default BLAS"
+        "Description" =>
+            is_mkl ?
+            "Using Intel MKL for optimized BLAS operations" :
+            "MKL not available - using default BLAS"
     )
 
     md_content = generate_markdown_header(BENCHMARK_NAME, config)
