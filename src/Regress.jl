@@ -6,6 +6,8 @@ using CovarianceMatrices: CovarianceMatrices, AbstractAsymptoticVarianceEstimato
                           CR0, CR1, CR2, CR3,
                           Bartlett, Parzen, QuadraticSpectral, TukeyHanning, Truncated,
                           Information, Misspecified, Uncorrelated, VcovSpec
+using StatsFuns
+using Distributions
 using DataFrames: DataFrames, AsTable, DataFrame, Not, combine, completecases,
                   disallowmissing, disallowmissing!, dropmissing, leftjoin,
                   nrow, select
@@ -26,7 +28,6 @@ using StatsAPI: StatsAPI, adjr2, coef, coefnames, coeftable, confint, deviance,
                 r2, residuals, response, responsename, rss, stderror, vcov, weights
 using StatsBase: StatsBase, AbstractWeights, CoefTable, UnitWeights, Weights,
                  mean, uweights
-using StatsFuns: StatsFuns, chisqccdf, fdistccdf, tdistccdf, tdistinvcdf
 @reexport using StatsModels
 using StatsModels: StatsModels, @formula, AbstractTerm, ConstantTerm,
                    FormulaTerm, FunctionTerm, InteractionTerm, InterceptTerm,
@@ -79,8 +80,13 @@ include("fit_ols.jl")     # OLS implementation
 include("fit.jl")         # Just thin wrappers now
 include("partial_out.jl")
 
+
+#probit
+include("BinaryModel.jl")
+include("fit_probit.jl")
+
 # Main estimation functions
-public ols, iv, fe
+public ols, iv, fe, probit
 
 # Model types
 # export OLSEstimator, OLSMatrixEstimator, IVEstimator, IVMatrixEstimator
@@ -112,6 +118,8 @@ export WuHausmanResult, SarganResult
 
 # Utility functions
 # export partial_out
+#
+export fit_probit, BinaryEstimator
 
 # Re-export StatsAPI functions for user convenience
 export coef, coefnames, coeftable, confint, stderror, vcov

@@ -552,3 +552,14 @@ function iv(::TSLS, Z::AbstractMatrix{<:Real}, X::AbstractMatrix{<:Real},
         p_values
     )
 end
+
+"""
+    probit(df, formula; kwargs...) -> BinaryEstimator
+
+Estimate a Probit model, optionally with fixed effects.
+"""
+function probit(@nospecialize(df), formula::FormulaTerm;
+                beta0=nothing, max_iter=100, tolerance=1e-6)
+                
+    return fit_probit(df, formula, beta0, max_iter, tolerance)
+end

@@ -505,7 +505,9 @@ function partial_out_fixed_effects!(cols::Vector,
         save_fes::Bool,
         has_intercept::Bool,
         has_fe_intercept::Bool,
-        T::Type)
+        T::Type,
+        verbose = true ::Bool
+        )
 
     # Initialize return values
     iterations, converged = 0, true
@@ -546,9 +548,9 @@ function partial_out_fixed_effects!(cols::Vector,
         for i in 1:length(cols)
             if sum(abs2, cols[i]) < tol * sumsquares_pre[i]
                 if i == 1
-                    @info "Dependent variable $(colnames[1]) is probably perfectly explained by fixed effects."
+                    verbose && @info "Dependent variable $(colnames[1]) is probably perfectly explained by fixed effects."
                 else
-                    @info "RHS-variable $(colnames[i]) is collinear with the fixed effects."
+                    verbose && @info "RHS-variable $(colnames[i]) is collinear with the fixed effects."
                     cols[i] .= zero(T)
                 end
             end
