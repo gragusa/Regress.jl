@@ -150,7 +150,7 @@ function prepare_data(df::DataFrame,
     end
     if subset !== nothing
         if length(subset) != nrows
-            throw("df has $(nrows) rows but the subset vector has $(length(subset)) elements")
+            throw(ArgumentError("df has $(nrows) rows but the subset vector has $(length(subset)) elements"))
         end
         esample .&= BitArray(!ismissing(x) && x for x in subset)
     end
@@ -162,7 +162,7 @@ function prepare_data(df::DataFrame,
     end
 
     nobs = sum(esample)
-    (nobs > 0) || throw("sample is empty")
+    (nobs > 0) || throw(ArgumentError("sample is empty"))
     (nobs < nrows) || (esample = Colon())
 
     return (formula = formula,

@@ -1638,7 +1638,7 @@ function StatsAPI.residuals(m::IVEstimator, data)
     Tables.istable(data) ||
         throw(ArgumentError("expected second argument to be a Table, got $(typeof(data))"))
     has_fe(m) &&
-        throw("To access residuals for a model with high-dimensional fixed effects,  run `m = iv(..., save = :residuals)` and then access residuals with `residuals(m)`.")
+        throw(ArgumentError("To access residuals for a model with high-dimensional fixed effects,  run `m = iv(..., save = :residuals)` and then access residuals with `residuals(m)`."))
     cdata = Tables.columntable(data)
     cols, nonmissings = StatsModels.missing_omit(cdata, m.formula_schema.rhs)
     Xnew = modelmatrix(m.formula_schema, cols)
@@ -1664,9 +1664,9 @@ end
 function StatsAPI.residuals(m::IVEstimator{T}) where {T}
     if !has_residuals_data(m)
         has_fe(m) &&
-            throw("To access residuals in a fixed effect regression, run `iv` with the option save = :residuals, and then access residuals with `residuals()`")
+            throw(ArgumentError("To access residuals in a fixed effect regression, run `iv` with the option save = :residuals, and then access residuals with `residuals()`"))
         !has_fe(m) &&
-            throw("To access residuals, use residuals(m, data) where `m` is an estimated IVEstimator and `data` is a Table")
+            throw(ArgumentError("To access residuals, use residuals(m, data) where `m` is an estimated IVEstimator and `data` is a Table"))
     end
     # Reconstruct full-length residuals with missings for non-esample rows
     n = length(m.esample)
@@ -1681,7 +1681,8 @@ end
 Return a DataFrame with fixed effects estimates.
 """
 function fe(m::IVEstimator; keepkeys = false)
-    !has_fe(m) && throw("fe() is not defined for models without fixed effects")
+    !has_fe(m) &&
+        throw(ArgumentError("fe() is not defined for models without fixed effects"))
     if keepkeys
         m.fe
     else

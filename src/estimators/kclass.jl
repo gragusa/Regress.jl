@@ -125,14 +125,15 @@ function fit_kclass_estimator(
     tss_total = tss(y, data_prep.has_intercept | data_prep.has_fe_intercept, wts)
 
     # Validate finite values
-    all(isfinite, wts) || throw("Weights are not finite")
-    all(isfinite, y) || throw("Some observations for the dependent variable are infinite")
+    all(isfinite, wts) || throw(ArgumentError("Weights are not finite"))
+    all(isfinite, y) ||
+        throw(ArgumentError("Some observations for the dependent variable are infinite"))
     all(isfinite, Xexo) ||
-        throw("Some observations for the exogenous variables are infinite")
+        throw(ArgumentError("Some observations for the exogenous variables are infinite"))
     all(isfinite, Xendo) ||
-        throw("Some observations for the endogenous variables are infinite")
+        throw(ArgumentError("Some observations for the endogenous variables are infinite"))
     all(isfinite, Z) ||
-        throw("Some observations for the instrumental variables are infinite")
+        throw(ArgumentError("Some observations for the instrumental variables are infinite"))
 
     ##############################################################################
     ## Partial Out Fixed Effects
@@ -197,7 +198,7 @@ function fit_kclass_estimator(
 
     # Check identification
     size(ZXendo, 1) >= size(ZXendo, 2) ||
-        throw("Model not identified. There must be at least as many instruments as endogenous variables")
+        throw(ArgumentError("Model not identified. There must be at least as many instruments as endogenous variables"))
 
     ##############################################################################
     ## Compute K-class Kappa

@@ -419,7 +419,7 @@ function StatsAPI.residuals(m::OLSEstimator{T}, data) where {T}
     Tables.istable(data) ||
         throw(ArgumentError("expected second argument to be a Table, got $(typeof(data))"))
     has_fe(m) &&
-        throw("To access residuals for a model with high-dimensional fixed effects, access them directly with `residuals(m)`.")
+        throw(ArgumentError("To access residuals for a model with high-dimensional fixed effects, access them directly with `residuals(m)`."))
 
     cdata = Tables.columntable(data)
     cols, nonmissings = StatsModels.missing_omit(cdata, m.formula_schema.rhs)
@@ -455,7 +455,8 @@ The output is aligned with the original DataFrame used in `ols`.
 * `keepkeys::Bool` : Should the returned DataFrame include the original variables used to define groups? Default to false
 """
 function fe(m::OLSEstimator; keepkeys = false)
-    !has_fe(m) && throw("fe() is not defined for models without fixed effects")
+    !has_fe(m) &&
+        throw(ArgumentError("fe() is not defined for models without fixed effects"))
     if keepkeys
         m.fes.fe
     else
