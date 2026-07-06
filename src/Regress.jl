@@ -81,20 +81,20 @@ include("fit.jl")         # Just thin wrappers now
 include("partial_out.jl")
 
 # Main estimation functions
-public ols, iv, fe
+public ols, iv, fe, partial_out
 
-# Model types
-# export OLSEstimator, OLSMatrixEstimator, IVEstimator, IVMatrixEstimator
-
-# VcovSpec for model + vcov() syntax
-# export VcovSpec
+# Model types, the matrix-API integration surface, and the IV estimator supertype.
+# `VcovSpec` is CovarianceMatrices' and already re-exported above.
+public OLSEstimator, IVEstimator, OLSMatrixEstimator, IVMatrixEstimator
+public AbstractIVEstimator
+public esample, bread
 
 # IV Estimators
-# export AbstractIVEstimator
 export TSLS, LIML, Fuller, KClass
 
 # Formula terms
-export lags, LagTerm
+export lags
+public LagTerm
 
 # First-stage diagnostics (new API)
 export AbstractTest, FirstStageFTest, Homoskedastic
@@ -110,9 +110,6 @@ export weakivtest, WeakIVTestResult
 # IV diagnostic tests
 export wu_hausman, sargan
 export WuHausmanResult, SarganResult
-
-# Utility functions
-# export partial_out
 
 # Re-export StatsAPI functions for user convenience
 export coef, coefnames, coeftable, confint, stderror, vcov

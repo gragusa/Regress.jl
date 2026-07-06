@@ -865,3 +865,25 @@ end
     x = Regress.ols(df1, @formula(a ~ b + fe(c)))
     @test coef(x) ≈ [0.5] atol = 1e-4
 end
+
+@testitem "Public API visibility" tags = [:api] begin
+    using Regress
+
+    # Documented types and the matrix-API integration surface are reachable as
+    # Regress.Name (public) but not dumped into scope by `using Regress`.
+    for s in (:OLSEstimator, :IVEstimator, :OLSMatrixEstimator, :IVMatrixEstimator,
+        :AbstractIVEstimator, :esample, :bread, :partial_out, :LagTerm)
+        @test Base.ispublic(Regress, s)
+        @test !Base.isexported(Regress, s)
+    end
+
+    # Entry-point verbs stay public-not-exported; estimator constructors and the
+    # `lags` term stay exported.
+    for s in (:ols, :iv, :fe)
+        @test Base.ispublic(Regress, s)
+        @test !Base.isexported(Regress, s)
+    end
+    for s in (:TSLS, :LIML, :Fuller, :KClass, :lags)
+        @test Base.isexported(Regress, s)
+    end
+end
