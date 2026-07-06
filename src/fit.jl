@@ -428,7 +428,7 @@ model_robust = model + vcov(HC1())
 
 See also: [`iv(::TSLS, df, formula)`](@ref), [`IVMatrixEstimator`](@ref)
 """
-function iv(::TSLS, Z::AbstractMatrix{<:Real}, X::AbstractMatrix{<:Real},
+function iv(estimator::TSLS, Z::AbstractMatrix{<:Real}, X::AbstractMatrix{<:Real},
         y::AbstractVector{<:Real};
         has_intercept::Bool = true,
         n_endogenous::Int = 1)
@@ -534,7 +534,8 @@ function iv(::TSLS, Z::AbstractMatrix{<:Real}, X::AbstractMatrix{<:Real},
     t_stats = beta ./ se
     p_values = 2 .* tdistccdf.(dof_res, abs.(t_stats))
 
-    return IVMatrixEstimator{T, typeof(default_vcov)}(
+    return IVMatrixEstimator{T, typeof(estimator), typeof(default_vcov)}(
+        estimator,
         beta,
         postestimation,
         basis_coef,
@@ -551,4 +552,150 @@ function iv(::TSLS, Z::AbstractMatrix{<:Real}, X::AbstractMatrix{<:Real},
         t_stats,
         p_values
     )
+end
+
+"""
+    iv(estimator::Union{LIML, Fuller, KClass},
+       Z::AbstractMatrix, X::AbstractMatrix, y::AbstractVector;
+       has_intercept::Bool=true, n_endogenous::Int=1) -> IVMatrixEstimator
+
+Estimate an IV model with a k-class estimator from matrix inputs, mirroring
+[`iv(::TSLS, Z, X, y)`](@ref). `LIML` computes its k-class parameter from the
+generalized eigenvalue problem, `Fuller` applies the finite-sample bias
+correction to the LIML value, and `KClass` uses the supplied parameter directly.
+
+See [`iv(::TSLS, Z, X, y)`](@ref) for the matrix layout: `X = [Xexo, Xendo]` with
+the last `n_endogenous` columns endogenous, and `Z = [Xexo, Zinstr]` sharing the
+exogenous block.
+
+# Example
+```julia
+model = iv(LIML(), Z, X, y; has_intercept=false, n_endogenous=1)
+coef(model)
+model_robust = model + vcov(HC1())
+```
+"""
+function iv(estimator::Union{LIML, Fuller, KClass},
+        Z::AbstractMatrix{<:Real}, X::AbstractMatrix{<:Real},
+        y::AbstractVector{<:Real};
+        has_intercept::Bool = true,
+        n_endogenous::Int = 1)
+    return _iv_matrix_kclass(estimator, Z, X, y; has_intercept, n_endogenous)
+end
+
+# Shared implementation for the k-class matrix estimators (LIML, Fuller, KClass).
+# The combined inputs are split back into the (Xexo, Xendo, Zexcl) components the
+# core k-class solver expects, and the k-class adjustment matrix `Adj` and bread
+# `invA` are stored in the `X_hat`/`invXhatXhat` slots so the shared
+# IVMatrixEstimator vcov machinery applies unchanged — at kappa=1 these coincide
+# with the TSLS projection quantities.
+function _iv_matrix_kclass(estimator::AbstractIVEstimator,
+        Z::AbstractMatrix{<:Real}, X::AbstractMatrix{<:Real},
+        y::AbstractVector{<:Real};
+        has_intercept::Bool,
+        n_endogenous::Int)
+    n = length(y)
+    size(X, 1) == n ||
+        throw(DimensionMismatch("X has $(size(X,1)) rows but y has $n elements"))
+    size(Z, 1) == n ||
+        throw(DimensionMismatch("Z has $(size(Z,1)) rows but y has $n elements"))
+    n_endogenous >= 0 || throw(ArgumentError("n_endogenous must be non-negative"))
+    n_endogenous <= size(X, 2) ||
+        throw(ArgumentError("n_endogenous ($n_endogenous) > number of X columns ($(size(X,2)))"))
+
+    k_x = size(X, 2)
+    k_z = size(Z, 2)
+    k_exo = k_x - n_endogenous
+    k_instr = k_z - k_exo  # Excluded instruments
+    k_instr >= n_endogenous || throw(ArgumentError(
+        "Not enough instruments: $k_instr excluded instruments < $n_endogenous endogenous variables"))
+
+    T = promote_type(eltype(X), eltype(Z), eltype(y))
+    T <: AbstractFloat || (T = Float64)
+    X_mat = convert(Matrix{T}, X)
+    y_vec = convert(Vector{T}, y)
+
+    # Split combined inputs into components: X = [Xexo, Xendo], Z = [Xexo, Zexcl]
+    Xexo = X_mat[:, 1:k_exo]
+    Xendo = X_mat[:, (k_exo + 1):k_x]
+    Zexcl = convert(Matrix{T}, Z)[:, (k_exo + 1):k_z]
+
+    kappa = _matrix_kclass_kappa(estimator, y_vec, Xendo, Zexcl, Xexo, n, k_z, k_exo)
+    if kappa < one(T)
+        @warn "K-class kappa < 1 ($kappa), model may be poorly identified"
+    end
+
+    coef_kc, residuals, invA, Adj = _kclass_fit(y_vec, Xendo, Zexcl, Xexo, kappa)
+
+    # _kclass_fit orders regressors [endo, exo]; reorder to the combined convention
+    # [exo, endo] so coef and the vcov carriers align with the stored X and Z.
+    reorder = vcat((n_endogenous + 1):k_x, 1:n_endogenous)
+    beta = coef_kc[reorder]
+    invA_reordered = Symmetric(invA[reorder, reorder])
+    Adj_reordered = Adj[:, reorder]
+
+    basis_coef = trues(k_x)
+    dof_model = k_x
+    dof_res = max(1, n - dof_model)
+
+    rss = sum(abs2, residuals)
+    ymean = mean(y_vec)
+    tss = has_intercept ? sum(abs2, y_vec .- ymean) : sum(abs2, y_vec)
+    r2_val = 1 - rss / tss
+
+    postestimation = PostEstimationDataIVMatrix{T}(
+        X_mat, convert(Matrix{T}, Z), Matrix{T}(Adj_reordered), y_vec, residuals,
+        Matrix{T}(invA_reordered), n_endogenous
+    )
+
+    default_vcov = CovarianceMatrices.HC1()
+
+    scale_hc1 = T(n) / T(dof_res)
+    M = Adj_reordered .* residuals
+    meat = M' * M
+    vcov_matrix = Symmetric(scale_hc1 .* invA_reordered * meat * invA_reordered)
+
+    se = sqrt.(diag(vcov_matrix))
+    t_stats = beta ./ se
+    p_values = 2 .* tdistccdf.(dof_res, abs.(t_stats))
+
+    return IVMatrixEstimator{T, typeof(estimator), typeof(default_vcov)}(
+        estimator,
+        beta,
+        postestimation,
+        basis_coef,
+        n,
+        dof_model,
+        dof_res,
+        T(rss),
+        T(tss),
+        T(r2_val),
+        has_intercept,
+        default_vcov,
+        vcov_matrix,
+        se,
+        t_stats,
+        p_values
+    )
+end
+
+# k-class parameter for the matrix path, matching the formula-path selection.
+function _matrix_kclass_kappa(estimator::LIML, y, Xendo, Zexcl, Xexo, n, k_z, k_exo)
+    return _liml_kappa(y, Xendo, Zexcl, Xexo)
+end
+
+function _matrix_kclass_kappa(
+        estimator::Fuller, y::AbstractVector{T}, Xendo, Zexcl, Xexo, n, k_z, k_exo) where {T}
+    kappa_liml = _liml_kappa(y, Xendo, Zexcl, Xexo)
+    L = k_z - k_exo  # Excluded instruments
+    p = k_exo
+    adj_denom = n - L - p
+    adj_denom > 0 ||
+        throw(ArgumentError("Fuller adjustment undefined: n - L - p = $adj_denom <= 0"))
+    return kappa_liml - T(estimator.a) / adj_denom
+end
+
+function _matrix_kclass_kappa(
+        estimator::KClass, y::AbstractVector{T}, Xendo, Zexcl, Xexo, n, k_z, k_exo) where {T}
+    return T(estimator.kappa)
 end
