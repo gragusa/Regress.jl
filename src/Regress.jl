@@ -23,7 +23,8 @@ using Statistics: Statistics
 using StatsAPI: StatsAPI, adjr2, coef, coefnames, coeftable, confint, deviance,
                 dof, dof_residual, fitted, islinear, leverage, loglikelihood,
                 modelmatrix, nobs, nulldeviance, nullloglikelihood, predict,
-                r2, residuals, response, responsename, rss, stderror, vcov, weights
+                pvalue, r2, residuals, response, responsename, rss, stderror,
+                vcov, weights
 using StatsBase: StatsBase, AbstractWeights, CoefTable, UnitWeights, Weights,
                  mean, uweights
 using StatsFuns: StatsFuns, chisqccdf, fdistccdf, tdistccdf, tdistinvcdf
@@ -115,7 +116,7 @@ export WuHausmanResult, SarganResult
 
 # Re-export StatsAPI functions for user convenience
 export coef, coefnames, coeftable, confint, stderror, vcov
-export nobs, dof, dof_residual
+export nobs, dof, dof_residual, pvalue
 export r2, adjr2, deviance, nulldeviance, loglikelihood, nullloglikelihood, rss
 export residuals, fitted, response, predict, modelmatrix, weights
 export islinear, responsename, leverage
