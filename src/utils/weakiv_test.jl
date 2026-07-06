@@ -21,7 +21,7 @@
 ##
 ##############################################################################
 
-using LinearAlgebra: tr, eigvals, Symmetric, qr, inv, cholesky, diag, dot
+using LinearAlgebra: tr, eigvals, Symmetric, qr, cholesky, diag, dot
 using StatsFuns: nchisqcdf
 
 ##############################################################################

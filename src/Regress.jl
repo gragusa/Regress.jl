@@ -13,8 +13,8 @@ using FixedEffects: FixedEffects, AbstractFixedEffectSolver, FixedEffect,
                     solve_coefficients!, solve_residuals!
 using LinearAlgebra: LinearAlgebra, BLAS, Cholesky, ColumnNorm, Hermitian, I,
                      Symmetric, UpperTriangular, cholesky, cholesky!, diag,
-                     diagm, dot, eigvals, issuccess, ldiv!, mul!, qr, rank,
-                     rmul!, svd, tr
+                     diagm, dot, eigvals, issuccess, ldiv!, mul!, pinv, qr,
+                     rank, rmul!, svd, tr
 using PrecompileTools: PrecompileTools, @compile_workload
 using Printf: Printf, @printf, @sprintf
 using Reexport: Reexport, @reexport

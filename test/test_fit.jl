@@ -32,7 +32,10 @@ end
     m = @formula Sales ~ Price + fe(State)
     x = Regress.ols(df, m)
     @test coef(x) ≈ [-0.20984] atol = 1e-4
-    @test x.iterations == 1
+    # A single FE demeans exactly; FixedEffects reports 0 or 1 iterations
+    # depending on whether it takes the direct single-FE path.
+    @test x.iterations <= 1
+    @test x.converged
 
     m = @formula Sales ~ Price + fe(State) + fe(Year)
     x = Regress.ols(df, m)

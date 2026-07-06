@@ -783,6 +783,13 @@ function StatsBase.vcov(ve::CovarianceMatrices.AbstractAsymptoticVarianceEstimat
     return Symmetric(Σ)
 end
 
+# DriscollKraay matches both the generic method above and CovarianceMatrices'
+# vcov(::DriscollKraay, ::RegressionModel); the implementation above must win.
+function StatsBase.vcov(ve::_CM.DriscollKraay, m::IVEstimator{T}) where {T}
+    invoke(StatsBase.vcov, Tuple{_CM.AbstractAsymptoticVarianceEstimator, IVEstimator{T}},
+        ve, m)
+end
+
 """
     _cluster_robust_scale_iv(k::_CM.CR, m::IVEstimator, n::Int)
 
@@ -1993,6 +2000,13 @@ function StatsBase.vcov(ve::CovarianceMatrices.AbstractAsymptoticVarianceEstimat
 
     Σ = scale .* B * A * B
     return Symmetric(Σ)
+end
+
+# DriscollKraay matches both the generic method above and CovarianceMatrices'
+# vcov(::DriscollKraay, ::RegressionModel); the implementation above must win.
+function StatsBase.vcov(ve::_CM.DriscollKraay, m::IVMatrixEstimator{T}) where {T}
+    invoke(StatsBase.vcov,
+        Tuple{_CM.AbstractAsymptoticVarianceEstimator, IVMatrixEstimator{T}}, ve, m)
 end
 
 function StatsBase.stderror(ve::CovarianceMatrices.AbstractAsymptoticVarianceEstimator,

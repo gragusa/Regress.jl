@@ -25,8 +25,8 @@ Fields:
 mutable struct OLSPredictorChol{T <: AbstractFloat} <: OLSLinearPredictor{T}
     X::Matrix{T}                            # Full model matrix (empty if save=:minimal)
     X_reduced::Matrix{T}                    # Non-collinear columns only (empty if save=:minimal)
-    beta::Vector{T}                         # Coefficient estimates (full, with NaN)
-    chol::Cholesky{T, Matrix{T}}            # Cholesky factorization of X_reduced'X_reduced
+    const beta::Vector{T}                   # Coefficient estimates (full, with NaN)
+    const chol::Cholesky{T, Matrix{T}}      # Cholesky factorization of X_reduced'X_reduced
 end
 
 """
@@ -44,8 +44,8 @@ Fields:
 mutable struct OLSPredictorQR{T <: AbstractFloat} <: OLSLinearPredictor{T}
     X::Matrix{T}                            # Full model matrix (empty if save=:minimal)
     X_reduced::Matrix{T}                    # Non-collinear columns only (empty if save=:minimal)
-    beta::Vector{T}                         # Coefficient estimates (full, with NaN)
-    qr::LinearAlgebra.QRCompactWY{T, Matrix{T}}   # QR factorization of X_reduced
+    const beta::Vector{T}                   # Coefficient estimates (full, with NaN)
+    const qr::LinearAlgebra.QRCompactWY{T, Matrix{T}}   # QR factorization of X_reduced
 end
 
 """
@@ -132,8 +132,8 @@ Fields:
 mutable struct OLSPredictorSweep{T <: AbstractFloat} <: OLSLinearPredictor{T}
     X::Matrix{T}                            # Full model matrix (empty if save=:minimal)
     X_reduced::Matrix{T}                    # Non-collinear columns only (empty if save=:minimal)
-    beta::Vector{T}                         # Coefficient estimates (full, with NaN for collinear)
-    invXX::Symmetric{T, Matrix{T}}          # (X'X)^(-1) for reduced columns
+    const beta::Vector{T}                   # Coefficient estimates (full, with NaN for collinear)
+    const invXX::Symmetric{T, Matrix{T}}    # (X'X)^(-1) for reduced columns
 end
 
 function clear_predictor_data!(pp::OLSPredictorSweep{T}) where {T}
