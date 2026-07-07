@@ -178,7 +178,7 @@ end
     using Regress
     using Regress.StableRNGs: StableRNG
     using DataFrames
-    using StatsBase: coef, vcov, stderror
+    using StatsBase: coef, vcov, stderror, leverage
     using CovarianceMatrices: HC0, HC1, HC2, HC3
 
     rng = StableRNG(42)
@@ -216,16 +216,16 @@ end
         @test stderror(mm_r) ≈ stderror(mf + Regress.vcov(HC3())) atol = 1e-8
     end
 
-    # TSLS matrix and formula paths agree on coefficients and the non-leverage HC
-    # variants. HC2/HC3 rely on IV leverage, which the two TSLS paths compute by
-    # different (unequal) formulas; see the k-class estimators above for full
-    # leverage parity.
+    # Over-identified TSLS: matrix and formula paths agree on coefficients and all
+    # HC variants, including the leverage-based HC2/HC3.
     mf_tsls = Regress.iv(Regress.TSLS(), df, f)
     mm_tsls = Regress.iv(Regress.TSLS(), Z, X, y; has_intercept = true, n_endogenous = 1)
     @test mm_tsls.estimator === Regress.TSLS()
     @test coef(mm_tsls) ≈ coef(mf_tsls) atol = 1e-8
-    @test vcov(HC0(), mm_tsls) ≈ vcov(HC0(), mf_tsls) atol = 1e-8
-    @test vcov(HC1(), mm_tsls) ≈ vcov(HC1(), mf_tsls) atol = 1e-8
+    @test leverage(mm_tsls) ≈ leverage(mf_tsls) atol = 1e-8
+    for hc in (HC0(), HC1(), HC2(), HC3())
+        @test vcov(hc, mm_tsls) ≈ vcov(hc, mf_tsls) atol = 1e-8
+    end
 end
 
 @testitem "Matrix k-class with multiple endogenous matches formula path" tags = [

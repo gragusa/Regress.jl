@@ -1903,7 +1903,12 @@ end
 """
     leverage(m::IVMatrixEstimator)
 
-Returns diagonal of hat matrix H = X̂(X̂'X̂)⁻¹X̂' for HC2/HC3/HC4/HC5.
+Diagonal of the IV hat matrix for HC2/HC3/HC4/HC5.
+
+For k-class estimators the `X_hat`/`invXhatXhat` slots hold the k-class
+adjustment matrix and its bread, so `diag(Adj·invA·Adj')` is the leverage. TSLS
+is specialized below to the AER formula, which for over-identified models does
+not coincide with `diag(X̂(X̂'X̂)⁻¹X̂')`.
 """
 function StatsAPI.leverage(m::IVMatrixEstimator)
     X_hat = m.postestimation.X_hat
@@ -1911,6 +1916,20 @@ function StatsAPI.leverage(m::IVMatrixEstimator)
     # h_ii = X̂_i' * (X̂'X̂)⁻¹ * X̂_i
     # Efficient computation: sum((X_hat * invXX) .* X_hat, dims=2)
     return vec(sum((X_hat * invXX) .* X_hat, dims = 2))
+end
+
+# TSLS leverage matches R's AER::ivreg / sandwich::vcovHC:
+#     h = diag(X · (X̂'X̂)⁻¹ · X' · Z · (Z'Z)⁻¹ · Z')
+# This is the same formula the formula-path `leverage(::IVEstimator)` uses. For
+# over-identified TSLS it differs from diag(X̂(X̂'X̂)⁻¹X̂'), so HC2/HC3 need it to
+# match the formula path.
+function StatsAPI.leverage(m::IVMatrixEstimator{T, TSLS}) where {T <: AbstractFloat}
+    X = m.postestimation.X
+    Z = m.postestimation.Z
+    invXhatXhat = m.postestimation.invXhatXhat
+    invZZ = inv(cholesky(Symmetric(Z' * Z)))
+    Pz = Z * (invZZ * Z')
+    return vec(sum((X * invXhatXhat) .* (Pz * X), dims = 2))
 end
 
 # CovarianceMatrices.jl uses numobs, which is distinct from StatsAPI.nobs
