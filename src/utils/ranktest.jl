@@ -385,8 +385,10 @@ function _compute_first_stage_fstats_via_ols(
             rr, pp, basis,
             n, dof_fs, dof_residual_fs,
             T(rss_j), T(tss_j), T(1 - rss_j / tss_j), true,
-            vcov_type, Symmetric(Matrix{T}(undef, k_total, k_total)),  # placeholder
-            Vector{T}(undef, k_total), Vector{T}(undef, k_total), Vector{T}(undef, k_total)
+            VcovStats(
+                vcov_type, Symmetric(Matrix{T}(undef, k_total, k_total)),  # placeholder
+                Vector{T}(undef, k_total), Vector{T}(undef, k_total), Vector{T}(undef, k_total)
+            )
         )
 
         # Use CovarianceMatrices to compute vcov — handles all HC/HAC/CR/EWC types

@@ -346,7 +346,7 @@ function fit_ols(@nospecialize(df),
         T(tss_total), T(tss_partial), T(rss),
         T(r2), T(r2_within),
         data_prep.has_intercept,
-        default_vcov, vcov_matrix, se, t_stats_val, p_values_val,
+        VcovStats(default_vcov, vcov_matrix, se, t_stats_val, p_values_val),
         T(F_stat_robust), T(p_val_robust)
     )
 end

@@ -260,7 +260,7 @@ function ols(X::AbstractMatrix{<:Real}, y::AbstractVector{<:Real};
         rr, pp, basis_coef,
         n, dof_model, dof_res,
         T(rss), T(tss), T(r2_val), has_intercept,
-        default_vcov, vcov_matrix, se, t_stats, p_values
+        VcovStats(default_vcov, vcov_matrix, se, t_stats, p_values)
     )
 end
 
@@ -546,11 +546,7 @@ function iv(estimator::TSLS, Z::AbstractMatrix{<:Real}, X::AbstractMatrix{<:Real
         T(tss),
         T(r2_val),
         has_intercept,
-        default_vcov,
-        vcov_matrix,
-        se,
-        t_stats,
-        p_values
+        VcovStats(default_vcov, vcov_matrix, se, t_stats, p_values)
     )
 end
 
@@ -671,11 +667,7 @@ function _iv_matrix_kclass(estimator::AbstractIVEstimator,
         T(tss),
         T(r2_val),
         has_intercept,
-        default_vcov,
-        vcov_matrix,
-        se,
-        t_stats,
-        p_values
+        VcovStats(default_vcov, vcov_matrix, se, t_stats, p_values)
     )
 end
 

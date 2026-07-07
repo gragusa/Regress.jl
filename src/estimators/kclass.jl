@@ -485,7 +485,7 @@ function fit_kclass_estimator(
         nobs_eff, dof_model, dof_fes, dof_residual,
         rss, tss_total,
         iterations, converged, r2_within,
-        default_vcov, vcov_matrix, se, t_stats, p_values,
+        VcovStats(default_vcov, vcov_matrix, se, t_stats, p_values),
         F_stat_robust, p_val_robust,
         F_first_stage_nonrobust, p_first_stage_nonrobust,
         F_first_stage_robust, p_first_stage_robust,

@@ -375,11 +375,7 @@ struct IVEstimator{
     r2_within::T      # within r2 (with fixed effect)
 
     # Variance-covariance estimator and precomputed statistics
-    vcov_estimator::V                        # Deep copy of the estimator
-    vcov_matrix::Symmetric{T, Matrix{T}}    # Precomputed vcov matrix
-    se::Vector{T}                            # Standard errors
-    t_stats::Vector{T}                       # t-statistics
-    p_values::Vector{T}                      # p-values
+    vstats::VcovStats{T, V}
 
     # Test statistics (computed with vcov_estimator)
     F::T                    # F-statistic (Wald test)
@@ -396,6 +392,15 @@ has_iv(::IVEstimator) = true
 has_fe(m::IVEstimator) = has_fe(m.formula)
 r2_within(m::IVEstimator) = m.r2_within
 model_hasintercept(m::IVEstimator) = hasintercept(m.formula)
+
+function Base.getproperty(m::IVEstimator, s::Symbol)
+    if s === :vcov_estimator || s === :vcov_matrix || s === :se ||
+       s === :t_stats || s === :p_values
+        return getfield(getfield(m, :vstats), s)
+    else
+        return getfield(m, s)
+    end
+end
 
 """
     has_residuals_data(m::IVEstimator) -> Bool
@@ -1174,19 +1179,11 @@ model_cr1 = model_cr + vcov(CR1(:firm))
 See also: [`VcovSpec`](@ref)
 """
 function Base.:+(m::IVEstimator{T, E, V1, P}, v::VcovSpec{V2}) where {T, E, V1, P, V2}
-    # Compute vcov matrix using StatsBase.vcov (which dispatches to IVModel.jl methods)
-    vcov_mat = StatsBase.vcov(v.source, m)
-
-    # Use shared helper for stats
-    se, t_stats, p_values, F_stat, p_val = _calculate_vcov_stats(m, vcov_mat)
+    vstats, F_stat, p_val = _respec_vstats(m, v.source)
 
     # Recompute robust first-stage F with this vcov type
     F_first_stage_robust, p_first_stage_robust = recompute_first_stage_fstat(m, v.source)
 
-    # Deep copy the vcov estimator to avoid aliasing
-    vcov_copy = deepcopy_vcov(v.source)
-
-    # Return new IVEstimator with same data but different vcov type
     return IVEstimator{T, E, V2, P}(
         m.estimator, m.coef,
         m.esample, m.residuals_esample, m.has_residuals, m.fe,
@@ -1196,7 +1193,7 @@ function Base.:+(m::IVEstimator{T, E, V1, P}, v::VcovSpec{V2}) where {T, E, V1, 
         m.nobs, m.dof, m.dof_fes, m.dof_residual,
         m.rss, m.tss,
         m.iterations, m.converged, m.r2_within,
-        vcov_copy, Symmetric(vcov_mat), se, t_stats, p_values,
+        vstats,
         F_stat, p_val,
         m.F_first_stage_nonrobust, m.p_first_stage_nonrobust,
         F_first_stage_robust, p_first_stage_robust,
@@ -1792,11 +1789,9 @@ Designed for programmatic use (e.g., LocalProjections.jl).
 - `tss::T`: Total sum of squares
 - `r2::T`: R-squared
 - `has_intercept::Bool`: Whether model includes intercept
-- `vcov_estimator::V`: Variance estimator used
-- `vcov_matrix::Symmetric{T, Matrix{T}}`: Precomputed variance-covariance matrix
-- `se::Vector{T}`: Standard errors
-- `t_stats::Vector{T}`: t-statistics
-- `p_values::Vector{T}`: p-values
+- `vstats::VcovStats{T,V}`: Vcov estimator and coefficient statistics
+  (`vcov_estimator`, `vcov_matrix`, `se`, `t_stats`, `p_values`), forwarded by
+  name through `getproperty`
 
 # Example
 ```julia
@@ -1824,17 +1819,22 @@ struct IVMatrixEstimator{T <: AbstractFloat, E <: AbstractIVEstimator, V} <:
     has_intercept::Bool
 
     # Variance-covariance
-    vcov_estimator::V
-    vcov_matrix::Symmetric{T, Matrix{T}}
-    se::Vector{T}
-    t_stats::Vector{T}
-    p_values::Vector{T}
+    vstats::VcovStats{T, V}
 end
 
 has_iv(::IVMatrixEstimator) = true
 has_fe(::IVMatrixEstimator) = false
 dof_fes(::IVMatrixEstimator) = 0
 model_hasintercept(m::IVMatrixEstimator) = m.has_intercept
+
+function Base.getproperty(m::IVMatrixEstimator, s::Symbol)
+    if s === :vcov_estimator || s === :vcov_matrix || s === :se ||
+       s === :t_stats || s === :p_values
+        return getfield(getfield(m, :vstats), s)
+    else
+        return getfield(m, s)
+    end
+end
 _estimator_name(m::IVMatrixEstimator) = _estimator_name(m.estimator)
 
 ##############################################################################
@@ -2054,13 +2054,7 @@ end
 Create a new IVMatrixEstimator with updated variance-covariance estimator.
 """
 function Base.:+(m::IVMatrixEstimator{T, E, V1}, v::VcovSpec{V2}) where {T, E, V1, V2}
-    new_vcov = vcov(v.source, m)
-    new_se = sqrt.(diag(new_vcov))
-
-    # Recompute t-stats and p-values
-    cc = coef(m)
-    new_t = cc ./ new_se
-    new_p = 2 .* tdistccdf.(dof_residual(m), abs.(new_t))
+    vstats, _, _ = _respec_vstats(m, v.source)
 
     return IVMatrixEstimator{T, E, V2}(
         m.estimator,
@@ -2074,11 +2068,7 @@ function Base.:+(m::IVMatrixEstimator{T, E, V1}, v::VcovSpec{V2}) where {T, E, V
         m.tss,
         m.r2,
         m.has_intercept,
-        deepcopy_vcov(v.source),
-        new_vcov,
-        new_se,
-        new_t,
-        new_p
+        vstats
     )
 end
 
