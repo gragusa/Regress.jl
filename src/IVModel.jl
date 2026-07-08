@@ -7,7 +7,20 @@
 """
     AbstractTest
 
-Abstract supertype for test result types (first-stage F-tests, weak IV tests, etc.).
+Abstract supertype for test result types (first-stage F-tests, weak IV tests,
+endogeneity and overidentification tests).
+
+# Interface
+- `StatsAPI.pvalue(t)` returns the test's p-value where one is meaningful.
+  Single-statistic tests return a scalar; per-endogenous first-stage tests
+  return a vector aligned with the endogenous variables. The composite
+  first-stage results (`FirstStageResult`, `FirstStageIV`) return the robust
+  p-values; their non-robust counterparts remain accessible as fields.
+  `WeakIVTestResult` implements no `pvalue` — it reports against critical
+  values rather than a p-value.
+- `StatsAPI.dof(t)` returns a scalar degrees of freedom where one is
+  unambiguous (`SarganResult`). F-based tests carry `df1`/`df2` fields instead
+  and implement no scalar `dof`.
 """
 abstract type AbstractTest end
 
@@ -90,6 +103,8 @@ function Base.show(io::IO, f::FirstStageFTest{<:AbstractVector})
     end
 end
 
+StatsAPI.pvalue(f::FirstStageFTest) = f.p
+
 ##############################################################################
 ##
 ## Type IVEstimator (for IV estimation)
@@ -151,7 +166,7 @@ fs.F_nonrobust       # Homoskedastic first-stage F-statistics
 fs.F_robust          # Robust first-stage F-statistics
 ```
 """
-struct FirstStageResult{T <: AbstractFloat}
+struct FirstStageResult{T <: AbstractFloat} <: AbstractTest
     endogenous_names::Vector{String}
     F_nonrobust::Vector{T}
     p_nonrobust::Vector{T}
@@ -163,6 +178,8 @@ struct FirstStageResult{T <: AbstractFloat}
     n_instruments::Int
     vcov_type::String
 end
+
+StatsAPI.pvalue(fs::FirstStageResult) = fs.p_robust
 
 """
     FirstStageIV{T, M}
@@ -195,7 +212,7 @@ fs.F_nonrobust           # non-robust F
 fs.F_robust              # robust F
 ```
 """
-struct FirstStageIV{T <: AbstractFloat, M <: OLSMatrixEstimator}
+struct FirstStageIV{T <: AbstractFloat, M <: OLSMatrixEstimator} <: AbstractTest
     models::Vector{M}
     endogenous_names::Vector{String}
     instrument_names::Vector{String}
@@ -223,6 +240,8 @@ function Base.show(io::IO, fs::FirstStageIV{T}) where {T}
     @printf(io, "DoF: (%d, %d)\n", fs.df1, fs.df2)
     println(io, "Excluded instruments: ", join(fs.instrument_names, ", "))
 end
+
+StatsAPI.pvalue(fs::FirstStageIV) = fs.p_robust
 
 """
     has_first_stage_data(fsd::FirstStageData) -> Bool
@@ -356,11 +375,7 @@ struct IVEstimator{
     r2_within::T      # within r2 (with fixed effect)
 
     # Variance-covariance estimator and precomputed statistics
-    vcov_estimator::V                        # Deep copy of the estimator
-    vcov_matrix::Symmetric{T, Matrix{T}}    # Precomputed vcov matrix
-    se::Vector{T}                            # Standard errors
-    t_stats::Vector{T}                       # t-statistics
-    p_values::Vector{T}                      # p-values
+    vstats::VcovStats{T, V}
 
     # Test statistics (computed with vcov_estimator)
     F::T                    # F-statistic (Wald test)
@@ -377,6 +392,15 @@ has_iv(::IVEstimator) = true
 has_fe(m::IVEstimator) = has_fe(m.formula)
 r2_within(m::IVEstimator) = m.r2_within
 model_hasintercept(m::IVEstimator) = hasintercept(m.formula)
+
+function Base.getproperty(m::IVEstimator, s::Symbol)
+    if s === :vcov_estimator || s === :vcov_matrix || s === :se ||
+       s === :t_stats || s === :p_values
+        return getfield(getfield(m, :vstats), s)
+    else
+        return getfield(m, s)
+    end
+end
 
 """
     has_residuals_data(m::IVEstimator) -> Bool
@@ -783,6 +807,13 @@ function StatsBase.vcov(ve::CovarianceMatrices.AbstractAsymptoticVarianceEstimat
     return Symmetric(Σ)
 end
 
+# DriscollKraay matches both the generic method above and CovarianceMatrices'
+# vcov(::DriscollKraay, ::RegressionModel); the implementation above must win.
+function StatsBase.vcov(ve::_CM.DriscollKraay, m::IVEstimator{T}) where {T}
+    invoke(StatsBase.vcov, Tuple{_CM.AbstractAsymptoticVarianceEstimator, IVEstimator{T}},
+        ve, m)
+end
+
 """
     _cluster_robust_scale_iv(k::_CM.CR, m::IVEstimator, n::Int)
 
@@ -1148,19 +1179,11 @@ model_cr1 = model_cr + vcov(CR1(:firm))
 See also: [`VcovSpec`](@ref)
 """
 function Base.:+(m::IVEstimator{T, E, V1, P}, v::VcovSpec{V2}) where {T, E, V1, P, V2}
-    # Compute vcov matrix using StatsBase.vcov (which dispatches to IVModel.jl methods)
-    vcov_mat = StatsBase.vcov(v.source, m)
-
-    # Use shared helper for stats
-    se, t_stats, p_values, F_stat, p_val = _calculate_vcov_stats(m, vcov_mat)
+    vstats, F_stat, p_val = _respec_vstats(m, v.source)
 
     # Recompute robust first-stage F with this vcov type
     F_first_stage_robust, p_first_stage_robust = recompute_first_stage_fstat(m, v.source)
 
-    # Deep copy the vcov estimator to avoid aliasing
-    vcov_copy = deepcopy_vcov(v.source)
-
-    # Return new IVEstimator with same data but different vcov type
     return IVEstimator{T, E, V2, P}(
         m.estimator, m.coef,
         m.esample, m.residuals_esample, m.has_residuals, m.fe,
@@ -1170,7 +1193,7 @@ function Base.:+(m::IVEstimator{T, E, V1, P}, v::VcovSpec{V2}) where {T, E, V1, 
         m.nobs, m.dof, m.dof_fes, m.dof_residual,
         m.rss, m.tss,
         m.iterations, m.converged, m.r2_within,
-        vcov_copy, Symmetric(vcov_mat), se, t_stats, p_values,
+        vstats,
         F_stat, p_val,
         m.F_first_stage_nonrobust, m.p_first_stage_nonrobust,
         F_first_stage_robust, p_first_stage_robust,
@@ -1403,8 +1426,7 @@ end
 ##
 ##############################################################################
 
-function _estimator_name(m::IVEstimator)
-    e = m.estimator
+function _estimator_name(e::AbstractIVEstimator)
     if e isa TSLS
         return "TSLS"
     elseif e isa LIML
@@ -1417,6 +1439,8 @@ function _estimator_name(m::IVEstimator)
         return string(typeof(e).name.name)
     end
 end
+
+_estimator_name(m::IVEstimator) = _estimator_name(m.estimator)
 
 function top(m::IVEstimator)
     # Use shared summary
@@ -1631,7 +1655,7 @@ function StatsAPI.residuals(m::IVEstimator, data)
     Tables.istable(data) ||
         throw(ArgumentError("expected second argument to be a Table, got $(typeof(data))"))
     has_fe(m) &&
-        throw("To access residuals for a model with high-dimensional fixed effects,  run `m = iv(..., save = :residuals)` and then access residuals with `residuals(m)`.")
+        throw(ArgumentError("To access residuals for a model with high-dimensional fixed effects,  run `m = iv(..., save = :residuals)` and then access residuals with `residuals(m)`."))
     cdata = Tables.columntable(data)
     cols, nonmissings = StatsModels.missing_omit(cdata, m.formula_schema.rhs)
     Xnew = modelmatrix(m.formula_schema, cols)
@@ -1657,9 +1681,9 @@ end
 function StatsAPI.residuals(m::IVEstimator{T}) where {T}
     if !has_residuals_data(m)
         has_fe(m) &&
-            throw("To access residuals in a fixed effect regression, run `iv` with the option save = :residuals, and then access residuals with `residuals()`")
+            throw(ArgumentError("To access residuals in a fixed effect regression, run `iv` with the option save = :residuals, and then access residuals with `residuals()`"))
         !has_fe(m) &&
-            throw("To access residuals, use residuals(m, data) where `m` is an estimated IVEstimator and `data` is a Table")
+            throw(ArgumentError("To access residuals, use residuals(m, data) where `m` is an estimated IVEstimator and `data` is a Table"))
     end
     # Reconstruct full-length residuals with missings for non-esample rows
     n = length(m.esample)
@@ -1674,7 +1698,8 @@ end
 Return a DataFrame with fixed effects estimates.
 """
 function fe(m::IVEstimator; keepkeys = false)
-    !has_fe(m) && throw("fe() is not defined for models without fixed effects")
+    !has_fe(m) &&
+        throw(ArgumentError("fe() is not defined for models without fixed effects"))
     if keepkeys
         m.fe
     else
@@ -1742,16 +1767,18 @@ struct PostEstimationDataIVMatrix{T <: AbstractFloat}
 end
 
 """
-    IVMatrixEstimator{T, V} <: AbstractRegressModel
+    IVMatrixEstimator{T, E, V} <: AbstractRegressModel
 
 Matrix-based IV estimator for use without formula interface.
 Designed for programmatic use (e.g., LocalProjections.jl).
 
 # Type Parameters
 - `T`: Element type (Float64 or Float32)
+- `E`: Estimator type (`TSLS`, `LIML`, `Fuller`, or `KClass`)
 - `V`: Variance estimator type
 
 # Fields
+- `estimator::E`: The k-class estimator used
 - `coef::Vector{T}`: Coefficient estimates
 - `postestimation::PostEstimationDataIVMatrix{T}`: Data for vcov computation
 - `basis_coef::BitVector`: Which coefficients are not collinear
@@ -1762,11 +1789,9 @@ Designed for programmatic use (e.g., LocalProjections.jl).
 - `tss::T`: Total sum of squares
 - `r2::T`: R-squared
 - `has_intercept::Bool`: Whether model includes intercept
-- `vcov_estimator::V`: Variance estimator used
-- `vcov_matrix::Symmetric{T, Matrix{T}}`: Precomputed variance-covariance matrix
-- `se::Vector{T}`: Standard errors
-- `t_stats::Vector{T}`: t-statistics
-- `p_values::Vector{T}`: p-values
+- `vstats::VcovStats{T,V}`: Vcov estimator and coefficient statistics
+  (`vcov_estimator`, `vcov_matrix`, `se`, `t_stats`, `p_values`), forwarded by
+  name through `getproperty`
 
 # Example
 ```julia
@@ -1774,9 +1799,14 @@ Designed for programmatic use (e.g., LocalProjections.jl).
 model = iv(TSLS(), Z, X, y; has_intercept=false, n_endogenous=1)
 coef(model)
 vcov(HC1(), model)
+
+# Same interface for LIML, Fuller, and generic k-class
+model_liml = iv(LIML(), Z, X, y; has_intercept=false, n_endogenous=1)
 ```
 """
-struct IVMatrixEstimator{T <: AbstractFloat, V} <: AbstractRegressModel
+struct IVMatrixEstimator{T <: AbstractFloat, E <: AbstractIVEstimator, V} <:
+       AbstractRegressModel
+    estimator::E
     coef::Vector{T}
     postestimation::PostEstimationDataIVMatrix{T}
     basis_coef::BitVector
@@ -1789,17 +1819,23 @@ struct IVMatrixEstimator{T <: AbstractFloat, V} <: AbstractRegressModel
     has_intercept::Bool
 
     # Variance-covariance
-    vcov_estimator::V
-    vcov_matrix::Symmetric{T, Matrix{T}}
-    se::Vector{T}
-    t_stats::Vector{T}
-    p_values::Vector{T}
+    vstats::VcovStats{T, V}
 end
 
 has_iv(::IVMatrixEstimator) = true
 has_fe(::IVMatrixEstimator) = false
 dof_fes(::IVMatrixEstimator) = 0
 model_hasintercept(m::IVMatrixEstimator) = m.has_intercept
+
+function Base.getproperty(m::IVMatrixEstimator, s::Symbol)
+    if s === :vcov_estimator || s === :vcov_matrix || s === :se ||
+       s === :t_stats || s === :p_values
+        return getfield(getfield(m, :vstats), s)
+    else
+        return getfield(m, s)
+    end
+end
+_estimator_name(m::IVMatrixEstimator) = _estimator_name(m.estimator)
 
 ##############################################################################
 ## StatsAPI Interface for IVMatrixEstimator
@@ -1867,7 +1903,12 @@ end
 """
     leverage(m::IVMatrixEstimator)
 
-Returns diagonal of hat matrix H = X̂(X̂'X̂)⁻¹X̂' for HC2/HC3/HC4/HC5.
+Diagonal of the IV hat matrix for HC2/HC3/HC4/HC5.
+
+For k-class estimators the `X_hat`/`invXhatXhat` slots hold the k-class
+adjustment matrix and its bread, so `diag(Adj·invA·Adj')` is the leverage. TSLS
+is specialized below to the AER formula, which for over-identified models does
+not coincide with `diag(X̂(X̂'X̂)⁻¹X̂')`.
 """
 function StatsAPI.leverage(m::IVMatrixEstimator)
     X_hat = m.postestimation.X_hat
@@ -1875,6 +1916,20 @@ function StatsAPI.leverage(m::IVMatrixEstimator)
     # h_ii = X̂_i' * (X̂'X̂)⁻¹ * X̂_i
     # Efficient computation: sum((X_hat * invXX) .* X_hat, dims=2)
     return vec(sum((X_hat * invXX) .* X_hat, dims = 2))
+end
+
+# TSLS leverage matches R's AER::ivreg / sandwich::vcovHC:
+#     h = diag(X · (X̂'X̂)⁻¹ · X' · Z · (Z'Z)⁻¹ · Z')
+# This is the same formula the formula-path `leverage(::IVEstimator)` uses. For
+# over-identified TSLS it differs from diag(X̂(X̂'X̂)⁻¹X̂'), so HC2/HC3 need it to
+# match the formula path.
+function StatsAPI.leverage(m::IVMatrixEstimator{T, TSLS}) where {T <: AbstractFloat}
+    X = m.postestimation.X
+    Z = m.postestimation.Z
+    invXhatXhat = m.postestimation.invXhatXhat
+    invZZ = inv(cholesky(Symmetric(Z' * Z)))
+    Pz = Z * (invZZ * Z')
+    return vec(sum((X * invXhatXhat) .* (Pz * X), dims = 2))
 end
 
 # CovarianceMatrices.jl uses numobs, which is distinct from StatsAPI.nobs
@@ -1995,6 +2050,13 @@ function StatsBase.vcov(ve::CovarianceMatrices.AbstractAsymptoticVarianceEstimat
     return Symmetric(Σ)
 end
 
+# DriscollKraay matches both the generic method above and CovarianceMatrices'
+# vcov(::DriscollKraay, ::RegressionModel); the implementation above must win.
+function StatsBase.vcov(ve::_CM.DriscollKraay, m::IVMatrixEstimator{T}) where {T}
+    invoke(StatsBase.vcov,
+        Tuple{_CM.AbstractAsymptoticVarianceEstimator, IVMatrixEstimator{T}}, ve, m)
+end
+
 function StatsBase.stderror(ve::CovarianceMatrices.AbstractAsymptoticVarianceEstimator,
         m::IVMatrixEstimator)
     V = vcov(ve, m)
@@ -2010,16 +2072,11 @@ end
 
 Create a new IVMatrixEstimator with updated variance-covariance estimator.
 """
-function Base.:+(m::IVMatrixEstimator{T, V1}, v::VcovSpec{V2}) where {T, V1, V2}
-    new_vcov = vcov(v.source, m)
-    new_se = sqrt.(diag(new_vcov))
+function Base.:+(m::IVMatrixEstimator{T, E, V1}, v::VcovSpec{V2}) where {T, E, V1, V2}
+    vstats, _, _ = _respec_vstats(m, v.source)
 
-    # Recompute t-stats and p-values
-    cc = coef(m)
-    new_t = cc ./ new_se
-    new_p = 2 .* tdistccdf.(dof_residual(m), abs.(new_t))
-
-    return IVMatrixEstimator{T, V2}(
+    return IVMatrixEstimator{T, E, V2}(
+        m.estimator,
         m.coef,
         m.postestimation,
         m.basis_coef,
@@ -2030,11 +2087,7 @@ function Base.:+(m::IVMatrixEstimator{T, V1}, v::VcovSpec{V2}) where {T, V1, V2}
         m.tss,
         m.r2,
         m.has_intercept,
-        deepcopy_vcov(v.source),
-        new_vcov,
-        new_se,
-        new_t,
-        new_p
+        vstats
     )
 end
 
@@ -2151,6 +2204,188 @@ function first_stage(m::IVMatrixEstimator{T};
 end
 
 ##############################################################################
+## First-stage / endogeneity / overidentification diagnostics for
+## IVMatrixEstimator. These build the same FirstStageData the formula path
+## stores, then route through the shared core routines, so the matrix-path and
+## formula-path diagnostics are numerically identical.
+##############################################################################
+
+"""
+    _matrix_first_stage_data(m::IVMatrixEstimator) -> FirstStageData
+
+Reconstruct the first-stage regression data (`Pi`, residualized endogenous and
+instruments, full first-stage design) from the stored `X = [Xexo, Xendo]` and
+`Z = [Xexo, Zinstr]`. The layout matches the formula path's `FirstStageData`, so
+downstream diagnostics share one implementation across both paths.
+"""
+function _matrix_first_stage_data(m::IVMatrixEstimator{T}) where {T}
+    pe = m.postestimation
+    n_endo = pe.n_endogenous
+    n_endo > 0 || throw(ArgumentError("Model has no endogenous variables."))
+
+    X = pe.X
+    Z = pe.Z
+    k_total = size(X, 2)
+    k_exo = k_total - n_endo
+    l = size(Z, 2) - k_exo  # number of excluded instruments
+
+    Xendo = X[:, (k_exo + 1):end]
+    endo_names = ["endo_$i" for i in 1:n_endo]
+
+    # First-stage OLS of each endogenous on the full instrument set Z.
+    ZZ_chol = cholesky(Symmetric(Z' * Z))
+    Pi_full = ZZ_chol \ (Z' * Xendo)          # (k_exo + l) × n_endo
+    Xendo_res = Xendo - Z * Pi_full
+    Pip = Pi_full[(k_exo + 1):end, :]         # instruments-only block, l × n_endo
+
+    # Residualize the excluded instruments on the exogenous regressors.
+    Z_instr = Z[:, (k_exo + 1):end]
+    if k_exo > 0
+        Xexo = X[:, 1:k_exo]
+        qr_exo = qr(Xexo)
+        Z_res = Z_instr - Xexo * (qr_exo \ Z_instr)
+    else
+        Z_res = copy(Z_instr)
+    end
+
+    return FirstStageData{T}(
+        Pip, Xendo_res, Z_res, endo_names, k_exo, Xendo, Z, m.has_intercept
+    )
+end
+
+"""
+    first_stage_F_iid(m::IVMatrixEstimator) -> FirstStageFTest
+
+IID (homoskedastic) first-stage F-test. Equation-by-equation SSR-based F-test.
+"""
+function first_stage_F_iid(m::IVMatrixEstimator{T}) where {T}
+    fsd = _matrix_first_stage_data(m)
+    F_vec, p_vec, df1, df2 = _compute_first_stage_f_iid(fsd, nobs(m), 0)
+
+    if length(F_vec) == 1
+        return FirstStageFTest{T, Homoskedastic}(
+            F_vec[1], df1, df2, p_vec[1], :iid, Homoskedastic(), fsd.endogenous_names)
+    else
+        return FirstStageFTest{Vector{T}, Homoskedastic}(
+            F_vec, df1, df2, p_vec, :iid, Homoskedastic(), fsd.endogenous_names)
+    end
+end
+
+"""
+    first_stage_F_robust(m::IVMatrixEstimator) -> FirstStageFTest
+
+Robust Wald first-stage F-test using the model's current variance estimator.
+"""
+function first_stage_F_robust(m::IVMatrixEstimator{T}) where {T}
+    fsd = _matrix_first_stage_data(m)
+    vcov_est = m.vcov_estimator
+
+    F_vec,
+    p_vec = compute_per_endogenous_fstats(
+        fsd.Xendo_res, fsd.Z_res, fsd.Pi,
+        vcov_est, nobs(m), dof(m), 0;
+        Xendo_orig = fsd.Xendo_orig, newZ = fsd.newZ
+    )
+
+    n_excl = size(fsd.Z_res, 2)
+    df1 = n_excl
+    df2 = nobs(m) - fsd.n_exo - n_excl
+
+    if length(F_vec) == 1
+        return FirstStageFTest{T, typeof(vcov_est)}(
+            F_vec[1], df1, df2, p_vec[1], :robust, vcov_est, fsd.endogenous_names)
+    else
+        return FirstStageFTest{Vector{T}, typeof(vcov_est)}(
+            F_vec, df1, df2, p_vec, :robust, vcov_est, fsd.endogenous_names)
+    end
+end
+
+"""
+    first_stage_F_KP(m::IVMatrixEstimator) -> FirstStageFTest
+
+Joint Kleibergen-Paap rk Wald F-test for under-identification.
+"""
+function first_stage_F_KP(m::IVMatrixEstimator{T}) where {T}
+    fsd = _matrix_first_stage_data(m)
+    n_excl = size(fsd.Z_res, 2)
+
+    F_kp,
+    p_kp = compute_first_stage_fstat(
+        fsd.Xendo_res, fsd.Z_res, fsd.Pi,
+        CovarianceMatrices.HR1(), nobs(m), dof(m), 0
+    )
+
+    return FirstStageFTest{T, typeof(m.vcov_estimator)}(
+        F_kp, n_excl, 0, p_kp, :kp, m.vcov_estimator, fsd.endogenous_names)
+end
+
+"""
+    wu_hausman(m::IVMatrixEstimator) -> WuHausmanResult
+
+Compute the Wu-Hausman F-test for endogeneity. Tests H₀: instrumented variables
+are exogenous (OLS is consistent).
+"""
+function wu_hausman(m::IVMatrixEstimator{T}) where {T}
+    fsd = _matrix_first_stage_data(m)
+    pe = m.postestimation
+    k_endo = length(fsd.endogenous_names)
+
+    y = pe.y
+    X = pe.X
+    v_hat = fsd.Xendo_res
+
+    qr_X = qr(X)
+    resid_r = y - X * (qr_X \ y)
+    ssr_r = sum(abs2, resid_r)
+
+    W = hcat(X, v_hat)
+    qr_W = qr(W)
+    resid_u = y - W * (qr_W \ y)
+    ssr_u = sum(abs2, resid_u)
+
+    df1 = k_endo
+    df2 = dof_residual(m) - k_endo
+
+    F = ((ssr_r - ssr_u) / df1) / (ssr_u / df2)
+    p = fdistccdf(df1, df2, F)
+
+    return WuHausmanResult{T}(F, p, df1, df2)
+end
+
+"""
+    sargan(m::IVMatrixEstimator) -> SarganResult
+
+Compute the Sargan test for overidentifying restrictions. Tests H₀: instruments
+are valid. Only available for overidentified models
+(n_instruments > n_endogenous).
+"""
+function sargan(m::IVMatrixEstimator{T}) where {T}
+    fsd = _matrix_first_stage_data(m)
+    pe = m.postestimation
+    k_endo = length(fsd.endogenous_names)
+    n_excl = size(fsd.Z_res, 2)
+
+    n_excl > k_endo || throw(ArgumentError(
+        "Sargan test requires overidentification (n_instruments=$n_excl > n_endogenous=$k_endo)."))
+
+    e = residuals(m)
+    Z_full = pe.Z
+
+    beta_aux = Symmetric(Z_full' * Z_full) \ (Z_full' * e)
+    e_hat = Z_full * beta_aux
+
+    rss_aux = sum(abs2, e - e_hat)
+    tss_e = sum(abs2, e)
+
+    n = nobs(m)
+    stat = n * (one(T) - rss_aux / tss_e)
+    df = n_excl - k_endo
+    p = chisqccdf(df, stat)
+
+    return SarganResult{T}(stat, p, df)
+end
+
+##############################################################################
 ## Show methods for IVMatrixEstimator
 ##############################################################################
 
@@ -2159,7 +2394,7 @@ function Base.show(io::IO, m::IVMatrixEstimator)
 end
 
 function Base.show(io::IO, ::MIME"text/plain", m::IVMatrixEstimator{T}) where {T}
-    println(io, "IV Matrix Estimator (TSLS)")
+    println(io, "IV Matrix Estimator ($(_estimator_name(m)))")
     println(io, "─" ^ 40)
     println(io, "Observations:      $(nobs(m))")
     println(io, "Parameters:        $(dof(m))")

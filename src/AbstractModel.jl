@@ -223,3 +223,34 @@ function _calculate_vcov_stats(m::AbstractRegressModel, vcov_mat::AbstractMatrix
 
     return se, t_stat, p_val, F_stat, F_p_val
 end
+
+"""
+    VcovStats{T,V}
+
+Vcov estimator and the coefficient-level statistics it produces. Every
+`AbstractRegressModel` holds one of these as its `vstats` field; the five names
+`vcov_estimator`, `vcov_matrix`, `se`, `t_stats`, `p_values` are forwarded from
+the model through `getproperty`, so `m.se`, `m.vcov_matrix`, etc. read the
+component transparently.
+"""
+struct VcovStats{T <: AbstractFloat, V}
+    vcov_estimator::V
+    vcov_matrix::Symmetric{T, Matrix{T}}
+    se::Vector{T}
+    t_stats::Vector{T}
+    p_values::Vector{T}
+end
+
+"""
+    _respec_vstats(m, source)
+
+Compute the `VcovStats` for model `m` under a new vcov `source`, returning the
+component together with the robust Wald `(F, p)` pair. The single routine every
+`Base.:+(m, ::VcovSpec)` uses to rebuild the inference block.
+"""
+function _respec_vstats(m::AbstractRegressModel, source)
+    vcov_mat = StatsBase.vcov(source, m)
+    se, t_stats, p_values, F_stat, p_val = _calculate_vcov_stats(m, vcov_mat)
+    vstats = VcovStats(deepcopy_vcov(source), Symmetric(vcov_mat), se, t_stats, p_values)
+    return vstats, F_stat, p_val
+end

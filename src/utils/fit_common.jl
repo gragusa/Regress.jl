@@ -150,7 +150,7 @@ function prepare_data(df::DataFrame,
     end
     if subset !== nothing
         if length(subset) != nrows
-            throw("df has $(nrows) rows but the subset vector has $(length(subset)) elements")
+            throw(ArgumentError("df has $(nrows) rows but the subset vector has $(length(subset)) elements"))
         end
         esample .&= BitArray(!ismissing(x) && x for x in subset)
     end
@@ -162,7 +162,7 @@ function prepare_data(df::DataFrame,
     end
 
     nobs = sum(esample)
-    (nobs > 0) || throw("sample is empty")
+    (nobs > 0) || throw(ArgumentError("sample is empty"))
     (nobs < nrows) || (esample = Colon())
 
     return (formula = formula,
@@ -505,7 +505,8 @@ function partial_out_fixed_effects!(cols::Vector,
         save_fes::Bool,
         has_intercept::Bool,
         has_fe_intercept::Bool,
-        T::Type)
+        T::Type;
+        verbose::Bool = true)
 
     # Initialize return values
     iterations, converged = 0, true
@@ -546,9 +547,11 @@ function partial_out_fixed_effects!(cols::Vector,
         for i in 1:length(cols)
             if sum(abs2, cols[i]) < tol * sumsquares_pre[i]
                 if i == 1
-                    @info "Dependent variable $(colnames[1]) is probably perfectly explained by fixed effects."
+                    verbose &&
+                        @info "Dependent variable $(colnames[1]) is probably perfectly explained by fixed effects."
                 else
-                    @info "RHS-variable $(colnames[i]) is collinear with the fixed effects."
+                    verbose &&
+                        @info "RHS-variable $(colnames[i]) is collinear with the fixed effects."
                     cols[i] .= zero(T)
                 end
             end
@@ -557,7 +560,8 @@ function partial_out_fixed_effects!(cols::Vector,
         iterations = maximum(iterations)
         converged = all(convergeds)
         if !converged
-            @info "Convergence not achieved in $(iterations) iterations; try increasing maxiter or decreasing tol."
+            verbose &&
+                @info "Convergence not achieved in $(iterations) iterations; try increasing maxiter or decreasing tol."
         end
 
         # Compute TSS after partialing out

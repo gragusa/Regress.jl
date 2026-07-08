@@ -111,3 +111,52 @@ end
     m22 = Regress.iv(Regress.TSLS(), df, @formula(y ~ (x + x2 ~ z1 + z2) + fe(a)))
     @test_throws ErrorException sargan(m22)
 end
+
+@testitem "AbstractTest interface" tags = [:iv, :validation] begin
+    using Regress
+    using DataFrames, CSV
+    using Regress: AbstractTest, first_stage_f, first_stage, first_stage_F_iid,
+                   first_stage_F_robust, first_stage_F_KP, wu_hausman, sargan,
+                   weakivtest
+    using StatsAPI: pvalue, dof
+
+    csv_path = joinpath(@__DIR__, "data", "basic_validation_df.csv")
+    df = CSV.read(csv_path, DataFrame)
+
+    # Overidentified single-endogenous model so every diagnostic is available.
+    m = Regress.iv(Regress.TSLS(), df, @formula(y ~ (x ~ z1 + z2)))
+
+    # Every statistical test-result type subtypes AbstractTest.
+    for t in (first_stage_f(m), first_stage(m), first_stage_F_iid(m),
+        first_stage_F_robust(m), first_stage_F_KP(m), wu_hausman(m),
+        sargan(m), weakivtest(m))
+        @test t isa AbstractTest
+    end
+
+    # Single-statistic tests report a scalar p-value equal to their `p` field.
+    @test pvalue(wu_hausman(m)) == wu_hausman(m).p
+    @test pvalue(sargan(m)) == sargan(m).p
+
+    # Per-endogenous first-stage tests report a vector aligned with the endogenous
+    # variables; the composite results report their robust p-values.
+    @test pvalue(first_stage_f(m)) == first_stage_f(m).p_per_endo
+    @test pvalue(first_stage(m)) == first_stage(m).p_robust
+    @test pvalue(first_stage_F_iid(m)) == first_stage_F_iid(m).p
+    @test pvalue(first_stage_F_robust(m)) == first_stage_F_robust(m).p
+
+    # WeakIVTestResult reports against critical values, so it has no p-value.
+    @test !hasmethod(pvalue, Tuple{typeof(weakivtest(m))})
+
+    # `dof` is a scalar only where unambiguous (Sargan's χ² df); F-based tests
+    # carry df1/df2 instead and implement no scalar `dof`.
+    @test dof(sargan(m)) == sargan(m).df
+    @test !hasmethod(dof, Tuple{typeof(wu_hausman(m))})
+    @test !hasmethod(dof, Tuple{typeof(first_stage_F_iid(m))})
+
+    # Matrix-path first-stage result also participates in the interface.
+    mm = Regress.iv(Regress.TSLS(), Matrix(df[:, [:z1, :z2]]),
+        reshape(df.x, :, 1), df.y; n_endogenous = 1)
+    fsi = first_stage(mm)
+    @test fsi isa AbstractTest
+    @test pvalue(fsi) == fsi.p_robust
+end

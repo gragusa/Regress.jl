@@ -1110,6 +1110,14 @@ function CM.vcov(k::CM.AbstractAsymptoticVarianceEstimator, m::OLSEstimator; dof
     return Σ
 end
 
+# DriscollKraay matches both the generic method above and CovarianceMatrices'
+# vcov(::DriscollKraay, ::RegressionModel); the FE-aware implementation above
+# must win.
+function CM.vcov(k::CM.DriscollKraay, m::OLSEstimator; kwargs...)
+    invoke(CM.vcov, Tuple{CM.AbstractAsymptoticVarianceEstimator, OLSEstimator}, k, m;
+        kwargs...)
+end
+
 ##############################################################################
 ##
 ## CovarianceMatrices.jl Interface for OLSMatrixEstimator
@@ -1284,6 +1292,13 @@ function CM.vcov(k::CM.AbstractAsymptoticVarianceEstimator, m::OLSMatrixEstimato
     end
 
     return scale .* B * A * B
+end
+
+# DriscollKraay matches both the generic method above and CovarianceMatrices'
+# vcov(::DriscollKraay, ::RegressionModel); the implementation above must win.
+function CM.vcov(k::CM.DriscollKraay, m::OLSMatrixEstimator; kwargs...)
+    invoke(CM.vcov, Tuple{CM.AbstractAsymptoticVarianceEstimator, OLSMatrixEstimator},
+        k, m; kwargs...)
 end
 
 function StatsAPI.confint(ve::CovarianceMatrices.AbstractAsymptoticVarianceEstimator,

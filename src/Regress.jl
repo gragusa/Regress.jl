@@ -6,6 +6,7 @@ using CovarianceMatrices: CovarianceMatrices, AbstractAsymptoticVarianceEstimato
                           CR0, CR1, CR2, CR3,
                           Bartlett, Parzen, QuadraticSpectral, TukeyHanning, Truncated,
                           Information, Misspecified, Uncorrelated, VcovSpec
+using Distributions: Distributions, Distribution, Normal
 using DataFrames: DataFrames, AsTable, DataFrame, Not, combine, completecases,
                   disallowmissing, disallowmissing!, dropmissing, leftjoin,
                   nrow, select
@@ -13,8 +14,8 @@ using FixedEffects: FixedEffects, AbstractFixedEffectSolver, FixedEffect,
                     solve_coefficients!, solve_residuals!
 using LinearAlgebra: LinearAlgebra, BLAS, Cholesky, ColumnNorm, Hermitian, I,
                      Symmetric, UpperTriangular, cholesky, cholesky!, diag,
-                     diagm, dot, eigvals, issuccess, ldiv!, mul!, qr, rank,
-                     rmul!, svd, tr
+                     diagm, dot, eigvals, issuccess, ldiv!, mul!, pinv, qr,
+                     rank, rmul!, svd, tr
 using PrecompileTools: PrecompileTools, @compile_workload
 using Printf: Printf, @printf, @sprintf
 using Reexport: Reexport, @reexport
@@ -23,15 +24,17 @@ using Statistics: Statistics
 using StatsAPI: StatsAPI, adjr2, coef, coefnames, coeftable, confint, deviance,
                 dof, dof_residual, fitted, islinear, leverage, loglikelihood,
                 modelmatrix, nobs, nulldeviance, nullloglikelihood, predict,
-                r2, residuals, response, responsename, rss, stderror, vcov, weights
+                pvalue, r2, residuals, response, responsename, rss, stderror,
+                vcov, weights
 using StatsBase: StatsBase, AbstractWeights, CoefTable, UnitWeights, Weights,
                  mean, uweights
-using StatsFuns: StatsFuns, chisqccdf, fdistccdf, tdistccdf, tdistinvcdf
+using StatsFuns: StatsFuns, chisqccdf, fdistccdf, normcdf, normlogccdf,
+                 normlogcdf, normlogpdf, tdistccdf, tdistinvcdf
 @reexport using StatsModels
 using StatsModels: StatsModels, @formula, AbstractTerm, ConstantTerm,
                    FormulaTerm, FunctionTerm, InteractionTerm, InterceptTerm,
                    MatrixTerm, StatisticalModel, Term, apply_schema, coefnames,
-                   formula, hasintercept, modelmatrix, omitsintercept,
+                   formula, hasintercept, modelcols, modelmatrix, omitsintercept,
                    response, schema, term
 using Tables: Tables
 
@@ -79,21 +82,25 @@ include("fit_ols.jl")     # OLS implementation
 include("fit.jl")         # Just thin wrappers now
 include("partial_out.jl")
 
+# Probit
+include("BinaryModel.jl")  # Binary-response model structs and StatsAPI surface
+include("fit_probit.jl")   # IRLS probit fit
+
 # Main estimation functions
-public ols, iv, fe
+public ols, iv, fe, probit, partial_out
 
-# Model types
-# export OLSEstimator, OLSMatrixEstimator, IVEstimator, IVMatrixEstimator
-
-# VcovSpec for model + vcov() syntax
-# export VcovSpec
+# Model types, the matrix-API integration surface, and the IV estimator supertype.
+# `VcovSpec` is CovarianceMatrices' and already re-exported above.
+public OLSEstimator, IVEstimator, OLSMatrixEstimator, IVMatrixEstimator
+public AbstractIVEstimator
+public esample, bread
 
 # IV Estimators
-# export AbstractIVEstimator
 export TSLS, LIML, Fuller, KClass
 
 # Formula terms
-export lags, LagTerm
+export lags
+public LagTerm
 
 # First-stage diagnostics (new API)
 export AbstractTest, FirstStageFTest, Homoskedastic
@@ -110,12 +117,11 @@ export weakivtest, WeakIVTestResult
 export wu_hausman, sargan
 export WuHausmanResult, SarganResult
 
-# Utility functions
-# export partial_out
+export fit_probit, BinaryEstimator
 
 # Re-export StatsAPI functions for user convenience
 export coef, coefnames, coeftable, confint, stderror, vcov
-export nobs, dof, dof_residual
+export nobs, dof, dof_residual, pvalue
 export r2, adjr2, deviance, nulldeviance, loglikelihood, nullloglikelihood, rss
 export residuals, fitted, response, predict, modelmatrix, weights
 export islinear, responsename, leverage

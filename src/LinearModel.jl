@@ -39,11 +39,9 @@ Use `ols(df, formula)` to fit this model type.
 - `r2::T`: R-squared
 - `r2_within::T`: Within R-squared (with FEs)
 - `has_intercept::Bool`: Whether model has intercept
-- `vcov_estimator::V`: Variance-covariance estimator (deep copy)
-- `vcov_matrix::Symmetric{T, Matrix{T}}`: Precomputed variance-covariance matrix
-- `se::Vector{T}`: Standard errors
-- `t_stats::Vector{T}`: t-statistics
-- `p_values::Vector{T}`: p-values
+- `vstats::VcovStats{T,V}`: Vcov estimator and coefficient statistics
+  (`vcov_estimator`, `vcov_matrix`, `se`, `t_stats`, `p_values`), forwarded by
+  name through `getproperty`
 - `F::T`: F-statistic (computed with vcov_estimator)
 - `p::T`: P-value of F-statistic
 """
@@ -85,11 +83,7 @@ struct OLSEstimator{T <: AbstractFloat, P <: OLSLinearPredictor{T}, V} <:
     has_intercept::Bool
 
     # Variance-covariance estimator and precomputed statistics
-    vcov_estimator::V                        # Deep copy of the estimator
-    vcov_matrix::Symmetric{T, Matrix{T}}    # Precomputed vcov matrix
-    se::Vector{T}                            # Standard errors
-    t_stats::Vector{T}                       # t-statistics
-    p_values::Vector{T}                      # p-values
+    vstats::VcovStats{T, V}
 
     # Test statistics (computed with vcov_estimator)
     F::T                            # F-statistic
@@ -132,11 +126,9 @@ Use `ols(X, y)` to fit this model type.
 - `tss::T`: Total sum of squares
 - `r2::T`: R-squared
 - `has_intercept::Bool`: Whether model has intercept (assumed from first column)
-- `vcov_estimator::V`: Variance-covariance estimator (deep copy)
-- `vcov_matrix::Symmetric{T, Matrix{T}}`: Precomputed variance-covariance matrix
-- `se::Vector{T}`: Standard errors
-- `t_stats::Vector{T}`: t-statistics
-- `p_values::Vector{T}`: p-values
+- `vstats::VcovStats{T,V}`: Vcov estimator and coefficient statistics
+  (`vcov_estimator`, `vcov_matrix`, `se`, `t_stats`, `p_values`), forwarded by
+  name through `getproperty`
 
 # Example
 ```julia
@@ -168,17 +160,22 @@ struct OLSMatrixEstimator{T <: AbstractFloat, P <: OLSLinearPredictor{T}, V} <:
     has_intercept::Bool             # Whether model has intercept
 
     # Variance-covariance estimator and precomputed statistics
-    vcov_estimator::V                        # Deep copy of the estimator
-    vcov_matrix::Symmetric{T, Matrix{T}}    # Precomputed vcov matrix
-    se::Vector{T}                            # Standard errors
-    t_stats::Vector{T}                       # t-statistics
-    p_values::Vector{T}                      # p-values
+    vstats::VcovStats{T, V}
 end
 
 has_iv(::OLSMatrixEstimator) = false
 has_fe(::OLSMatrixEstimator) = false
 dof_fes(::OLSMatrixEstimator) = 0
 model_hasintercept(m::OLSMatrixEstimator) = m.has_intercept
+
+function Base.getproperty(m::OLSMatrixEstimator, s::Symbol)
+    if s === :vcov_estimator || s === :vcov_matrix || s === :se ||
+       s === :t_stats || s === :p_values
+        return getfield(getfield(m, :vstats), s)
+    else
+        return getfield(m, s)
+    end
+end
 
 """
     has_matrices(m::OLSMatrixEstimator) -> Bool
@@ -268,15 +265,13 @@ end
 Create a new model with a different variance-covariance estimator.
 """
 function Base.:+(m::OLSMatrixEstimator{T, P, V1}, v::VcovSpec{V2}) where {T, P, V1, V2}
-    vcov_mat = StatsBase.vcov(v.source, m)
-    se, t_stats, p_values, _, _ = _calculate_vcov_stats(m, vcov_mat)
-    vcov_copy = deepcopy_vcov(v.source)
+    vstats, _, _ = _respec_vstats(m, v.source)
 
     return OLSMatrixEstimator{T, P, V2}(
         m.rr, m.pp, m.basis_coef,
         m.nobs, m.dof, m.dof_residual,
         m.rss, m.tss, m.r2, m.has_intercept,
-        vcov_copy, Symmetric(vcov_mat), se, t_stats, p_values
+        vstats
     )
 end
 
@@ -293,6 +288,9 @@ function Base.getproperty(m::OLSEstimator, s::Symbol)
         return getfield(m, :fes).iterations
     elseif s === :converged
         return getfield(m, :fes).converged
+    elseif s === :vcov_estimator || s === :vcov_matrix || s === :se ||
+           s === :t_stats || s === :p_values
+        return getfield(getfield(m, :vstats), s)
     else
         return getfield(m, s)
     end
@@ -419,7 +417,7 @@ function StatsAPI.residuals(m::OLSEstimator{T}, data) where {T}
     Tables.istable(data) ||
         throw(ArgumentError("expected second argument to be a Table, got $(typeof(data))"))
     has_fe(m) &&
-        throw("To access residuals for a model with high-dimensional fixed effects, access them directly with `residuals(m)`.")
+        throw(ArgumentError("To access residuals for a model with high-dimensional fixed effects, access them directly with `residuals(m)`."))
 
     cdata = Tables.columntable(data)
     cols, nonmissings = StatsModels.missing_omit(cdata, m.formula_schema.rhs)
@@ -455,7 +453,8 @@ The output is aligned with the original DataFrame used in `ols`.
 * `keepkeys::Bool` : Should the returned DataFrame include the original variables used to define groups? Default to false
 """
 function fe(m::OLSEstimator; keepkeys = false)
-    !has_fe(m) && throw("fe() is not defined for models without fixed effects")
+    !has_fe(m) &&
+        throw(ArgumentError("fe() is not defined for models without fixed effects"))
     if keepkeys
         m.fes.fe
     else
@@ -685,16 +684,8 @@ model_cr1 = model_cr + vcov(CR1(:firm))
 See also: [`VcovSpec`](@ref)
 """
 function Base.:+(m::OLSEstimator{T, P, V1}, v::VcovSpec{V2}) where {T, P, V1, V2}
-    # Compute vcov matrix using StatsBase.vcov (which dispatches to covariance.jl methods)
-    vcov_mat = StatsBase.vcov(v.source, m)
+    vstats, F_stat, p_val = _respec_vstats(m, v.source)
 
-    # Use shared helper for stats
-    se, t_stats, p_values, F_stat, p_val = _calculate_vcov_stats(m, vcov_mat)
-
-    # Deep copy the vcov estimator to avoid aliasing
-    vcov_copy = deepcopy_vcov(v.source)
-
-    # Return new OLSEstimator with same data but different vcov type
     return OLSEstimator{T, P, V2}(
         m.rr, m.pp, m.fes,
         m.formula, m.formula_schema, m.contrasts,
@@ -703,7 +694,7 @@ function Base.:+(m::OLSEstimator{T, P, V1}, v::VcovSpec{V2}) where {T, P, V1, V2
         m.nobs, m.dof, m.dof_fes, m.dof_residual,
         m.tss_total, m.tss_partial, m.rss, m.r2, m.r2_within,
         m.has_intercept,
-        vcov_copy, Symmetric(vcov_mat), se, t_stats, p_values,
+        vstats,
         F_stat, p_val
     )
 end

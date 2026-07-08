@@ -155,6 +155,40 @@ end
     @test_throws ErrorException Regress.weakivtest(m)
 end
 
+@testitem "weakivtest: tol keyword" tags = [:iv, :weakiv] begin
+    using Regress
+    using DataFrames
+    using StableRNGs
+
+    rng = StableRNG(7)
+    n = 200
+    z1 = randn(rng, n)
+    z2 = randn(rng, n)
+    z3 = randn(rng, n)
+    x = 0.5 * z1 + 0.3 * z2 + 0.2 * z3 + randn(rng, n)
+    y = 1.0 .+ 2.0 .* x .+ randn(rng, n)
+    df = DataFrame(y = y, x = x, z1 = z1, z2 = z2, z3 = z3)
+
+    # Formula path: passing the default explicitly matches the default.
+    m = Regress.iv(Regress.TSLS(), df, @formula(y ~ (x ~ z1 + z2 + z3)))
+    r_default = Regress.weakivtest(m)
+    r_tol = Regress.weakivtest(m; tol = 0.001)
+    @test r_tol.cv_TSLS == r_default.cv_TSLS
+    @test r_tol.cv_LIML == r_default.cv_LIML
+    @test r_tol.cv_GMMf == r_default.cv_GMMf
+
+    # A different tolerance is accepted and yields a valid result.
+    r_loose = Regress.weakivtest(m; tol = 0.01)
+    @test all(cv -> cv > 0, r_loose.cv_TSLS)
+
+    # Matrix path also accepts tol.
+    X = hcat(ones(n), x)
+    Z = hcat(ones(n), z1, z2, z3)
+    m_matrix = Regress.iv(Regress.TSLS(), Z, X, y; has_intercept = false, n_endogenous = 1)
+    r_matrix = Regress.weakivtest(m_matrix; tol = 0.001)
+    @test all(cv -> cv > 0, r_matrix.cv_TSLS)
+end
+
 @testitem "weakivtest: IVMatrixEstimator matches IVEstimator" tags = [:iv, :weakiv] begin
     using Regress
     using CSV
