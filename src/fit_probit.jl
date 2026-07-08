@@ -33,7 +33,7 @@ function select_columns(df::DataFrame, formula::FormulaTerm)
     for (j, name) in enumerate(Xnames)
         out[!, name] = X[:, j]
     end
-    X_final = convert(Matrix{Float64}, X_without_fe) #FIXME it is always float here
+    X_final = convert(Matrix{Float64}, X_without_fe)
     return (schema, formula_schema, out, X_final, vec(y))
 end
 
@@ -99,76 +99,7 @@ function get_coefficient_names_nofe(formula::FormulaTerm, data::DataFrame)
 end
 
 ############################################################
-### OLS SOLVER
-############################################################
-"""
-    ils_solver(X, y; factorization = :auto, collinearity = :qr, tol = 1e-8,
-               weights = nothing, has_intercept = true) -> ILSEstimator
-
-Fit the weighted least-squares step used by iterative least squares (ILS).  
-This is a lightweight WLS solver for internal probit iterations, returning
-an `ILSEstimator` containing the response object, predictor object, and
-basis coefficient mask, without full inference results.
-"""
-function ils_solver(X::AbstractVecOrMat{<:Real}, y::AbstractVector{<:Real};
-        factorization::Symbol = :auto,
-        collinearity::Symbol = :qr,
-        tol::Real = 1e-8,
-        weights::Union{Nothing, AbstractVector} = nothing,
-        has_intercept::Bool = true)
-
-    # Validate inputs
-    n, k = size(X)
-    length(y) == n ||
-        throw(DimensionMismatch("X has $n rows but y has $(length(y)) elements"))
-
-    # Validate keywords
-    factorization in (:auto, :chol, :qr) ||
-        throw(ArgumentError("factorization must be :auto, :chol, or :qr, got :$factorization"))
-    collinearity in (:qr, :sweep) ||
-        throw(ArgumentError("collinearity must be :qr or :sweep, got :$collinearity"))
-
-    # Determine numeric type
-    T = promote_type(eltype(X), eltype(y))
-    T <: AbstractFloat || (T = Float64)
-
-    # Convert to Matrix{T} and Vector{T} (materializes views)
-    X_mat = convert(Matrix{T}, X)
-    y_vec = convert(Vector{T}, y)
-
-    # Handle weights
-    has_weights = weights !== nothing
-    if has_weights
-        length(weights) == n || throw(DimensionMismatch("weights must have length $n"))
-        wts_vec = convert(Vector{T}, weights)
-        sqrtw = sqrt.(wts_vec)
-        X_mat = X_mat .* sqrtw
-        y_vec = y_vec .* sqrtw
-    else
-        wts_vec = T[]
-    end
-
-    # Choose factorization
-    if factorization == :auto
-        factorization = k < 100 ? :chol : :qr
-    end
-
-    # Build response object
-    mu = similar(y_vec)
-    rr = OLSResponse(y_vec, mu, wts_vec, T[], :y)
-
-    # Fit using unified solver
-    pp, basis_coef,
-    _ = fit_ols_core!(rr, X_mat, factorization;
-        tol = tol, save_matrices = true, collinearity = collinearity)
-
-    return ILSEstimator{T, typeof(pp)}(
-        rr, pp, basis_coef
-    )
-end
-
-############################################################
-### Probit specific likelihood helper
+### Probit-specific likelihood helper
 ############################################################
 """
     log_likelihood_probit(y, eta)
@@ -178,103 +109,178 @@ single probit observation with response `y` and linear predictor `eta`.
 """
 function log_likelihood_probit(y, eta)
     if y == 1
-        gi = exp(normlogpdf(eta)-normlogcdf(eta))
+        gi = exp(normlogpdf(eta) - normlogcdf(eta))
         hi = gi^2 + eta * gi
         di = normlogcdf(eta)
     else
-        gi = - exp(normlogpdf(eta)-normlogccdf(eta))
-        hi = gi^2 + eta*gi
+        gi = -exp(normlogpdf(eta) - normlogccdf(eta))
+        hi = gi^2 + eta * gi
         di = normlogccdf(eta)
     end
     return (gi, hi, di)
 end
 
+############################################################
+### IRLS workspace
+############################################################
 """
-    update_predictor!(m::BinaryEstimator, fes) -> feM
+    ProbitWorkspace{T, C}
 
-Perform one IRLS predictor update. Computes the working response `tildaz` and
-working weights from the current score and observed information, partials out
-fixed effects `fes` from both the working response and model matrix, solves the
-weighted least-squares problem, and stores the result in `pp.beta_new`.
-Returns the `FixedEffectMatrix` `feM` from the demeaning step.
+Preallocated buffers reused across IRLS iterations so that the inner loop makes
+no per-iteration allocations for the working response, weights, or demeaned
+design.
+
+The working response and design columns to be absorbed share a single
+`(n × (k+1))` buffer `M`: column 1 holds the working response, columns `2:k+1`
+hold the design. `cols` is a concretely typed vector of views into `M`, so
+`solve_residuals!` demeans them without dynamic dispatch.
 """
-function update_predictor!(m::BinaryEstimator, fes)
-    rr = m.rr
-    pp = m.pp
-    gi = getindex.(rr.v, 1)
-    hi = getindex.(rr.v, 2)
-    copyto!(pp.tildaX, pp.X)
-    pp.tildaz .= rr.eta .+ (gi ./ hi)
-    copyto!(pp.z, pp.tildaz) #dest,source
-    cols = Vector{AbstractVector{Float64}}(collect(eachcol(pp.tildaX))) #this is a view so it does not allocate
-    pushfirst!(cols, pp.tildaz)
-    feM, _,
-    _,
-    _,
-    _,
-    _ = partial_out_fixed_effects!(
-        cols,
-        m.coefnames,
-        fes,
-        Weights(hi),
-        :cpu, # TODO make this an argument,
-        Threads.nthreads(),
-        1e-6,
-        10000,
-        true,
-        false,
-        true,
-        true,
-        Float64;
-        verbose = false
-    ) # this modifies X and z in place
-
-    wls = ils_solver(
-        pp.tildaX,
-        pp.tildaz,
-        weights = hi
-    )
-    pp.beta_new = coef(wls)
-    m.basis_coef = basis_coef(wls)
-    return feM
+struct ProbitWorkspace{T <: AbstractFloat, C <: AbstractVector{T}}
+    g::Vector{T}       # per-observation score
+    h::Vector{T}       # per-observation observed information (working weights)
+    z::Vector{T}       # working response η + g/h
+    M::Matrix{T}       # [working response | design], absorbed in place
+    cols::Vector{C}    # views into M's columns for solve_residuals!
+    resid::Vector{T}   # z - Xβ, input to the fixed-effect contribution recovery
 end
 
-"""
-    stephalving!(m::BinaryEstimator, alpha_sum)
+function ProbitWorkspace(X::Matrix{T}) where {T <: AbstractFloat}
+    n, k = size(X)
+    M = Matrix{T}(undef, n, k + 1)
+    C = typeof(view(M, :, 1))
+    cols = C[view(M, :, j) for j in 1:(k + 1)]
+    return ProbitWorkspace{T, C}(
+        Vector{T}(undef, n), Vector{T}(undef, n), Vector{T}(undef, n),
+        M, cols, Vector{T}(undef, n))
+end
 
-Apply step-halving to ensure the deviance does not increase. Repeatedly
-bisects the step from `pp.beta` to `pp.beta_new` (up to 26 halvings) until
-`rr.deviance_new ≤ rr.deviance`.
+# Views onto the working response and the absorbed design within the shared buffer.
+zbuf(ws::ProbitWorkspace) = view(ws.M, :, 1)
+Xdbuf(ws::ProbitWorkspace) = view(ws.M, :, 2:size(ws.M, 2))
+
+############################################################
+### Weighted least squares on the absorbed design
+############################################################
 """
-function stephalving!(m::BinaryEstimator, alpha_sum)
-    rr = m.rr
-    pp = m.pp
-    steps = 0
-    while rr.deviance < rr.deviance_new && steps < 26
-        @info "Step-halving iteration $(steps), deviance = $(rr.deviance), new deviance = $(rr.deviance_new)"
-        pp.beta_new = (pp.beta .+ pp.beta_new) ./ 2
-        rr.eta = pp.X * pp.beta_new .+ alpha_sum
-        rr.v = log_likelihood_probit.(rr.y, rr.eta)
-        rr.deviance_new = deviance(rr)
-        steps += 1
+    wls_absorbed!(beta, Xd, z, h) -> beta
+
+Solve the weighted least-squares problem `min_β Σ hᵢ (zᵢ - Xdᵢ'β)²` on the
+FE-absorbed design `Xd` and working response `z`, writing the coefficients into
+`beta`. Columns of `Xd` that are collinear with the fixed effects have already
+been zeroed by the caller, so their coefficients come back as zero.
+"""
+function wls_absorbed!(beta::Vector{T}, Xd::AbstractMatrix{T}, z::AbstractVector{T},
+        h::Vector{T}, basis::BitVector) where {T <: AbstractFloat}
+    hz = h .* z
+    hX = h .* Xd
+    XtWX = Xd' * hX
+    XtWz = Xd' * hz
+    # FE-collinear columns (basis[j] == false) are excluded from the solve: pin
+    # their row/column to a unit diagonal with a zero right-hand side so their
+    # coefficient comes back as zero.
+    @inbounds for j in axes(XtWX, 1)
+        if !basis[j]
+            XtWX[:, j] .= zero(T)
+            XtWX[j, :] .= zero(T)
+            XtWX[j, j] = one(T)
+            XtWz[j] = zero(T)
+        end
     end
+    copyto!(beta, cholesky!(Symmetric(XtWX)) \ XtWz)
+    return beta
 end
 
 """
-    update_response!(m, alphanew)
+    _probit_irls!(m, ws, feM, has_fes, max_iter, tolerance) -> basis
 
-Update the response object after a predictor step. Recomputes `rr.eta` using
-`pp.beta_new` and the new fixed-effect sum `alphanew`, refreshes the
-log-likelihood contributions `rr.v` and `rr.deviance_new`, then calls
-`stephalving!` if needed to enforce deviance decrease.
+Run the IRLS loop in place on the model `m`, using the preallocated workspace
+`ws` and (optionally) the fixed-effect solver `feM`. Returns the basis mask of
+slope columns that survive fixed-effect absorption.
+
+A separate function from `fit_probit` so the hot loop specializes on the
+concrete types of `ws` and `feM`.
 """
-function update_response!(m, alphanew)
+function _probit_irls!(m::BinaryEstimator, ws::ProbitWorkspace, feM, has_fes::Bool,
+        max_iter::Integer, tolerance::Real)
     rr = m.rr
     pp = m.pp
-    rr.eta = pp.X * pp.beta_new .+ alphanew
-    rr.v = log_likelihood_probit.(rr.y, rr.eta)
-    rr.deviance_new = deviance(rr)
-    stephalving!(m, alphanew)
+    n = length(rr.y)
+    k = size(pp.X, 2)
+    # Basis of slope columns that survive absorption. A column collinear with the
+    # fixed effects collapses to (near) zero after demeaning; it is detected once
+    # on the first iteration and excluded thereafter.
+    basis = trues(k)
+    basis_detected = !has_fes
+    alpha = zeros(n)
+    sspre = zeros(k)
+    zd = zbuf(ws)
+    Xd = Xdbuf(ws)
+
+    for _ in 1:max_iter
+        # Score and observed information from the current linear predictor.
+        @inbounds for i in eachindex(rr.v)
+            gi, hi, _ = rr.v[i]
+            ws.g[i] = gi
+            ws.h[i] = hi
+        end
+
+        # Working response, and the absorption buffer holding [z | X].
+        ws.z .= rr.eta .+ ws.g ./ ws.h
+        zd .= ws.z
+        copyto!(Xd, pp.X)
+
+        if has_fes
+            if !basis_detected
+                @inbounds for j in 1:k
+                    sspre[j] = sum(abs2, view(Xd, :, j))
+                end
+            end
+            FixedEffects.update_weights!(feM, Weights(ws.h))
+            solve_residuals!(
+                ws.cols, feM; tol = 1e-6, maxiter = 10000, progress_bar = false)
+            if !basis_detected
+                @inbounds for j in 1:k
+                    if sum(abs2, view(Xd, :, j)) < 1e-6 * sspre[j]
+                        basis[j] = false
+                    end
+                end
+                basis_detected = true
+            end
+            # Zero any FE-collinear columns so the WLS coefficient is exactly zero.
+            @inbounds for j in 1:k
+                basis[j] || (view(Xd, :, j) .= zero(eltype(Xd)))
+            end
+        end
+
+        wls_absorbed!(pp.beta_new, Xd, zd, ws.h, basis)
+
+        if has_fes
+            # The fixed-effect contribution to the linear predictor is the part of
+            # the working residual removed by absorption:
+            #   α = (z − Xβ) − (z̃ − X̃β)
+            # where z̃, X̃ are the demeaned working response and design. Both
+            # residuals are already available, so no extra solve is needed.
+            mul!(ws.resid, pp.X, pp.beta_new)
+            mul!(alpha, Xd, pp.beta_new)
+            @inbounds for i in eachindex(alpha)
+                alpha[i] = (ws.z[i] - ws.resid[i]) - (zd[i] - alpha[i])
+            end
+        else
+            fill!(alpha, zero(eltype(alpha)))
+        end
+
+        update_response!(m, alpha)
+
+        # beta and beta_new are kept as distinct buffers: stephalving! mutates
+        # beta_new in place, so beta must be an independent copy.
+        converged = abs(rr.deviance_new - rr.deviance) / (0.1 + abs(rr.deviance_new)) <
+                    tolerance
+        rr.deviance = rr.deviance_new
+        copyto!(pp.beta, pp.beta_new)
+        converged && break
+    end
+
+    return basis
 end
 
 ############################################################
@@ -286,19 +292,25 @@ end
 Estimate a binary-response probit model, optionally absorbing fixed effects
 specified with `fe(...)` terms in `formula`.
 
-The estimator uses iterative reweighted least squares. At each iteration, fixed
-effects are partialled out before solving the weighted least-squares update for
-the slope coefficients.
+The estimator uses iteratively reweighted least squares. Each iteration forms
+the working response and weights from the probit score and observed information,
+absorbs the fixed effects from both the working response and the design, solves
+the weighted least-squares update for the slope coefficients, and recovers the
+fixed-effect contribution to the linear predictor. Step-halving guards against
+deviance increases.
+
+The fixed-effect solver and the working buffers are constructed once and reused
+across iterations; only the observation weights are refreshed each iteration.
 
 # Arguments
 - `data`: Input table containing the response, regressors, and fixed-effect
   variables.
 - `formula::FormulaTerm`: A `StatsModels.jl` formula, for example
   `@formula(y ~ x1 + x2 + fe(group))`.
-- `beta0::Vector`: Initial coefficient vector for the non-fixed-effect
-  regressors.
+- `beta0::Union{Nothing, Vector}`: Initial coefficient vector for the
+  non-fixed-effect regressors, or `nothing` for a zero start.
 - `max_iter::Integer`: Maximum number of IRLS iterations.
-- `tolerance::Real`: Convergence tolerance for the deviance update.
+- `tolerance::Real`: Convergence tolerance for the relative deviance change.
 
 # Returns
 - `BinaryEstimator`: Fitted model containing the response, fitted
@@ -310,112 +322,122 @@ function fit_probit(
         formula::FormulaTerm,
         beta0::Union{Nothing, Vector},
         max_iter::Integer,
-        tolerance::Real #if the difference between the old beta and the new one is below the tolerance stop 
-)
-    ###############################################
-    ###### FORMULA PARSING AND DATA CLEANING ######
-    ###############################################
-
-    #parse the formula and return a dataframe with only the needed columns, X::Matrix, y::Vector.
+        tolerance::Real)
     schema, formula_schema, data, X, y = select_columns(data, formula)
 
-    # Put all 0s in beta if user did not input an initial guess
-    if beta0 === nothing
-        beta0 = zeros(size(X, 2))
-    end
-    # store coefficient names for model summary, ignroes fe variables
     response_name, coef_names_str = get_coefficient_names_nofe(formula, data)
-
-    #initialize alpha to all 0 and append it to the dataframe
-    alpha = zeros(size(X, 1))
-
-    # vector to store fitted values, now empty
-    fitted_probabilities = Vector{Float64}()
 
     n = size(data, 1)
     k = count(==(1), y)
-    # total sum of squares
-    Lnull = k * log(k/n) + (n-k) * log(1 - k/n)
+    Lnull = k * log(k / n) + (n - k) * log(1 - k / n)
     nulldeviance = -2 * Lnull
 
-    # formula parsing
     formula, formula_fes = parse_fe(formula)
     fes, feids, fekeys = parse_fixedeffect(data, formula_fes)
+    has_fes = has_fe(formula_fes)
 
-    ## Instantiate predictor object
-    pp = BinaryPredictorQR{Float64, Weights}(
-        X, similar(X),
-        beta0, similar(beta0),
-        similar(beta0), Weights(ones(length(y))),
-        similar(X), similar(y), similar(y)
-    )
+    # Fixed effects absorb the constant; without them the model needs an explicit
+    # intercept, which the fe-excluded model matrix does not carry.
+    if !has_fes
+        X = hcat(ones(eltype(X), size(X, 1)), X)
+        pushfirst!(coef_names_str, "(Intercept)")
+    end
 
-    ## Instantiate response object
+    if beta0 === nothing
+        beta0 = zeros(size(X, 2))
+    end
+
+    pp = BinaryPredictorQR{Float64}(X, beta0, similar(beta0))
+
     rr = BinaryResponse(y, pp, response_name)
 
-    beta = copy(pp.beta)
-
     m = BinaryEstimator{Float64}(
-        rr,                             # rr
-        pp,                             # pp
-        formula,                        # formula
-        formula_schema,                 # formula_schema
-        formula_fes,                    # formula_fes
-        size(data, 1),                   # n_observations
-        0,                              # n_parameters
-        0,                              # deviance
-        nulldeviance,                   # nulldeviance
-        has_fe(formula_fes),            # has_fixed_effects
-        0,                              # fixed_effects_dof
-        coef_names_str,                 # coefnames
-        trues(length(coef_names_str))   # basis_coef
+        rr,
+        pp,
+        formula,
+        formula_schema,
+        formula_fes,
+        n,
+        0,
+        0,
+        nulldeviance,
+        has_fes,
+        0,
+        coef_names_str,
+        trues(length(coef_names_str))
     )
     m.deviance = deviance(m)
 
     ###############################################
     ############ ESTIMATION LOOP ##################
     ###############################################
-    i = 0
-    for _ in 1:max_iter
-        feM = update_predictor!(m, fes)
-
-        if m.has_fixed_effects
-            newfes, _,
-            _ = solve_coefficients!(
-                pp.z - pp.X * pp.beta_new,
-                feM;
-                tol = 1e-6,
-                maxiter = 1000
-            )
-            alpha = stack(newfes)
-            #if there are more than one fe we are interested only in the sum of them
-            alpha_sum = alpha isa AbstractVector ? alpha : vec(sum(alpha, dims = 2))
-        else
-            alpha_sum = alpha
-        end
-
-        update_response!(m, alpha_sum)
-
-        if norm(rr.deviance_new - rr.deviance) / (0.1 + norm(rr.deviance_new)) < tolerance
-            pp.beta = pp.beta_new
-            break
-        end
-        rr.deviance = rr.deviance_new
-        pp.beta = pp.beta_new
-        i += 1
-    end
+    ws = ProbitWorkspace(X)
+    # Build the fixed-effect solver once; only its weights change per iteration.
+    feM = has_fes ?
+          AbstractFixedEffectSolver{Float64}(fes, Weights(ones(n)), Val{:cpu}) : nothing
+    basis = _probit_irls!(m, ws, feM, has_fes, max_iter, tolerance)
 
     ################################
     ## Summary statistics
     ################################
-
     ngroups_fes = [nunique(fe) for fe in fes]
-    dof_fes = sum(ngroups_fes)
-    dof_model = sum(basis_coef(m))
-    m.n_parameters = dof_model
+    dof_fes = sum(ngroups_fes; init = 0)
+    m.basis_coef = basis
+    m.n_parameters = sum(basis)
     m.fixed_effects_dof = dof_fes
 
-    rr.mu = normcdf.(rr.eta) #FIXME need to also use alpha??
-    println("Convergence reached after $i iterations")
+    rr.mu = normcdf.(rr.eta)
     return m
+end
+
+"""
+    refresh_response!(rr, X, beta, alpha) -> deviance
+
+Recompute the linear predictor `rr.eta = X·β + α` and the per-observation
+log-likelihood contributions `rr.v` in place, and return the deviance. Performs
+no allocations beyond the reused buffers.
+"""
+function refresh_response!(rr::BinaryResponse{T}, X, beta, alpha) where {T}
+    mul!(rr.eta, X, beta)
+    dev = zero(T)
+    @inbounds for i in eachindex(rr.eta)
+        rr.eta[i] += alpha[i]
+        gi, hi, di = log_likelihood_probit(rr.y[i], rr.eta[i])
+        rr.v[i] = (gi, hi, di)
+        dev -= 2 * di
+    end
+    return dev
+end
+
+"""
+    stephalving!(m::BinaryEstimator, alpha)
+
+Apply step-halving to ensure the deviance does not increase. Repeatedly bisects
+the step from `pp.beta` to `pp.beta_new` (up to 26 halvings) until
+`rr.deviance_new ≤ rr.deviance`.
+"""
+function stephalving!(m::BinaryEstimator, alpha)
+    rr = m.rr
+    pp = m.pp
+    steps = 0
+    while rr.deviance < rr.deviance_new && steps < 26
+        pp.beta_new .= (pp.beta .+ pp.beta_new) ./ 2
+        rr.deviance_new = refresh_response!(rr, pp.X, pp.beta_new, alpha)
+        steps += 1
+    end
+end
+
+"""
+    update_response!(m, alpha)
+
+Update the response object after a predictor step. Recomputes `rr.eta` using
+`pp.beta_new` and the fixed-effect contribution `alpha`, refreshes the
+log-likelihood contributions `rr.v` and `rr.deviance_new`, then calls
+`stephalving!` if needed to enforce a deviance decrease.
+"""
+function update_response!(m, alpha)
+    rr = m.rr
+    pp = m.pp
+    rr.deviance_new = refresh_response!(rr, pp.X, pp.beta_new, alpha)
+    stephalving!(m, alpha)
 end

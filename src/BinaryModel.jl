@@ -44,36 +44,24 @@ end
 # ── Predictor ─────────────────────────────────────────────────────────────────
 
 """
-    BinaryPredictorQR{T <: AbstractFloat, W <: AbstractWeights}
+    BinaryPredictorQR{T <: AbstractFloat}
 
-QR-based predictor for binary models. Stores the design matrix, coefficient
-estimates, and demeaned working variables used in each IRLS step.
+Predictor for binary models: the design matrix and the current and candidate
+coefficient vectors updated at each IRLS step.
 
 # Fields
-- `X`: full design matrix
-- `X_reduced`: non-collinear columns only (FIXME: currently same as X)
+- `X`: design matrix (fixed-effect terms excluded)
 - `beta`: current coefficient estimates
-- `deltaBeta`: coefficient update from last iteration
-- `beta_new`: scratch space for candidate coefficients
-- `weights`: observation weights
-- `tildaX`: demeaned design matrix (after FE absorption)
-- `z`, `tildaz`: working response and its demeaned version
+- `beta_new`: candidate coefficients from the latest weighted least-squares step
 """
-mutable struct BinaryPredictorQR{T <: AbstractFloat, W <: AbstractWeights}
-    X::AbstractVecOrMat{T}
-    X_reduced::AbstractVecOrMat{T}  #FIXME Non collinear columns only
+mutable struct BinaryPredictorQR{T <: AbstractFloat}
+    X::Matrix{T}
     beta::Vector{T}
-    deltaBeta::Vector{T}
     beta_new::Vector{T}
-    weights::W
-    tildaX::AbstractVecOrMat{T}
-    z::Vector{T}
-    tildaz::Vector{T}
-    # qr::LinearAlgebra.QRCompactWY{T, Matrix{T}} #TODO add QR factorization
 end
 
 """
-    buildBinaryResponse(yi, pp::BinaryPredictorQR, responsename) -> BinaryResponse
+    BinaryResponse(yi, pp::BinaryPredictorQR, responsename) -> BinaryResponse
 
 Construct a `BinaryResponse` from initial response vector `yi`, predictor `pp`,
 and the response variable name. Computes the initial linear predictor `eta`,
@@ -82,11 +70,11 @@ log-likelihood contributions, and deviance.
 function BinaryResponse(yi, pp::BinaryPredictorQR, responsename)
     T = eltype(pp.beta)
     yi = T.(yi)
-    eta = pp.X isa AbstractVector ? pp.X * only(pp.beta) : pp.X * pp.beta
+    eta = pp.X * pp.beta
     v = log_likelihood_probit.(yi, eta)
     total_log_likelihood = sum(getindex.(v, 3))
     deviance = -2 * total_log_likelihood
-    rr = BinaryResponse(
+    return BinaryResponse(
         yi,
         Normal(0, 1),
         v,
@@ -95,34 +83,10 @@ function BinaryResponse(yi, pp::BinaryPredictorQR, responsename)
         eta,
         similar(yi), # fitted probabilities
         similar(yi), # weights
-        similar(yi), #offset
+        similar(yi), # offset
         responsename
     )
 end
-
-# ── ILS inner model ───────────────────────────────────────────────────────────
-
-"""
-    ILSEstimator{T <: AbstractFloat, P <: OLSLinearPredictor{T}}
-
-Iterated Least Squares sub-model wrapping an OLS response and predictor.
-Used as the inner linear step of IRLS binary model fitting.
-`basis_coef` marks which columns are linearly independent.
-"""
-struct ILSEstimator{T <: AbstractFloat, P <: OLSLinearPredictor{T}} <:
-       AbstractRegressModel
-    rr::OLSResponse{T}
-    pp::P
-    basis_coef::BitVector
-end
-
-function StatsAPI.coef(m::ILSEstimator)
-    beta = copy(m.pp.beta)
-    beta[.!m.basis_coef] .= zero(eltype(beta))
-    return beta
-end
-
-basis_coef(m::ILSEstimator) = m.basis_coef
 
 # ── Fitted model ──────────────────────────────────────────────────────────────
 

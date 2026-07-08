@@ -12,6 +12,8 @@
     #   (CovarianceMatrices): protocol methods Regress extends
     # - alignment, print_matrix_row (Base): custom coeftable show
     # - QRCompactWY (LinearAlgebra): concrete type of the stored QR factorization
+    # - update_weights! (FixedEffects): reweights the fixed-effect solver in place
+    #   across probit IRLS iterations
     test_explicit_imports(Regress;
         ignore = (:PValue, :NoQuote,
             :Schema, :FullRank, :collect_matrix_terms, :missing_omit,
@@ -19,5 +21,5 @@
             :istable, :getcolumn, :ColumnTable,
             :CR, :Clustering, :_residuals, :mask, :numobs, :setkernelweights!,
             :alignment, :print_matrix_row,
-            :QRCompactWY))
+            :QRCompactWY, :update_weights!))
 end

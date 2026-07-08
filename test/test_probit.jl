@@ -86,13 +86,17 @@ end
         max_iter = 1000,
         tolerance = 1e-6
     )
+    # Without fixed effects the model carries an explicit intercept.
     expected_no_fe_coef = [
-        0.0142774,
-        -1.1008e-5,
-        -0.126499,
-        -0.0211008,
-        0.0548625
+        0.1550025,
+        0.0128346,
+        -1.164312e-5,
+        -0.1411836,
+        -0.0281153,
+        0.0522604
     ]
+    @test coefnames(model_no_fe) ==
+          ["(Intercept)", "age", "hhninc", "hhkids", "educ", "married"]
     @test coef(model_no_fe) ≈ expected_no_fe_coef atol = 1e-4
 
     model_educ = probit(
@@ -102,30 +106,19 @@ end
         max_iter = 1000,
         tolerance = 1e-6
     )
-    @test coef(model_educ) ≈ [0.0261837] atol = 1e-4
+    @test coef(model_educ) ≈ [0.8038687, -0.0417852] atol = 1e-4
 end
 
 @testitem "Probit step-halving reduces bad overshoot" tags = [:probit] begin
     using Regress
     using Regress: BinaryEstimator, BinaryPredictorQR, BinaryResponse
-    using Regress: stephalving!, log_likelihood_probit
-    using StatsBase: Weights
+    using Regress: stephalving!, refresh_response!
     using StatsAPI: deviance
 
     X = reshape([-1.0, 1.0, 1.0], :, 1)
     y = [0.0, 1.0, 0.0]
 
-    pp = BinaryPredictorQR{Float64, Weights}(
-        X,
-        similar(X),
-        [0.0],
-        [0.0],
-        [20.0],
-        Weights(ones(length(y))),
-        similar(X),
-        similar(y),
-        similar(y)
-    )
+    pp = BinaryPredictorQR{Float64}(X, [0.0], [20.0])
 
     rr = BinaryResponse(y, pp, :y)
     rr.deviance = deviance(rr)
@@ -148,16 +141,39 @@ end
         trues(1)
     )
 
-    alpha_sum = zeros(length(y))
+    alpha = zeros(length(y))
 
-    rr.eta = pp.X * pp.beta_new .+ alpha_sum
-    rr.v = log_likelihood_probit.(rr.y, rr.eta)
-    rr.deviance_new = deviance(rr)
+    rr.deviance_new = refresh_response!(rr, pp.X, pp.beta_new, alpha)
 
     @test rr.deviance_new > rr.deviance
 
-    stephalving!(m, alpha_sum)
+    stephalving!(m, alpha)
 
     @test rr.deviance_new <= rr.deviance
     @test pp.beta_new ≈ [0.625]
+end
+
+@testitem "Probit without fixed effects matches GLM" tags = [:probit] begin
+    using Regress
+    using Regress: probit
+    using StatsAPI: coef
+    using DataFrames
+    using GLM  # re-exports Normal, cdf, Binomial, ProbitLink
+    using StableRNGs
+
+    rng = StableRNG(20240607)
+    n = 2000
+    x1 = randn(rng, n)
+    x2 = randn(rng, n)
+    eta = 0.4 .- 0.8 .* x1 .+ 0.5 .* x2
+    y = Int.(rand(rng, n) .< GLM.Distributions.cdf.(GLM.Distributions.Normal(), eta))
+    df = DataFrame(; y, x1, x2)
+
+    m = probit(
+        df, @formula(y ~ x1 + x2); beta0 = nothing, max_iter = 1000, tolerance = 1e-8)
+    g = glm(@formula(y ~ x1 + x2), df, Binomial(), ProbitLink())
+
+    # The no-fixed-effect model carries an explicit intercept.
+    @test coefnames(m) == ["(Intercept)", "x1", "x2"]
+    @test coef(m) ≈ coef(g) atol = 1e-5
 end
