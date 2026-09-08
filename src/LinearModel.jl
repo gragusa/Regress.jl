@@ -522,9 +522,9 @@ end
 import StatsBase: NoQuote, PValue
 function Base.show(io::IO, m::OLSEstimator)
     ct = coeftable(m)
-    cols = ct.cols;
-    rownms = ct.rownms;
-    colnms = ct.colnms;
+    cols = ct.cols
+    rownms = ct.rownms
+    colnms = ct.colnms
     nc = length(cols)
     nr = length(cols[1])
     if length(rownms) == 0
@@ -593,9 +593,9 @@ end
 
 function Base.show(io::IO, ::MIME"text/html", m::OLSEstimator)
     ct = coeftable(m)
-    cols = ct.cols;
-    rownms = ct.rownms;
-    colnms = ct.colnms;
+    cols = ct.cols
+    rownms = ct.rownms
+    colnms = ct.colnms
 
     # Start table with OLS as caption
     html_table_start(io; class = "regress-table regress-ols", caption = "OLS")
