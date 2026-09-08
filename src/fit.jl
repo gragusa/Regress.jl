@@ -526,8 +526,10 @@ function iv(::TSLS, Z::AbstractMatrix{<:Real}, X::AbstractMatrix{<:Real},
     #           = (n/(n-k)) * (X̂'X̂)^{-1} * X̂'diag(e²)X̂ * (X̂'X̂)^{-1}
     scale_hc1 = T(n) / T(n - k)
     Xe = X_hat .* residuals
-    meat = Xe' * Xe
-    vcov_matrix = Symmetric(scale_hc1 .* invXhatXhat * meat * invXhatXhat)
+    # Form the sandwich as B*B' (B = (X̂'X̂)⁻¹ X̂'diag(e)) so it is PSD even when X̂'X̂ is nearly
+    # singular (weak first stage): A*M*A can then have negative diagonal entries from cancellation.
+    B_hc1 = invXhatXhat * Xe'
+    vcov_matrix = Symmetric(scale_hc1 .* (B_hc1 * B_hc1'))
 
     # Standard errors, t-stats, p-values
     se = sqrt.(diag(vcov_matrix))
