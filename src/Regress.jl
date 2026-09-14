@@ -46,7 +46,6 @@ include("utils/fit_common.jl")   # Shared utilities for fitting
 include("utils/ranktest.jl")     # Kleibergen-Paap rank test for IV
 include("utils/vcov_spec.jl")    # VcovSpec wrapper for model + vcov() syntax
 include("utils/robust_fstat.jl") # Robust Wald F-statistic computation
-include("utils/vcov_copy.jl")    # Deep copy utilities for vcov estimators
 include("utils/kclass_utils.jl") # K-class estimation utilities (LIML, Fuller)
 include("utils/show_utils.jl")   # Display formatting utilities
 

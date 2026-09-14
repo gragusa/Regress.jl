@@ -1157,9 +1157,6 @@ function Base.:+(m::IVEstimator{T, E, V1, P}, v::VcovSpec{V2}) where {T, E, V1, 
     # Recompute robust first-stage F with this vcov type
     F_first_stage_robust, p_first_stage_robust = recompute_first_stage_fstat(m, v.source)
 
-    # Deep copy the vcov estimator to avoid aliasing
-    vcov_copy = deepcopy_vcov(v.source)
-
     # Return new IVEstimator with same data but different vcov type
     return IVEstimator{T, E, V2, P}(
         m.estimator, m.coef,
@@ -1170,7 +1167,7 @@ function Base.:+(m::IVEstimator{T, E, V1, P}, v::VcovSpec{V2}) where {T, E, V1, 
         m.nobs, m.dof, m.dof_fes, m.dof_residual,
         m.rss, m.tss,
         m.iterations, m.converged, m.r2_within,
-        vcov_copy, Symmetric(vcov_mat), se, t_stats, p_values,
+        v.source, Symmetric(vcov_mat), se, t_stats, p_values,
         F_stat, p_val,
         m.F_first_stage_nonrobust, m.p_first_stage_nonrobust,
         F_first_stage_robust, p_first_stage_robust,
@@ -2030,7 +2027,7 @@ function Base.:+(m::IVMatrixEstimator{T, V1}, v::VcovSpec{V2}) where {T, V1, V2}
         m.tss,
         m.r2,
         m.has_intercept,
-        deepcopy_vcov(v.source),
+        v.source,
         new_vcov,
         new_se,
         new_t,

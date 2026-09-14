@@ -270,13 +270,12 @@ Create a new model with a different variance-covariance estimator.
 function Base.:+(m::OLSMatrixEstimator{T, P, V1}, v::VcovSpec{V2}) where {T, P, V1, V2}
     vcov_mat = StatsBase.vcov(v.source, m)
     se, t_stats, p_values, _, _ = _calculate_vcov_stats(m, vcov_mat)
-    vcov_copy = deepcopy_vcov(v.source)
 
     return OLSMatrixEstimator{T, P, V2}(
         m.rr, m.pp, m.basis_coef,
         m.nobs, m.dof, m.dof_residual,
         m.rss, m.tss, m.r2, m.has_intercept,
-        vcov_copy, Symmetric(vcov_mat), se, t_stats, p_values
+        v.source, Symmetric(vcov_mat), se, t_stats, p_values
     )
 end
 
@@ -522,9 +521,9 @@ end
 import StatsBase: NoQuote, PValue
 function Base.show(io::IO, m::OLSEstimator)
     ct = coeftable(m)
-    cols = ct.cols;
-    rownms = ct.rownms;
-    colnms = ct.colnms;
+    cols = ct.cols
+    rownms = ct.rownms
+    colnms = ct.colnms
     nc = length(cols)
     nr = length(cols[1])
     if length(rownms) == 0
@@ -593,9 +592,9 @@ end
 
 function Base.show(io::IO, ::MIME"text/html", m::OLSEstimator)
     ct = coeftable(m)
-    cols = ct.cols;
-    rownms = ct.rownms;
-    colnms = ct.colnms;
+    cols = ct.cols
+    rownms = ct.rownms
+    colnms = ct.colnms
 
     # Start table with OLS as caption
     html_table_start(io; class = "regress-table regress-ols", caption = "OLS")
@@ -691,9 +690,6 @@ function Base.:+(m::OLSEstimator{T, P, V1}, v::VcovSpec{V2}) where {T, P, V1, V2
     # Use shared helper for stats
     se, t_stats, p_values, F_stat, p_val = _calculate_vcov_stats(m, vcov_mat)
 
-    # Deep copy the vcov estimator to avoid aliasing
-    vcov_copy = deepcopy_vcov(v.source)
-
     # Return new OLSEstimator with same data but different vcov type
     return OLSEstimator{T, P, V2}(
         m.rr, m.pp, m.fes,
@@ -703,7 +699,7 @@ function Base.:+(m::OLSEstimator{T, P, V1}, v::VcovSpec{V2}) where {T, P, V1, V2
         m.nobs, m.dof, m.dof_fes, m.dof_residual,
         m.tss_total, m.tss_partial, m.rss, m.r2, m.r2_within,
         m.has_intercept,
-        vcov_copy, Symmetric(vcov_mat), se, t_stats, p_values,
+        v.source, Symmetric(vcov_mat), se, t_stats, p_values,
         F_stat, p_val
     )
 end
