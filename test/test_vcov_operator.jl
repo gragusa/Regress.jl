@@ -97,6 +97,59 @@ end
     @test wrapped.se ≈ direct_se
 end
 
+@testitem "OLS + vcov(HAC) with data-driven bandwidth" tags = [:ols, :vcov] begin
+    using Regress, CSV, DataFrames, LinearAlgebra, StatsBase
+    using Regress: Bartlett, Andrews, NeweyWest, aVar, bandwidth
+    using CovarianceMatrices: kernelweights, momentmatrix
+
+    # `y ~ x` on this dataset separates the weighted and unweighted bandwidths by
+    # a factor of 2 (Andrews) and 4.5 (NeweyWest). On Cigar they agree to ~1e-6,
+    # which would make the comparisons below pass even if the weights were dropped.
+    df = CSV.read(joinpath(@__DIR__, "data", "basic_validation_df.csv"), DataFrame)
+    model = Regress.ols(df, @formula(y ~ x))
+
+    X = modelmatrix(model)
+    mm = momentmatrix(model)
+
+    for k in [Bartlett{Andrews}(), Bartlett{NeweyWest}()]
+        # Bandwidth selection weights come from the model matrix, giving the
+        # intercept column weight 0; an intercept-free model gets all-ones
+        # weights and the distinction below disappears.
+        kw = kernelweights(k, X)
+        @test kw == [0.0, 1.0]
+
+        from_model = aVar(k, model)
+        with_weights = aVar(k, mm; weights = kw)
+        without_weights = aVar(k, mm)
+
+        # The model path selects the bandwidth the explicitly weighted call does.
+        @test bandwidth(from_model) ≈ bandwidth(with_weights)
+        @test Matrix(from_model) ≈ Matrix(with_weights)
+
+        # ... and not the one it would select with the weights omitted.
+        @test !isapprox(bandwidth(from_model), bandwidth(without_weights); rtol = 1e-3)
+    end
+end
+
+@testitem "show with data-driven bandwidth" tags = [:ols, :iv, :vcov, :smoke] begin
+    using Regress, CSV, DataFrames, StatsBase
+    using Regress: Bartlett, Andrews, NeweyWest
+
+    df = DataFrame(CSV.File(joinpath(dirname(pathof(Regress)), "../dataset/Cigar.csv")))
+    model = Regress.ols(df, @formula(Sales ~ Price + NDI))
+    model_iv = Regress.iv(Regress.TSLS(), df, @formula(Sales ~ NDI + (Price ~ Pimin)))
+
+    for k in [Bartlett{Andrews}(), Bartlett{NeweyWest}()]
+        for m in (model, model_iv)
+            wrapped = m + vcov(k)
+            @test Regress.vcov_type_name(wrapped.vcov_estimator) == "Bartlett(auto)"
+            @test !isempty(sprint(show, wrapped))
+        end
+    end
+
+    @test Regress.vcov_type_name(Bartlett(4)) == "Bartlett(4)"
+end
+
 @testitem "IV + vcov(HC)" tags = [:iv, :vcov, :hc] begin
     using Regress, CategoricalArrays, CSV, DataFrames, LinearAlgebra, StatsBase
     using Regress: HC0, HC1, HC2

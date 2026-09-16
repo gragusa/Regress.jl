@@ -342,7 +342,6 @@ function CM.aVar(
         scale = true,
         kwargs...
 ) where {K <: CM.AbstractAsymptoticVarianceEstimator}
-    CM.setkernelweights!(k, m)
     # Compute moment matrix directly: X .* (y - mu) .* u in single fused broadcast
     # This avoids separate allocation for residuals vector
     # Note: y and mu are already weighted if model has weights
@@ -352,7 +351,11 @@ function CM.aVar(
     mu = m.rr.mu
     mm = @. X * (y - mu) * u
     basis_coef = m.basis_coef
-    Σ = aVar(k, mm; demean = demean, prewhite = prewhite, scale = scale)
+    # Bandwidth-selection weights come from the model matrix, not the moment
+    # matrix: they must give the intercept weight 0, and the intercept column of
+    # the moment matrix is not constant. `nothing` for non-HAC estimators.
+    kw = CM.kernelweights(k, X)
+    Σ = aVar(k, mm; demean = demean, prewhite = prewhite, scale = scale, weights = kw)
 
     all(basis_coef) && return Σ
     return mask_vcov_collinear(Σ, basis_coef)
@@ -394,14 +397,6 @@ function CM.aVar(
 
     all(basis_coef) && return Σ
     return mask_vcov_collinear(Σ, basis_coef)
-end
-
-function CM.setkernelweights!(
-        k::CM.HAC{T},
-        X::OLSEstimator
-) where {T <: Union{CM.NeweyWest, CM.Andrews}}
-    CM.setkernelweights!(k, modelmatrix(X))
-    k.wlock .= true
 end
 
 ##############################################################################
@@ -1177,7 +1172,6 @@ function CM.aVar(
         scale = true,
         kwargs...
 ) where {K <: CM.AbstractAsymptoticVarianceEstimator}
-    CM.setkernelweights!(k, m)
     # Compute moment matrix directly: X .* (y - mu) .* u in single fused broadcast
     u = residualadjustment(k, m)
     X = modelmatrix(m)
@@ -1185,7 +1179,11 @@ function CM.aVar(
     mu = m.rr.mu
     mm = @. X * (y - mu) * u
     basis_coef = m.basis_coef
-    Σ = aVar(k, mm; demean = demean, prewhite = prewhite, scale = scale)
+    # Bandwidth-selection weights come from the model matrix, not the moment
+    # matrix: they must give the intercept weight 0, and the intercept column of
+    # the moment matrix is not constant. `nothing` for non-HAC estimators.
+    kw = CM.kernelweights(k, X)
+    Σ = aVar(k, mm; demean = demean, prewhite = prewhite, scale = scale, weights = kw)
 
     all(basis_coef) && return Σ
     return mask_vcov_collinear(Σ, basis_coef)
@@ -1224,14 +1222,6 @@ function CM.aVar(
 
     all(basis_coef) && return Σ
     return mask_vcov_collinear(Σ, basis_coef)
-end
-
-function CM.setkernelweights!(
-        k::CM.HAC{T},
-        X::OLSMatrixEstimator
-) where {T <: Union{CM.NeweyWest, CM.Andrews}}
-    CM.setkernelweights!(k, modelmatrix(X))
-    k.wlock .= true
 end
 
 """
