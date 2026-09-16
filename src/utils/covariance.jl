@@ -117,11 +117,14 @@ end
 """
     mask_vcov_collinear(Σ::AbstractMatrix{T}, basis_coef::BitVector) where {T}
 
-Create a copy of vcov matrix with NaN for collinear entries.
+Create a copy of a variance matrix with NaN for collinear entries.
 The matrix Σ is expected to be full size (matching length of basis_coef).
 Non-collinear entries are preserved; collinear entries are set to NaN.
 
-Uses indexed assignment instead of element-wise loop for better performance.
+Applies to a completed sandwich, not to an `aVar` result: the `aVar` methods
+return the variance of the moment matrix, where coefficient collinearity has not
+yet entered. The `vcov` methods that build their own sandwich handle rank
+deficiency by subsetting to `findall(basis_coef)` directly.
 """
 function mask_vcov_collinear(Σ::AbstractMatrix{T}, basis_coef::BitVector) where {T}
     Σ_out = fill(T(NaN), size(Σ))
@@ -350,15 +353,11 @@ function CM.aVar(
     y = m.rr.y
     mu = m.rr.mu
     mm = @. X * (y - mu) * u
-    basis_coef = m.basis_coef
     # Bandwidth-selection weights come from the model matrix, not the moment
     # matrix: they must give the intercept weight 0, and the intercept column of
     # the moment matrix is not constant. `nothing` for non-HAC estimators.
     kw = CM.kernelweights(k, X)
-    Σ = aVar(k, mm; demean = demean, prewhite = prewhite, scale = scale, weights = kw)
-
-    all(basis_coef) && return Σ
-    return mask_vcov_collinear(Σ, basis_coef)
+    return aVar(k, mm; demean = demean, prewhite = prewhite, scale = scale, weights = kw)
 end
 
 # Disambiguating method for cluster-robust estimators (CR <: AbstractAsymptoticVarianceEstimator)
@@ -376,7 +375,6 @@ function CM.aVar(
     X = modelmatrix(m)
     y = m.rr.y
     mu = m.rr.mu
-    basis_coef = m.basis_coef
 
     # Optimization: For single-cluster CR0/CR1, use direct aggregation
     # This avoids allocating an n×k moment matrix
@@ -384,19 +382,13 @@ function CM.aVar(
         clustering = k.g[1]
         # Direct aggregation: only allocate G×k instead of n×k
         # Pass scale parameter to match CovarianceMatrices.aVar behavior
-        Σ = cluster_aVar_direct(X, y, mu, clustering; scale = scale)
-
-        all(basis_coef) && return Σ
-        return mask_vcov_collinear(Σ, basis_coef)
+        return cluster_aVar_direct(X, y, mu, clustering; scale = scale)
     end
 
     # Fallback: standard moment matrix computation for multi-way or CR2/CR3
     u = residualadjustment(k, m)
     mm = @. X * (y - mu) * u
-    Σ = aVar(k, mm; demean = demean, prewhite = prewhite, scale = scale)
-
-    all(basis_coef) && return Σ
-    return mask_vcov_collinear(Σ, basis_coef)
+    return aVar(k, mm; demean = demean, prewhite = prewhite, scale = scale)
 end
 
 ##############################################################################
@@ -651,12 +643,7 @@ function CM.aVar(
     y = m.rr.y
     mu = m.rr.mu
     mm = @. X * (y - mu)
-    basis_coef = m.basis_coef
-
-    Σ = aVar(k, mm; demean = demean, prewhite = prewhite, scale = scale)
-
-    all(basis_coef) && return Σ
-    return mask_vcov_collinear(Σ, basis_coef)
+    return aVar(k, mm; demean = demean, prewhite = prewhite, scale = scale)
 end
 
 # Residual adjustment for CachedCR (same as CR0/CR1 - no adjustment)
@@ -1079,7 +1066,7 @@ function CM.vcov(k::CM.AbstractAsymptoticVarianceEstimator, m::OLSEstimator; dof
     end
 
     # Handle dimension mismatch when there is collinearity:
-    # - A is k×k (full size, with NaN for collinear entries)
+    # - A is k×k (full size, finite throughout)
     # - B is k_reduced×k_reduced (from factorization on non-collinear columns)
     # We need to extract the valid submatrix, compute sandwich, then expand back
     if !all(basis_coef)
@@ -1178,15 +1165,11 @@ function CM.aVar(
     y = m.rr.y
     mu = m.rr.mu
     mm = @. X * (y - mu) * u
-    basis_coef = m.basis_coef
     # Bandwidth-selection weights come from the model matrix, not the moment
     # matrix: they must give the intercept weight 0, and the intercept column of
     # the moment matrix is not constant. `nothing` for non-HAC estimators.
     kw = CM.kernelweights(k, X)
-    Σ = aVar(k, mm; demean = demean, prewhite = prewhite, scale = scale, weights = kw)
-
-    all(basis_coef) && return Σ
-    return mask_vcov_collinear(Σ, basis_coef)
+    return aVar(k, mm; demean = demean, prewhite = prewhite, scale = scale, weights = kw)
 end
 
 # Disambiguating method for cluster-robust estimators
@@ -1201,7 +1184,6 @@ function CM.aVar(
     X = modelmatrix(m)
     y = m.rr.y
     mu = m.rr.mu
-    basis_coef = m.basis_coef
 
     # Optimization: For single-cluster CR0/CR1, use direct aggregation
     # This avoids allocating an n×k moment matrix
@@ -1209,19 +1191,13 @@ function CM.aVar(
         clustering = k.g[1]
         # Direct aggregation: only allocate G×k instead of n×k
         # Pass scale parameter to match CovarianceMatrices.aVar behavior
-        Σ = cluster_aVar_direct(X, y, mu, clustering; scale = scale)
-
-        all(basis_coef) && return Σ
-        return mask_vcov_collinear(Σ, basis_coef)
+        return cluster_aVar_direct(X, y, mu, clustering; scale = scale)
     end
 
     # Fallback: standard moment matrix computation for multi-way or CR2/CR3
     u = residualadjustment(k, m)
     mm = @. X * (y - mu) * u
-    Σ = aVar(k, mm; demean = demean, prewhite = prewhite, scale = scale)
-
-    all(basis_coef) && return Σ
-    return mask_vcov_collinear(Σ, basis_coef)
+    return aVar(k, mm; demean = demean, prewhite = prewhite, scale = scale)
 end
 
 """
