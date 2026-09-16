@@ -39,7 +39,7 @@ Use `ols(df, formula)` to fit this model type.
 - `r2::T`: R-squared
 - `r2_within::T`: Within R-squared (with FEs)
 - `has_intercept::Bool`: Whether model has intercept
-- `vcov_estimator::V`: Variance-covariance estimator (deep copy)
+- `vcov_estimator::V`: Variance-covariance estimator used to compute `vcov_matrix`
 - `vcov_matrix::C`: Precomputed variance-covariance matrix
 - `se::Vector{T}`: Standard errors
 - `t_stats::Vector{T}`: t-statistics
@@ -86,7 +86,7 @@ struct OLSEstimator{T <: AbstractFloat, P <: OLSLinearPredictor{T}, V,
     has_intercept::Bool
 
     # Variance-covariance estimator and precomputed statistics
-    vcov_estimator::V                        # Deep copy of the estimator
+    vcov_estimator::V                        # Estimator used to compute vcov_matrix
     vcov_matrix::C                           # Precomputed vcov matrix
     se::Vector{T}                            # Standard errors
     t_stats::Vector{T}                       # t-statistics
@@ -133,7 +133,7 @@ Use `ols(X, y)` to fit this model type.
 - `tss::T`: Total sum of squares
 - `r2::T`: R-squared
 - `has_intercept::Bool`: Whether model has intercept (assumed from first column)
-- `vcov_estimator::V`: Variance-covariance estimator (deep copy)
+- `vcov_estimator::V`: Variance-covariance estimator used to compute `vcov_matrix`
 - `vcov_matrix::C`: Precomputed variance-covariance matrix
 - `se::Vector{T}`: Standard errors
 - `t_stats::Vector{T}`: t-statistics
@@ -170,7 +170,7 @@ struct OLSMatrixEstimator{T <: AbstractFloat, P <: OLSLinearPredictor{T}, V,
     has_intercept::Bool             # Whether model has intercept
 
     # Variance-covariance estimator and precomputed statistics
-    vcov_estimator::V                        # Deep copy of the estimator
+    vcov_estimator::V                        # Estimator used to compute vcov_matrix
     vcov_matrix::C                           # Precomputed vcov matrix
     se::Vector{T}                            # Standard errors
     t_stats::Vector{T}                       # t-statistics

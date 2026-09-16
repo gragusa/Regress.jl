@@ -357,7 +357,7 @@ struct IVEstimator{
     r2_within::T      # within r2 (with fixed effect)
 
     # Variance-covariance estimator and precomputed statistics
-    vcov_estimator::V                        # Deep copy of the estimator
+    vcov_estimator::V                        # Estimator used to compute vcov_matrix
     vcov_matrix::C                           # Precomputed vcov matrix
     se::Vector{T}                            # Standard errors
     t_stats::Vector{T}                       # t-statistics
