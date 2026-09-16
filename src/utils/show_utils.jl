@@ -270,6 +270,29 @@ function vcov_type_name(v::CovarianceMatrices.HAC)
     if bw_val == 0.0
         return @sprintf("%s(auto)", typename)
     else
-        return @sprintf("%s(auto), bw: %.2f", typename, bw_val)
+        return @sprintf("%s(auto: %.2f)", typename, bw_val)
     end
 end
+
+"""
+    vcov_type_name(estimator, V) -> String
+
+Name the variance estimator, reporting the bandwidth `V` selected when the
+estimator does not fix one itself.
+
+`V` is the computed variance matrix, as returned by [`vcov`](@ref). A
+data-driven HAC kernel chooses its bandwidth from the data, so the number
+exists only on the estimate; `CovarianceMatrices.bandwidth` returns `nothing`
+for estimators that select nothing, and the name is then unchanged.
+"""
+vcov_type_name(v, V) = vcov_type_name(v)
+
+function vcov_type_name(v::CovarianceMatrices.HAC, V)
+    bw_val = CovarianceMatrices.bandwidth(V)
+    bw_val === nothing && return vcov_type_name(v)
+    return @sprintf("%s(auto: %.2f)", _hac_kernel_name(v), bw_val)
+end
+
+# A fixed bandwidth is already in the estimator; reading it back off the
+# estimate would report the same number.
+vcov_type_name(v::CovarianceMatrices.HAC{<:CovarianceMatrices.Fixed}, V) = vcov_type_name(v)

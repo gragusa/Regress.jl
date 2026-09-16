@@ -132,8 +132,9 @@ end
 end
 
 @testitem "show with data-driven bandwidth" tags = [:ols, :iv, :vcov, :smoke] begin
-    using Regress, CSV, DataFrames, StatsBase
+    using Regress, CSV, DataFrames, StatsBase, Printf
     using Regress: Bartlett, Andrews, NeweyWest
+    using CovarianceMatrices: bandwidth
 
     df = DataFrame(CSV.File(joinpath(dirname(pathof(Regress)), "../dataset/Cigar.csv")))
     model = Regress.ols(df, @formula(Sales ~ Price + NDI))
@@ -142,12 +143,40 @@ end
     for k in [Bartlett{Andrews}(), Bartlett{NeweyWest}()]
         for m in (model, model_iv)
             wrapped = m + vcov(k)
+            V = vcov(wrapped)
+
+            # The estimator alone cannot name the bandwidth it has not selected.
             @test Regress.vcov_type_name(wrapped.vcov_estimator) == "Bartlett(auto)"
-            @test !isempty(sprint(show, wrapped))
+
+            # Paired with the estimate, it reports what was selected.
+            bw = bandwidth(V)
+            @test bw isa Float64
+            @test bw > 0
+            expected = @sprintf("Bartlett(auto: %.2f)", bw)
+            @test Regress.vcov_type_name(wrapped.vcov_estimator, V) == expected
+
+            # ... and that is what `show` prints.
+            out = sprint(show, wrapped)
+            @test occursin(expected, out)
         end
     end
 
+    # An estimator that selects no bandwidth is named the same either way.
+    m_hc = model + vcov(Regress.HC1())
+    @test bandwidth(vcov(m_hc)) === nothing
+    @test Regress.vcov_type_name(m_hc.vcov_estimator, vcov(m_hc)) == "HC1"
+    @test occursin("HC1", sprint(show, m_hc))
+
     @test Regress.vcov_type_name(Bartlett(4)) == "Bartlett(4)"
+    # A fixed bandwidth is carried by the estimator itself.
+    m_fixed = model + vcov(Bartlett(4))
+    @test Regress.vcov_type_name(m_fixed.vcov_estimator, vcov(m_fixed)) == "Bartlett(4)"
+
+    # `save = :minimal` stores a placeholder variance matrix that carries no
+    # estimator metadata; naming the estimator must not consult it.
+    m_min = Regress.ols(df, @formula(Sales ~ Price + NDI); save = :minimal)
+    @test Regress.vcov_type_name(m_min.vcov_estimator, vcov(m_min)) == "HC1"
+    @test !isempty(sprint(show, m_min))
 end
 
 @testitem "IV + vcov(HC)" tags = [:iv, :vcov, :hc] begin
