@@ -1,6 +1,6 @@
 name = "Regress"
 uuid = "0ccf13ad-a1f2-44b4-972b-15ef40764d74"
-version = "0.1.0"
+version = "0.2.0"
 
 [deps]
 CovarianceMatrices = "60f91f6f-d783-54cb-84f9-544141854719"

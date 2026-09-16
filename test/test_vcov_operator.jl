@@ -481,3 +481,144 @@ end
     # return variances wrong by roughly T/n.
     @test !isapprox(Matrix(vcov(k, model)), Matrix(vcov(Bartlett(4), model)); rtol = 0.1)
 end
+
+@testitem "residual adjustment delegates to CovarianceMatrices" tags = [:ols, :iv, :vcov] begin
+    using Regress, CSV, DataFrames, LinearAlgebra, StatsBase
+    using Regress: fe
+    import CovarianceMatrices as CM
+
+    df = DataFrame(CSV.File(joinpath(dirname(pathof(Regress)), "../dataset/Cigar.csv")))
+    model = Regress.ols(df, @formula(Sales ~ Price + NDI))
+    model_iv = Regress.iv(Regress.TSLS(), df, @formula(Sales ~ NDI + (Price ~ Pimin)))
+
+    # HC0 and HC2-HC5 are upstream's; only the values are pinned here, since the
+    # forwarding itself is what makes them reachable.
+    for k in (CM.HC0(), CM.HC2(), CM.HC3(), CM.HC4(), CM.HC5())
+        for m in (model, model_iv)
+            @test Regress.residualadjustment(k, m) ≈ CM.residual_adjustment(k, m)
+        end
+    end
+
+    # HR1 deliberately does not delegate: upstream divides by `n - length(coef(m))`,
+    # which cannot see absorbed fixed effects. Without fe(...) the two agree; with
+    # fe(...) Regress's `dof_residual` is the smaller, more conservative denominator.
+    @test Regress.residualadjustment(CM.HC1(), model) ≈
+          CM.residual_adjustment(CM.HC1(), model)
+
+    model_fe = Regress.ols(df, @formula(Sales ~ Price + fe(State)))
+    @test dof_residual(model_fe) < nobs(model_fe) - length(coef(model_fe))
+    @test Regress.residualadjustment(CM.HC1(), model_fe) >
+          CM.residual_adjustment(CM.HC1(), model_fe)
+end
+
+@testitem "CR2 uses the symmetric square root" tags = [:ols, :vcov, :cluster] begin
+    using Regress, CSV, DataFrames, LinearAlgebra, StatsBase
+    import CovarianceMatrices as CM
+
+    df = DataFrame(CSV.File(joinpath(dirname(pathof(Regress)), "../dataset/Cigar.csv")))
+    model = Regress.ols(df, @formula(Sales ~ Price + NDI), save_cluster = :State)
+    cl = df.State[model.esample]
+    X = modelmatrix(model)
+    u = residuals(model)
+    XX = CM.bread(model)
+    k = CM.CR2(cl)
+    g = k.g[1]
+
+    # The Bell-McCaffrey adjustment is the symmetric root of (I - H_gg). A Cholesky
+    # factor of the same matrix leaves u'(I - H_gg)^-1 u unchanged but differs by an
+    # orthogonal rotation, which does not cancel in the outer products the cluster
+    # meat sums -- so the two give different CR2 standard errors.
+    a = Regress.residualadjustment(k, model)
+    ind = findall(==(1), g.groups)
+    Xg = view(X, ind, :)
+    A = Symmetric(I - Xg * XX * Xg')
+
+    symmetric_root = A^(-1 / 2) * u[ind]
+    cholesky_root = cholesky(A).L \ u[ind]
+
+    @test (a[ind] .* u[ind]) ≈ symmetric_root
+    @test !isapprox(symmetric_root, cholesky_root)
+    # Both roots preserve the quadratic form; only the direction differs.
+    @test dot(symmetric_root, symmetric_root) ≈ dot(cholesky_root, cholesky_root)
+end
+
+@testitem "CR2/CR3 on weighted and IV models" tags = [:ols, :iv, :vcov, :cluster] begin
+    using Regress, CSV, DataFrames, LinearAlgebra, StatsBase
+    import CovarianceMatrices as CM
+
+    df = DataFrame(CSV.File(joinpath(dirname(pathof(Regress)), "../dataset/Cigar.csv")))
+
+    # Each successive estimator applies a larger leverage correction, so the standard
+    # errors increase monotonically. Weighting must not disturb that: `modelmatrix`
+    # and `residuals` already carry the weights, so the leverage blocks must not be
+    # weighted a second time.
+    for model in (Regress.ols(df, @formula(Sales ~ Price + NDI)),
+        Regress.ols(df, @formula(Sales ~ Price + NDI); weights = :Pop))
+        cl = df.State[model.esample]
+        se = [stderror(K(cl), model)[2] for K in (CM.CR0, CM.CR1, CM.CR2, CM.CR3)]
+        @test all(isfinite, se)
+        @test issorted(se)
+    end
+
+    # CR2/CR3 are reachable on IV models; the leverage blocks are built from the
+    # second-stage regressor matrix rather than `modelmatrix`.
+    model_iv = Regress.iv(Regress.TSLS(), df, @formula(Sales ~ NDI + (Price ~ Pimin)))
+    cl_iv = df.State[model_iv.esample]
+    se_iv = [stderror(K(cl_iv), model_iv)[2] for K in (CM.CR0, CM.CR1, CM.CR2, CM.CR3)]
+    @test all(isfinite, se_iv)
+    @test issorted(se_iv)
+end
+
+@testitem "multiway CR2/CR3" tags = [:ols, :vcov, :cluster] begin
+    using Regress, CSV, DataFrames, LinearAlgebra, StatsBase, Random
+    using Regress: fe
+    import CovarianceMatrices as CM
+
+    df = DataFrame(CSV.File(joinpath(dirname(pathof(Regress)), "../dataset/Cigar.csv")))
+    model = Regress.ols(df, @formula(Sales ~ Price + NDI); save_cluster = [:State, :Year])
+    cl_state = df.State[model.esample]
+    cl_year = df.Year[model.esample]
+
+    # One cluster dimension reaches the elementwise-multiplier path, several reach the
+    # inclusion-exclusion path. The two must agree when the dimensions coincide.
+    for K in (CM.CR2, CM.CR3)
+        @test stderror(K(cl_state), model) ≈ stderror(K(cl_state, cl_state), model)
+    end
+
+    # Successive estimators apply larger leverage corrections, as in the one-way case.
+    se = [stderror(K(cl_state, cl_year), model)[2]
+          for K in (CM.CR0, CM.CR1, CM.CR2, CM.CR3)]
+    @test all(isfinite, se)
+    @test issorted(se)
+
+    # The symbol API resolves stored cluster variables to the same result.
+    for K in (CM.CR2, CM.CR3)
+        @test stderror(K(:State, :Year), model) ≈ stderror(K(cl_state, cl_year), model)
+    end
+
+    # Three dimensions exercise the general subset walk rather than the two-way case.
+    df3 = copy(df)
+    df3.Region = mod.(df3.State, 5)
+    model3 = Regress.ols(df3, @formula(Sales ~ Price + NDI))
+    cl3 = (df3.State[model3.esample], df3.Year[model3.esample], df3.Region[model3.esample])
+    for K in (CM.CR2, CM.CR3)
+        @test all(isfinite, stderror(K(cl3...), model3))
+    end
+
+    # Fixed effects absorbed out of the design do not disturb the leverage blocks.
+    model_fe = Regress.ols(df, @formula(Sales ~ Price + NDI + fe(State)))
+    cl_fe = (df.State[model_fe.esample], df.Year[model_fe.esample])
+    for K in (CM.CR2, CM.CR3)
+        @test all(isfinite, stderror(K(cl_fe...), model_fe))
+    end
+
+    # A cluster whose rows span the column space makes `I - H_gg` singular. Inverting
+    # it yields a huge but finite block, so the failure is caught on the blocks rather
+    # than surfacing as `Inf` in the finished variance.
+    rng = MersenneTwister(11)
+    n = 30
+    dsing = DataFrame(y = randn(rng, n), x1 = randn(rng, n), x2 = randn(rng, n))
+    model_sing = Regress.ols(dsing, @formula(y ~ x1 + x2))
+    @test_throws "leverage correction is singular" stderror(
+        CM.CR2(repeat(1:10, inner = 3), fill(1, n)), model_sing)
+end

@@ -2,6 +2,23 @@
 
 ## Unreleased
 
+## 0.2.0
+
+### Breaking Changes
+
+- **Requires CovarianceMatrices 0.32.** Earlier versions no longer load: 0.32
+  removed `setkernelweights!`, on which Regress defined methods.
+
+- **`vcov(model)` returns a `CovarianceMatrix`** instead of
+  `Symmetric{T,Matrix{T}}`. It is still an `AbstractMatrix`, so indexing,
+  `inv`, `\`, and factorizations are unchanged, but the result now carries the
+  metadata of the estimate: `estimator(V)` gives the variance estimator,
+  `bandwidth(V)` the selected HAC bandwidth, `kernelweights(V)` the per-column
+  kernel weights, `information(V)` the full metadata `NamedTuple`, and
+  `parent(V)` the bare matrix. Code that stores the result in a
+  `Matrix`- or `Symmetric`-typed field needs updating; code that only reads
+  values does not.
+
 ### New Features
 
 - **`lags()` formula term**: `@formula(y ~ lags(x, 12))` expands into a matrix of 12 lag columns. Supports nested transforms (`lags(log(abs(x)), 3)`), interactions (`lags(x, 3) & z`), and composition with other terms. Moved from LocalProjections.jl so both packages share the same implementation.
@@ -18,7 +35,60 @@
 
 - **EWC, DriscollKraay, VARHAC support**: All `Correlated` variance estimators from CovarianceMatrices.jl now work with `model + vcov(...)` (previously only `HAC` was supported).
 
+- **Driscoll-Kraay standard errors on fitted models**: `model + vcov(DriscollKraay(...))`
+  now works for OLS and IV models and for the matrix estimators. Previously
+  every such call was a `MethodError`. The computation delegates to
+  CovarianceMatrices, which scales by the number of time periods rather than
+  the number of observations.
+
+- **`show` reports the selected HAC bandwidth**: a model fitted with an
+  automatic bandwidth selector prints `Bartlett(auto: 55.71)` rather than
+  `Bartlett(auto)`. The bandwidth is a property of the estimate, so it is read
+  from `vcov(model)`.
+
 ### Bug Fixes
+
+- **CR2 uses the symmetric square root of `I - H_gg`.** The Bell-McCaffrey
+  adjustment is defined by the symmetric root; the Cholesky factor used
+  previously preserves the quadratic form `u'(I - H_gg)⁻¹u` but differs from it
+  by an orthogonal rotation, which does not cancel in the outer products the
+  cluster meat sums. CR2 standard errors change by a fraction of a percent on
+  typical data. CR3 is unaffected.
+
+- **CR2/CR3 on weighted models no longer double-count the weights.**
+  `modelmatrix` and `residuals` already carry the weighting, so the per-cluster
+  leverage blocks must not be weighted again. They were, which drove
+  `I - H_gg` indefinite and produced standard errors roughly an order of
+  magnitude too large (and, for CR2, an `InexactError` on some data).
+
+- **CR2/CR3 work on IV models.** Both threw `MethodError` when resolving cluster
+  indices. The leverage blocks are built from the second-stage regressor matrix,
+  which is what the IV sandwich treats as the design.
+
+- **HC4/HC5 on the matrix IV estimator use the standard exponents.**
+  `IVMatrixEstimator` raised `1 - h` to `δ` where the definition uses `δ/2`, and
+  took an extra square root for HC5, so its adjustments disagreed with the ones
+  the other three model types compute.
+
+- **HAC bandwidth selection accounts for kernel weights.** The kernel weights
+  that give the intercept column zero weight are now passed to `aVar` through
+  the `weights` keyword. The moment matrix's intercept column is not constant,
+  so an Andrews or Newey-West bandwidth computed without them differs — by a
+  factor of about two on `y ~ x` in the bundled validation data.
+
+- **CovarianceMatrices entry points accept Regress models.** `bread` and
+  `leverage` were defined as new functions in Regress's namespace instead of
+  extending the CovarianceMatrices generics, so `CovarianceMatrices.vcov(k, m)`
+  threw a `MethodError` for every Regress model. `numobs` and `mask` were
+  missing for the IV estimators. All are now provided, and the HC2-HC5 and
+  CR2/CR3 estimators that dispatch on `leverage` work through the upstream path.
+
+- **`aVar(k, model)` no longer masks collinear coefficients.** `aVar` estimates
+  the variance of the moment matrix, where coefficient collinearity has not yet
+  entered; rank deficiency is handled by `vcov`, which subsets to the
+  full-rank block independently. The masking discarded the `CovarianceMatrix`
+  wrapper without affecting any variance. `vcov` results are unchanged,
+  including the NaN entries it produces for collinear coefficients.
 
 - **HC3 first-stage F-statistic**: The robust first-stage F with HC3 (and HC2/HC4/HC5) was silently using the HC1 formula. Refactored to delegate to CovarianceMatrices.jl, which handles all variance types correctly.
 
@@ -37,6 +107,13 @@
 - **Fallback path in `compute_per_endogenous_fstats`**: The fallback when `Xendo_orig` is `nothing` passed `Z_res` as the full design matrix, producing wrong F-statistics. Replaced with an explicit error.
 
 ### Refactoring
+
+- **Residual adjustments delegate to CovarianceMatrices.jl**: the HC0 and HC2-HC5
+  adjustments, and the CR2/CR3 leverage blocks, now come from
+  `CovarianceMatrices.residual_adjustment` instead of being reimplemented for each
+  of the four model types. HC1 stays local because upstream divides by
+  `n - length(coef(m))`, which cannot see fixed effects absorbed out of the
+  design, and the CR finite-sample corrections stay local to keep matching fixest.
 
 - **First-stage robust F via CovarianceMatrices.jl**: Replaced ~250 lines of manual sandwich variance computation (`_compute_meat_inplace!`, `_compute_robust_first_stage_fstats_batched`, `_compute_single_first_stage_fstat`) with `_compute_first_stage_fstats_via_ols`, which constructs lightweight `OLSMatrixEstimator` wrappers around pre-computed first-stage data and delegates to `CovarianceMatrices.vcov`. No refitting; ZZ factorization is shared across endogenous variables.
 

@@ -32,7 +32,12 @@ end
     m = @formula Sales ~ Price + fe(State)
     x = Regress.ols(df, m)
     @test coef(x) ≈ [-0.20984] atol = 1e-4
-    @test x.iterations == 1
+    # A single fixed effect is absorbed by direct projection rather than by LSMR.
+    # The reported count is the LSMR sweep count, which FixedEffects.jl leaves at its
+    # initial value on that path; the value differs across supported 3.x versions, so
+    # the invariant worth asserting is that the solve does not iterate.
+    @test x.iterations <= 1
+    @test x.converged
 
     m = @formula Sales ~ Price + fe(State) + fe(Year)
     x = Regress.ols(df, m)
@@ -394,7 +399,7 @@ end
     x = Regress.ols(df, m, save_cluster = :State)
     @test stderror(CR0(:State), x)[2] ≈ 0.03749 atol = 1e-4  # No G/(G-1) adjustment
     @test stderror(CR1(:State), x)[2] ≈ 0.0379228 atol = 1e-4  # With G/(G-1)
-    @test stderror(CR2(:State), x)[2] ≈ 0.03835 atol = 1e-4  # Leverage-adjusted
+    @test stderror(CR2(:State), x)[2] ≈ 0.03840 atol = 1e-4  # Bell-McCaffrey leverage
     @test stderror(CR3(:State), x)[2] ≈ 0.03889 atol = 1e-4  # Squared leverage
 
     # CR estimators with FE (FE not nested in cluster)
@@ -407,7 +412,7 @@ end
     x = Regress.ols(df, m, save_cluster = :State)
     @test stderror(CR0(:State), x)[1] ≈ 0.03535 atol = 1e-4  # No G/(G-1)
     @test stderror(CR1(:State), x)[1] ≈ 0.0357498 atol = 1e-4  # With G/(G-1)
-    @test stderror(CR2(:State), x)[1] ≈ 0.03622 atol = 1e-4  # Leverage-adjusted
+    @test stderror(CR2(:State), x)[1] ≈ 0.03617 atol = 1e-4  # Bell-McCaffrey leverage
     @test stderror(CR3(:State), x)[1] ≈ 0.03659 atol = 1e-4  # Squared leverage
 end
 

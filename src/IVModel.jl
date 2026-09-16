@@ -563,37 +563,14 @@ function StatsAPI.leverage(m::IVEstimator)
     return h
 end
 
-# Residual adjustments for HC/HR estimators
-# Note: HC0 = HR0 and HC1 = HR1 in CovarianceMatrices.jl (type aliases)
-@noinline residualadjustment(k::_CM.HR0, m::IVEstimator) = 1.0  # Also handles HC0
-@noinline residualadjustment(k::_CM.HR1, m::IVEstimator) = sqrt(nobs(m) / dof_residual(m))  # Also handles HC1
-@noinline residualadjustment(k::_CM.HR2, m::IVEstimator) = 1.0 ./ sqrt.(1 .- leverage(m))  # Also handles HC2
-@noinline residualadjustment(k::_CM.HR3, m::IVEstimator) = 1.0 ./ (1 .- leverage(m))  # Also handles HC3
+# Residual adjustments for HC/HR estimators come from
+# `CovarianceMatrices.residual_adjustment`, which reaches the model through the
+# `leverage` and `numobs` protocol methods defined above.
+@noinline residualadjustment(k::_CM.HR, m::IVEstimator) = _CM.residual_adjustment(k, m)
 
-@noinline function residualadjustment(k::_CM.HC4, m::IVEstimator)
-    n = nobs(m)
-    h = leverage(m)
-    p = round(Int, sum(h))
-    adj = similar(h)
-    @inbounds for j in eachindex(h)
-        delta = min(4.0, n * h[j] / p)
-        adj[j] = 1 / (1 - h[j])^(delta / 2)
-    end
-    adj
-end
-
-@noinline function residualadjustment(k::_CM.HC5, m::IVEstimator)
-    n = nobs(m)
-    h = leverage(m)
-    p = round(Int, sum(h))
-    mx = max(n * 0.7 * maximum(h) / p, 4.0)
-    adj = similar(h)
-    @inbounds for j in eachindex(h)
-        alpha = min(n * h[j] / p, mx)
-        adj[j] = 1 / (1 - h[j])^(alpha / 4)
-    end
-    adj
-end
+# HR1 is the exception: upstream divides by `n - length(coef(m))`, which cannot see
+# fixed effects absorbed out of the design, while `dof_residual` counts them.
+@noinline residualadjustment(k::_CM.HR1, m::IVEstimator) = sqrt(nobs(m) / dof_residual(m))
 
 # Cluster-robust residual adjustments
 @noinline residualadjustment(k::_CM.CR0, m::IVEstimator) = 1.0
@@ -602,45 +579,28 @@ end
 # Correlated estimators (HAC, EWC, DriscollKraay, VARHAC, etc.) - no residual adjustment needed
 @noinline residualadjustment(k::_CM.Correlated, m::IVEstimator) = 1.0
 
-# CR2 and CR3 for IV - leverage-adjusted cluster-robust
-function residualadjustment(k::_CM.CR2, m::IVEstimator)
-    @assert length(k.g) == 1 "CR2 for IV currently only supports single-way clustering"
+# CR2/CR3 for IV - leverage-adjusted cluster-robust.
+#
+# The leverage blocks are built from the second-stage regressor matrix (`Adj` for the
+# K-class estimators, the fitted `X` otherwise), which is the matrix the IV sandwich
+# treats as the design; it is not `modelmatrix(m)`, so this cannot route through
+# `CovarianceMatrices.residual_adjustment` the way the OLS methods do. The root itself
+# is shared with upstream via `_leverage_transform`: CR2 is the symmetric square root,
+# CR3 the plain inverse.
+function residualadjustment(k::Union{_CM.CR2, _CM.CR3}, m::IVEstimator)
+    length(k.g) == 1 || throw(ArgumentError(
+        "multiway clustering with $(nameof(typeof(k))) is not supported for IV models"))
     g = k.g[1]
-    X = m.postestimation.X_fitted
+    pe = m.postestimation
+    X = has_kclass_adj(pe) ? pe.Adj : pe.X_fitted
     resid = residuals_for_vcov(m)
     u = copy(resid)
     XX = bread(m)
-    for groups in 1:g.ngroups
-        ind = findall(==(groups), g)
+    for gc in 1:g.ngroups
+        ind = findall(==(gc), g.groups)
         Xg = view(X, ind, :)
-        ug = view(u, ind)
         Hgg = Xg * XX * Xg'
-        # Apply (I - H_gg)^(-1/2) to residuals
-        F = cholesky!(Symmetric(I - Hgg); check = false)
-        if issuccess(F)
-            ldiv!(ug, F.L, ug)
-        end
-    end
-    return u ./ resid
-end
-
-function residualadjustment(k::_CM.CR3, m::IVEstimator)
-    @assert length(k.g) == 1 "CR3 for IV currently only supports single-way clustering"
-    g = k.g[1]
-    X = m.postestimation.X_fitted
-    resid = residuals_for_vcov(m)
-    u = copy(resid)
-    XX = bread(m)
-    for groups in 1:g.ngroups
-        ind = findall(==(groups), g)
-        Xg = view(X, ind, :)
-        ug = view(u, ind)
-        Hgg = Xg * XX * Xg'
-        # Apply (I - H_gg)^(-1) to residuals
-        F = cholesky!(Symmetric(I - Hgg); check = false)
-        if issuccess(F)
-            ldiv!(ug, F, ug)
-        end
+        u[ind] = _CM._leverage_transform(k, I - Hgg) * view(u, ind)
     end
     return u ./ resid
 end
@@ -1918,41 +1878,17 @@ _CM.numobs(m::IVMatrixEstimator) = m.nobs
 
 _CM.mask(m::IVMatrixEstimator) = m.basis_coef
 
-# Residual adjustments for HC estimators
-function residualadjustment(k::_CM.HC0, m::IVMatrixEstimator)
-    return ones(eltype(m.postestimation.residuals), nobs(m))
+# Residual adjustments for HC estimators come from
+# `CovarianceMatrices.residual_adjustment`, reaching the model through the `leverage`
+# and `numobs` protocol methods defined above.
+@noinline function residualadjustment(k::_CM.HR, m::IVMatrixEstimator{T}) where {T}
+    return _CM.residual_adjustment(k, m)
 end
 
-function residualadjustment(k::_CM.HC1, m::IVMatrixEstimator{T}) where {T}
-    n, k_params = nobs(m), dof(m)
-    return fill(sqrt(T(n) / T(n - k_params)), n)
-end
-
-function residualadjustment(k::_CM.HC2, m::IVMatrixEstimator{T}) where {T}
-    h = leverage(m)
-    return T(1) ./ sqrt.(max.(T(1) .- h, eps(T)))
-end
-
-function residualadjustment(k::_CM.HC3, m::IVMatrixEstimator{T}) where {T}
-    h = leverage(m)
-    return T(1) ./ max.(T(1) .- h, eps(T))
-end
-
-@noinline function residualadjustment(k::_CM.HC4, m::IVMatrixEstimator{T}) where {T}
-    n = nobs(m)
-    p = dof(m)
-    h = leverage(m)
-    δ = @. min(4.0, h * n / p)
-    return @. T(1) / (T(1) - h)^δ
-end
-
-@noinline function residualadjustment(k::_CM.HC5, m::IVMatrixEstimator{T}) where {T}
-    n = nobs(m)
-    p = dof(m)
-    h = leverage(m)
-    hmax = max(n * 0.7 * maximum(h) / p, 4.0)
-    δ = @. min(h * n / p, hmax)
-    return @. sqrt(T(1) / (T(1) - h)^δ)
+# HR1 is the exception: upstream divides by `n - length(coef(m))`, which cannot see
+# fixed effects absorbed out of the design, while `dof_residual` counts them.
+@noinline function residualadjustment(k::_CM.HR1, m::IVMatrixEstimator{T}) where {T}
+    return sqrt(T(nobs(m)) / T(dof_residual(m)))
 end
 
 # Correlated estimators (HAC, EWC, DriscollKraay, VARHAC, etc.) - no adjustment needed
