@@ -1097,6 +1097,25 @@ function CM.vcov(k::CM.AbstractAsymptoticVarianceEstimator, m::OLSEstimator; dof
     return _wrap_vcov(Σ, k, A)
 end
 
+"""
+    vcov(k::DriscollKraay, m::OLSEstimator; type::Symbol = :HC0, kwargs...)
+
+Driscoll-Kraay variance for a fitted OLS model, delegating to the
+CovarianceMatrices implementation.
+
+`type` selects the small-sample correction (`:HC0`, `:HC1`, `:sss`); the
+estimator carries its own time and unit indices, so the model supplies nothing
+beyond the standard interface.
+
+Driscoll-Kraay scales by the number of time periods, not by the number of
+observations, so this must not route through the sandwich above: the two
+divisors differ by a factor of roughly `T / n`.
+"""
+function CM.vcov(k::CM.DriscollKraay, m::OLSEstimator; type::Symbol = :HC0, kwargs...)
+    Σ = invoke(CM.vcov, Tuple{CM.DriscollKraay, RegressionModel}, k, m; type, kwargs...)
+    return _wrap_vcov(Σ, k, nothing)
+end
+
 ##############################################################################
 ##
 ## CovarianceMatrices.jl Interface for OLSMatrixEstimator
@@ -1275,6 +1294,18 @@ function CM.vcov(k::CM.AbstractAsymptoticVarianceEstimator, m::OLSMatrixEstimato
     end
 
     return _wrap_vcov(scale .* B * A * B, k, A)
+end
+
+"""
+    vcov(k::DriscollKraay, m::OLSMatrixEstimator; type::Symbol = :HC0, kwargs...)
+
+Driscoll-Kraay variance for a matrix-based OLS model, delegating to the
+CovarianceMatrices implementation. See the `OLSEstimator` method for the
+`type` options and for why the sandwich above is not reused.
+"""
+function CM.vcov(k::CM.DriscollKraay, m::OLSMatrixEstimator; type::Symbol = :HC0, kwargs...)
+    Σ = invoke(CM.vcov, Tuple{CM.DriscollKraay, RegressionModel}, k, m; type, kwargs...)
+    return _wrap_vcov(Σ, k, nothing)
 end
 
 function StatsAPI.confint(ve::CovarianceMatrices.AbstractAsymptoticVarianceEstimator,

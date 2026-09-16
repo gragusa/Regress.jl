@@ -438,3 +438,46 @@ end
     # The wrapper does not disturb the estimate itself.
     @test Matrix(vcov(model + vcov(HC3()))) ≈ vcov(HC3(), model)
 end
+
+@testitem "Driscoll-Kraay vcov on Regress models" tags = [:vcov, :hac, :panel] begin
+    using Regress, CSV, DataFrames, LinearAlgebra, StatsBase
+    using CovarianceMatrices: CovarianceMatrices, DriscollKraay, CovarianceMatrix
+
+    df = DataFrame(CSV.File(joinpath(dirname(pathof(Regress)), "../dataset/Cigar.csv")))
+    n = nrow(df)
+    y = df.Sales
+
+    # The upstream implementation is the reference: these methods exist only to
+    # resolve dispatch, not to compute anything of their own.
+    reference(k, m; kwargs...) = invoke(
+        CovarianceMatrices.vcov, Tuple{DriscollKraay, RegressionModel}, k, m; kwargs...)
+
+    model = Regress.ols(df, @formula(Sales ~ Price + NDI))
+    k = DriscollKraay(Bartlett(4), tis = df.Year[model.esample], iis = df.State[model.esample])
+
+    model_iv = Regress.iv(TSLS(), df, @formula(Sales ~ NDI + (Price ~ Pimin)))
+    k_iv = DriscollKraay(Bartlett(4), tis = df.Year[model_iv.esample], iis = df.State[model_iv.esample])
+
+    k_mat = DriscollKraay(Bartlett(4), tis = df.Year, iis = df.State)
+    model_mat = Regress.ols([ones(n) df.Price df.NDI], y)
+    model_iv_mat = Regress.iv(
+        TSLS(), [ones(n) df.Price df.NDI], [ones(n) df.Pimin df.NDI], y;
+        n_endogenous = 1)
+
+    for (kk, m) in ((k, model), (k_iv, model_iv), (k_mat, model_mat), (k_mat, model_iv_mat))
+        V = vcov(kk, m)
+        @test V isa CovarianceMatrix
+        @test estimator(V) isa DriscollKraay
+        @test Matrix(V) ≈ reference(kk, m)
+        @test stderror(kk, m) ≈ sqrt.(diag(reference(kk, m)))
+
+        # `type` selects the small-sample correction and must reach upstream.
+        @test Matrix(vcov(kk, m; type = :HC1)) ≈ reference(kk, m; type = :HC1)
+        @test !isapprox(Matrix(vcov(kk, m; type = :HC1)), reference(kk, m))
+    end
+
+    # Driscoll-Kraay scales by the number of time periods; Regress's own HAC
+    # sandwich scales by the number of observations. Reusing that sandwich would
+    # return variances wrong by roughly T/n.
+    @test !isapprox(Matrix(vcov(k, model)), Matrix(vcov(Bartlett(4), model)); rtol = 0.1)
+end

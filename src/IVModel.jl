@@ -798,6 +798,28 @@ function StatsBase.vcov(ve::CovarianceMatrices.AbstractAsymptoticVarianceEstimat
 end
 
 """
+    vcov(k::DriscollKraay, m::IVEstimator; type::Symbol = :HC0, kwargs...)
+
+Driscoll-Kraay variance for a fitted IV model, delegating to the
+CovarianceMatrices implementation.
+
+`type` selects the small-sample correction (`:HC0`, `:HC1`, `:sss`); the
+estimator carries its own time and unit indices, so the model supplies nothing
+beyond the standard interface.
+
+Driscoll-Kraay scales by the number of time periods, not by the number of
+observations, so this must not route through the sandwich above: the two
+divisors differ by a factor of roughly `T / n`.
+"""
+function StatsBase.vcov(k::_CM.DriscollKraay, m::IVEstimator; type::Symbol = :HC0, kwargs...)
+    isnothing(m.postestimation) &&
+        error("Model does not have post-estimation data stored. Post-estimation vcov not available.")
+    Σ = invoke(
+        StatsBase.vcov, Tuple{_CM.DriscollKraay, RegressionModel}, k, m; type, kwargs...)
+    return _wrap_vcov(Σ, k, nothing)
+end
+
+"""
     _cluster_robust_scale_iv(k::_CM.CR, m::IVEstimator, n::Int)
 
 Compute the scale factor for cluster-robust variance estimation for IV models.
@@ -2009,6 +2031,19 @@ function StatsBase.vcov(ve::CovarianceMatrices.AbstractAsymptoticVarianceEstimat
 
     Σ = scale .* B * A * B
     return _wrap_vcov(Symmetric(Σ), ve, A)
+end
+
+"""
+    vcov(k::DriscollKraay, m::IVMatrixEstimator; type::Symbol = :HC0, kwargs...)
+
+Driscoll-Kraay variance for a matrix-based IV model, delegating to the
+CovarianceMatrices implementation. See the `IVEstimator` method for the `type`
+options and for why the sandwich above is not reused.
+"""
+function StatsBase.vcov(k::_CM.DriscollKraay, m::IVMatrixEstimator{T}; type::Symbol = :HC0, kwargs...) where {T}
+    Σ = invoke(
+        StatsBase.vcov, Tuple{_CM.DriscollKraay, RegressionModel}, k, m; type, kwargs...)
+    return _wrap_vcov(Σ, k, nothing)
 end
 
 function StatsBase.stderror(ve::CovarianceMatrices.AbstractAsymptoticVarianceEstimator,
