@@ -321,7 +321,8 @@ iv(TSLS(), df, @formula(y ~ x + (endo ~ instrument)))
 ```
 """
 struct IVEstimator{
-    T, E <: AbstractIVEstimator, V, P <: Union{PostEstimationDataIV{T}, Nothing}} <:
+    T, E <: AbstractIVEstimator, V, P <: Union{PostEstimationDataIV{T}, Nothing},
+    C <: AbstractMatrix{T}} <:
        AbstractRegressModel
     estimator::E  # Which IV estimator was used
 
@@ -357,7 +358,7 @@ struct IVEstimator{
 
     # Variance-covariance estimator and precomputed statistics
     vcov_estimator::V                        # Deep copy of the estimator
-    vcov_matrix::Symmetric{T, Matrix{T}}    # Precomputed vcov matrix
+    vcov_matrix::C                           # Precomputed vcov matrix
     se::Vector{T}                            # Standard errors
     t_stats::Vector{T}                       # t-statistics
     p_values::Vector{T}                      # p-values
@@ -761,7 +762,7 @@ function StatsBase.vcov(ve::CovarianceMatrices.AbstractAsymptoticVarianceEstimat
     # Uncorrelated() assumes i.i.d. errors
     if ve isa CovarianceMatrices.Uncorrelated
         σ² = sum(abs2, resid) / dof_residual(m)
-        return Symmetric(σ² * B)
+        return _wrap_vcov(Symmetric(σ² * B), ve, nothing)
     end
 
     # Sandwich variance: V = scale * B * A * B where A = aVar(k, m)
@@ -793,7 +794,7 @@ function StatsBase.vcov(ve::CovarianceMatrices.AbstractAsymptoticVarianceEstimat
     end
 
     Σ = scale .* B * A * B
-    return Symmetric(Σ)
+    return _wrap_vcov(Symmetric(Σ), ve, A)
 end
 
 """
@@ -1171,7 +1172,7 @@ function Base.:+(m::IVEstimator{T, E, V1, P}, v::VcovSpec{V2}) where {T, E, V1, 
     F_first_stage_robust, p_first_stage_robust = recompute_first_stage_fstat(m, v.source)
 
     # Return new IVEstimator with same data but different vcov type
-    return IVEstimator{T, E, V2, P}(
+    return IVEstimator{T, E, V2, P, typeof(vcov_mat)}(
         m.estimator, m.coef,
         m.esample, m.residuals_esample, m.has_residuals, m.fe,
         m.postestimation, m.fekeys,
@@ -1180,7 +1181,7 @@ function Base.:+(m::IVEstimator{T, E, V1, P}, v::VcovSpec{V2}) where {T, E, V1, 
         m.nobs, m.dof, m.dof_fes, m.dof_residual,
         m.rss, m.tss,
         m.iterations, m.converged, m.r2_within,
-        v.source, Symmetric(vcov_mat), se, t_stats, p_values,
+        v.source, vcov_mat, se, t_stats, p_values,
         F_stat, p_val,
         m.F_first_stage_nonrobust, m.p_first_stage_nonrobust,
         F_first_stage_robust, p_first_stage_robust,
@@ -1752,7 +1753,7 @@ struct PostEstimationDataIVMatrix{T <: AbstractFloat}
 end
 
 """
-    IVMatrixEstimator{T, V} <: AbstractRegressModel
+    IVMatrixEstimator{T, V, C} <: AbstractRegressModel
 
 Matrix-based IV estimator for use without formula interface.
 Designed for programmatic use (e.g., LocalProjections.jl).
@@ -1773,7 +1774,7 @@ Designed for programmatic use (e.g., LocalProjections.jl).
 - `r2::T`: R-squared
 - `has_intercept::Bool`: Whether model includes intercept
 - `vcov_estimator::V`: Variance estimator used
-- `vcov_matrix::Symmetric{T, Matrix{T}}`: Precomputed variance-covariance matrix
+- `vcov_matrix::C`: Precomputed variance-covariance matrix
 - `se::Vector{T}`: Standard errors
 - `t_stats::Vector{T}`: t-statistics
 - `p_values::Vector{T}`: p-values
@@ -1786,7 +1787,8 @@ coef(model)
 vcov(HC1(), model)
 ```
 """
-struct IVMatrixEstimator{T <: AbstractFloat, V} <: AbstractRegressModel
+struct IVMatrixEstimator{T <: AbstractFloat, V, C <: AbstractMatrix{T}} <:
+       AbstractRegressModel
     coef::Vector{T}
     postestimation::PostEstimationDataIVMatrix{T}
     basis_coef::BitVector
@@ -1800,7 +1802,7 @@ struct IVMatrixEstimator{T <: AbstractFloat, V} <: AbstractRegressModel
 
     # Variance-covariance
     vcov_estimator::V
-    vcov_matrix::Symmetric{T, Matrix{T}}
+    vcov_matrix::C
     se::Vector{T}
     t_stats::Vector{T}
     p_values::Vector{T}
@@ -1998,7 +2000,7 @@ function StatsBase.vcov(ve::CovarianceMatrices.AbstractAsymptoticVarianceEstimat
     # Homoskedastic case
     if ve isa CovarianceMatrices.Uncorrelated
         σ² = sum(abs2, resid) / dof_residual(m)
-        return Symmetric(σ² * B)
+        return _wrap_vcov(Symmetric(σ² * B), ve, nothing)
     end
 
     # Sandwich: V = scale * B * A * B
@@ -2006,7 +2008,7 @@ function StatsBase.vcov(ve::CovarianceMatrices.AbstractAsymptoticVarianceEstimat
     scale = convert(T, n)
 
     Σ = scale .* B * A * B
-    return Symmetric(Σ)
+    return _wrap_vcov(Symmetric(Σ), ve, A)
 end
 
 function StatsBase.stderror(ve::CovarianceMatrices.AbstractAsymptoticVarianceEstimator,
@@ -2033,7 +2035,7 @@ function Base.:+(m::IVMatrixEstimator{T, V1}, v::VcovSpec{V2}) where {T, V1, V2}
     new_t = cc ./ new_se
     new_p = 2 .* tdistccdf.(dof_residual(m), abs.(new_t))
 
-    return IVMatrixEstimator{T, V2}(
+    return IVMatrixEstimator{T, V2, typeof(new_vcov)}(
         m.coef,
         m.postestimation,
         m.basis_coef,

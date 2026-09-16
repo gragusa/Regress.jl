@@ -206,12 +206,12 @@ function compute_hc1_vcov_direct(
         Σ = fill(T(NaN), k_full, k_full)
         Σ[valid_idx, valid_idx] = Σ_valid
 
-        return Symmetric(Σ)
+        return _wrap_vcov(Symmetric(Σ), CovarianceMatrices.HC1(), nothing)
     end
 
     # Standard case: no collinearity
     Σ = scale .* invXX * aVar * invXX
-    return Symmetric(Σ)
+    return _wrap_vcov(Symmetric(Σ), CovarianceMatrices.HC1(), nothing)
 end
 
 """
@@ -284,12 +284,12 @@ function compute_hc1_vcov_direct_iv(
         Σ = fill(T(NaN), k_full, k_full)
         Σ[valid_idx, valid_idx] = Σ_valid
 
-        return Symmetric(Σ)
+        return _wrap_vcov(Symmetric(Σ), CovarianceMatrices.HC1(), nothing)
     end
 
     # Standard case: no collinearity
     Σ = scale .* invXX * aVar * invXX
-    return Symmetric(Σ)
+    return _wrap_vcov(Symmetric(Σ), CovarianceMatrices.HC1(), nothing)
 end
 
 ##############################################################################
@@ -1089,12 +1089,12 @@ function CM.vcov(k::CM.AbstractAsymptoticVarianceEstimator, m::OLSEstimator; dof
         Σ = fill(T(NaN), k_full, k_full)
         Σ[valid_idx, valid_idx] = Σ_valid
 
-        return Σ
+        return _wrap_vcov(Σ, k, A)
     end
 
     Σ = scale .* B * A * B
 
-    return Σ
+    return _wrap_vcov(Σ, k, A)
 end
 
 ##############################################################################
@@ -1208,6 +1208,24 @@ function CM.aVar(
 end
 
 """
+    _wrap_vcov(Σ, estimator, A) -> CovarianceMatrix
+
+Pair a completed sandwich `Σ` with the `estimator` that produced it and the
+quantities selected during estimation.
+
+`A` is the `aVar` result the sandwich was built from. When it carries selected
+quantities — a HAC bandwidth and kernel weights — they are propagated, so
+`bandwidth` and `kernelweights` resolve on the returned matrix. Paths that never
+call `aVar`, and the single-cluster CR0/CR1 aggregation that bypasses it, have
+nothing to propagate and yield an empty `info`; `bandwidth` then returns
+`nothing`, which is the documented result for an estimator that selects nothing.
+"""
+_wrap_vcov(Σ, estimator, A) = CovarianceMatrix(Σ, estimator, NamedTuple())
+function _wrap_vcov(Σ, estimator, A::CovarianceMatrix)
+    return CovarianceMatrix(Σ, estimator, CovarianceMatrices.information(A))
+end
+
+"""
     stderror(ve::CovarianceMatrices.AbstractAsymptoticVarianceEstimator, m::OLSMatrixEstimator)
 
 Compute standard errors using a specified variance estimator.
@@ -1253,10 +1271,10 @@ function CM.vcov(k::CM.AbstractAsymptoticVarianceEstimator, m::OLSMatrixEstimato
         T = eltype(Σ_valid)
         Σ = fill(T(NaN), k_full, k_full)
         Σ[valid_idx, valid_idx] = Σ_valid
-        return Σ
+        return _wrap_vcov(Σ, k, A)
     end
 
-    return scale .* B * A * B
+    return _wrap_vcov(scale .* B * A * B, k, A)
 end
 
 function StatsAPI.confint(ve::CovarianceMatrices.AbstractAsymptoticVarianceEstimator,

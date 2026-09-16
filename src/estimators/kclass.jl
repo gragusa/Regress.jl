@@ -474,7 +474,8 @@ function fit_kclass_estimator(
     ##############################################################################
 
     return IVEstimator{
-        T, typeof(estimator), typeof(default_vcov), typeof(postestimation_data)}(
+        T, typeof(estimator), typeof(default_vcov), typeof(postestimation_data),
+        typeof(vcov_matrix)}(
         estimator,  # Store the actual estimator (LIML, Fuller, KClass)
         coef,
         esample_final, residuals_esample, save_residuals, augmentdf,

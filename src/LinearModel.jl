@@ -40,14 +40,15 @@ Use `ols(df, formula)` to fit this model type.
 - `r2_within::T`: Within R-squared (with FEs)
 - `has_intercept::Bool`: Whether model has intercept
 - `vcov_estimator::V`: Variance-covariance estimator (deep copy)
-- `vcov_matrix::Symmetric{T, Matrix{T}}`: Precomputed variance-covariance matrix
+- `vcov_matrix::C`: Precomputed variance-covariance matrix
 - `se::Vector{T}`: Standard errors
 - `t_stats::Vector{T}`: t-statistics
 - `p_values::Vector{T}`: p-values
 - `F::T`: F-statistic (computed with vcov_estimator)
 - `p::T`: P-value of F-statistic
 """
-struct OLSEstimator{T <: AbstractFloat, P <: OLSLinearPredictor{T}, V} <:
+struct OLSEstimator{T <: AbstractFloat, P <: OLSLinearPredictor{T}, V,
+    C <: AbstractMatrix{T}} <:
        AbstractRegressModel
     # Core GLM-style components
     rr::OLSResponse{T}              # Response object
@@ -86,7 +87,7 @@ struct OLSEstimator{T <: AbstractFloat, P <: OLSLinearPredictor{T}, V} <:
 
     # Variance-covariance estimator and precomputed statistics
     vcov_estimator::V                        # Deep copy of the estimator
-    vcov_matrix::Symmetric{T, Matrix{T}}    # Precomputed vcov matrix
+    vcov_matrix::C                           # Precomputed vcov matrix
     se::Vector{T}                            # Standard errors
     t_stats::Vector{T}                       # t-statistics
     p_values::Vector{T}                      # p-values
@@ -133,7 +134,7 @@ Use `ols(X, y)` to fit this model type.
 - `r2::T`: R-squared
 - `has_intercept::Bool`: Whether model has intercept (assumed from first column)
 - `vcov_estimator::V`: Variance-covariance estimator (deep copy)
-- `vcov_matrix::Symmetric{T, Matrix{T}}`: Precomputed variance-covariance matrix
+- `vcov_matrix::C`: Precomputed variance-covariance matrix
 - `se::Vector{T}`: Standard errors
 - `t_stats::Vector{T}`: t-statistics
 - `p_values::Vector{T}`: p-values
@@ -154,7 +155,8 @@ vcov(HC1(), model)
 stderror(model)  # Uses precomputed vcov
 ```
 """
-struct OLSMatrixEstimator{T <: AbstractFloat, P <: OLSLinearPredictor{T}, V} <:
+struct OLSMatrixEstimator{T <: AbstractFloat, P <: OLSLinearPredictor{T}, V,
+    C <: AbstractMatrix{T}} <:
        AbstractRegressModel
     rr::OLSResponse{T}              # Response object
     pp::P                           # Predictor object (Chol or QR)
@@ -169,7 +171,7 @@ struct OLSMatrixEstimator{T <: AbstractFloat, P <: OLSLinearPredictor{T}, V} <:
 
     # Variance-covariance estimator and precomputed statistics
     vcov_estimator::V                        # Deep copy of the estimator
-    vcov_matrix::Symmetric{T, Matrix{T}}    # Precomputed vcov matrix
+    vcov_matrix::C                           # Precomputed vcov matrix
     se::Vector{T}                            # Standard errors
     t_stats::Vector{T}                       # t-statistics
     p_values::Vector{T}                      # p-values
@@ -271,11 +273,11 @@ function Base.:+(m::OLSMatrixEstimator{T, P, V1}, v::VcovSpec{V2}) where {T, P, 
     vcov_mat = StatsBase.vcov(v.source, m)
     se, t_stats, p_values, _, _ = _calculate_vcov_stats(m, vcov_mat)
 
-    return OLSMatrixEstimator{T, P, V2}(
+    return OLSMatrixEstimator{T, P, V2, typeof(vcov_mat)}(
         m.rr, m.pp, m.basis_coef,
         m.nobs, m.dof, m.dof_residual,
         m.rss, m.tss, m.r2, m.has_intercept,
-        v.source, Symmetric(vcov_mat), se, t_stats, p_values
+        v.source, vcov_mat, se, t_stats, p_values
     )
 end
 
@@ -691,7 +693,7 @@ function Base.:+(m::OLSEstimator{T, P, V1}, v::VcovSpec{V2}) where {T, P, V1, V2
     se, t_stats, p_values, F_stat, p_val = _calculate_vcov_stats(m, vcov_mat)
 
     # Return new OLSEstimator with same data but different vcov type
-    return OLSEstimator{T, P, V2}(
+    return OLSEstimator{T, P, V2, typeof(vcov_mat)}(
         m.rr, m.pp, m.fes,
         m.formula, m.formula_schema, m.contrasts,
         m.esample,
@@ -699,7 +701,7 @@ function Base.:+(m::OLSEstimator{T, P, V1}, v::VcovSpec{V2}) where {T, P, V1, V2
         m.nobs, m.dof, m.dof_fes, m.dof_residual,
         m.tss_total, m.tss_partial, m.rss, m.r2, m.r2_within,
         m.has_intercept,
-        v.source, Symmetric(vcov_mat), se, t_stats, p_values,
+        v.source, vcov_mat, se, t_stats, p_values,
         F_stat, p_val
     )
 end

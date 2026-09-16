@@ -116,7 +116,7 @@ design matrices. Compatible with CovarianceMatrices.jl for robust inference.
 - `has_intercept::Bool = true`: Whether model includes an intercept (for R² computation)
 
 # Returns
-- `OLSMatrixEstimator{T, P, V}`: Fitted model with precomputed HC1 standard errors
+- `OLSMatrixEstimator{T, P, V, C}`: Fitted model with precomputed HC1 standard errors
 
 # Example
 ```julia
@@ -256,7 +256,7 @@ function ols(X::AbstractMatrix{<:Real}, y::AbstractVector{<:Real};
     # Default vcov estimator (HC1)
     default_vcov = CovarianceMatrices.HC1()
 
-    return OLSMatrixEstimator{T, typeof(pp), typeof(default_vcov)}(
+    return OLSMatrixEstimator{T, typeof(pp), typeof(default_vcov), typeof(vcov_matrix)}(
         rr, pp, basis_coef,
         n, dof_model, dof_res,
         T(rss), T(tss), T(r2_val), has_intercept,
@@ -536,7 +536,7 @@ function iv(::TSLS, Z::AbstractMatrix{<:Real}, X::AbstractMatrix{<:Real},
     t_stats = beta ./ se
     p_values = 2 .* tdistccdf.(dof_res, abs.(t_stats))
 
-    return IVMatrixEstimator{T, typeof(default_vcov)}(
+    return IVMatrixEstimator{T, typeof(default_vcov), typeof(vcov_matrix)}(
         beta,
         postestimation,
         basis_coef,

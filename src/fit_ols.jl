@@ -336,7 +336,7 @@ function fit_ols(@nospecialize(df),
     ## Return OLSEstimator
     ##############################################################################
 
-    return OLSEstimator{T, typeof(pp), typeof(default_vcov)}(
+    return OLSEstimator{T, typeof(pp), typeof(default_vcov), typeof(vcov_matrix)}(
         rr, pp, fes,
         data_prep.formula_origin, formula_schema, contrasts,
         esample_final,

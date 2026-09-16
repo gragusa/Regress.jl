@@ -746,7 +746,8 @@ function fit_tsls(@nospecialize(df),
     ##########################################################################
 
     return IVEstimator{
-        T, TSLS, typeof(CovarianceMatrices.HC1()), typeof(postestimation_data)}(
+        T, TSLS, typeof(CovarianceMatrices.HC1()), typeof(postestimation_data),
+        typeof(inf.vcov_matrix)}(
         TSLS(), coef,
         esample_final, residuals_esample, save_residuals, augmentdf,
         postestimation_data,

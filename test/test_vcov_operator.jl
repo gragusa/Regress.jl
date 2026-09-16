@@ -15,7 +15,7 @@
         direct_vcov = vcov(hc, model)
         direct_se = stderror(hc, model)
 
-        @test wrapped.vcov_matrix ≈ direct_vcov
+        @test vcov(wrapped) ≈ direct_vcov
         @test wrapped.se ≈ direct_se
         @test wrapped.t_stats ≈ coef(model) ./ direct_se
     end
@@ -39,7 +39,7 @@ end
         direct_vcov = vcov(hc, model_fe)
         direct_se = stderror(hc, model_fe)
 
-        @test wrapped.vcov_matrix ≈ direct_vcov
+        @test vcov(wrapped) ≈ direct_vcov
         @test wrapped.se ≈ direct_se
     end
 end
@@ -63,7 +63,7 @@ end
         direct_vcov = vcov(cr, model_cluster)
         direct_se = stderror(cr, model_cluster)
 
-        @test wrapped.vcov_matrix ≈ direct_vcov
+        @test vcov(wrapped) ≈ direct_vcov
         @test wrapped.se ≈ direct_se
     end
 
@@ -74,7 +74,7 @@ end
     direct_vcov = vcov(CR1(:State, :Year), model_cluster2)
     direct_se = stderror(CR1(:State, :Year), model_cluster2)
 
-    @test wrapped.vcov_matrix ≈ direct_vcov
+    @test vcov(wrapped) ≈ direct_vcov
     @test wrapped.se ≈ direct_se
 end
 
@@ -93,7 +93,7 @@ end
     direct_vcov = vcov(Bartlett(4), model)
     direct_se = stderror(Bartlett(4), model)
 
-    @test wrapped.vcov_matrix ≈ direct_vcov
+    @test vcov(wrapped) ≈ direct_vcov
     @test wrapped.se ≈ direct_se
 end
 
@@ -167,7 +167,7 @@ end
         direct_vcov = vcov(hc, model)
         direct_se = stderror(hc, model)
 
-        @test wrapped.vcov_matrix ≈ direct_vcov
+        @test vcov(wrapped) ≈ direct_vcov
         @test wrapped.se ≈ direct_se
         @test wrapped.t_stats ≈ coef(model) ./ direct_se
     end
@@ -192,7 +192,7 @@ end
         direct_vcov = vcov(cr, model_cluster)
         direct_se = stderror(cr, model_cluster)
 
-        @test wrapped.vcov_matrix ≈ direct_vcov
+        @test vcov(wrapped) ≈ direct_vcov
         @test wrapped.se ≈ direct_se
     end
 end
@@ -215,7 +215,7 @@ end
         direct_vcov = vcov(hc, model_fe)
         direct_se = stderror(hc, model_fe)
 
-        @test wrapped.vcov_matrix ≈ direct_vcov
+        @test vcov(wrapped) ≈ direct_vcov
         @test wrapped.se ≈ direct_se
     end
 end
@@ -235,7 +235,7 @@ end
     direct_vcov = vcov(Bartlett(4), model)
     direct_se = stderror(Bartlett(4), model)
 
-    @test wrapped.vcov_matrix ≈ direct_vcov
+    @test vcov(wrapped) ≈ direct_vcov
     @test wrapped.se ≈ direct_se
 end
 
@@ -253,7 +253,7 @@ end
     model_hc3_chained = model_hc1 + vcov(HC3())
     model_hc3_direct = model + vcov(HC3())
 
-    @test model_hc3_chained.vcov_matrix ≈ model_hc3_direct.vcov_matrix
+    @test vcov(model_hc3_chained) ≈ vcov(model_hc3_direct)
     @test model_hc3_chained.se ≈ model_hc3_direct.se
     @test model_hc3_chained.F ≈ model_hc3_direct.F
 end
@@ -280,7 +280,6 @@ end
     @test fitted(wrapped) == fitted(model)
 
     # Test that vcov-dependent methods use updated values
-    @test vcov(wrapped) == wrapped.vcov_matrix
     @test stderror(wrapped) == wrapped.se
 
     # Test confint
@@ -362,4 +361,51 @@ end
     # Reachability is what this testitem pins. The CovarianceMatrices sandwich
     # applies its own finite-sample corrections, so its results are not asserted
     # to equal those of the Regress vcov methods.
+end
+
+@testitem "vcov(model) carries estimator metadata" tags = [:vcov, :smoke] begin
+    using Regress, CSV, DataFrames, LinearAlgebra, StatsBase
+    using CovarianceMatrices: CovarianceMatrix, estimator, bandwidth, kernelweights
+    using Regress: HC0, HC3, Bartlett, Andrews, NeweyWest
+
+    df = DataFrame(CSV.File(joinpath(dirname(pathof(Regress)), "../dataset/Cigar.csv")))
+    m = @formula Sales ~ Price + NDI
+    model = Regress.ols(df, m)
+    model_iv = Regress.iv(Regress.TSLS(), df, @formula(Sales ~ Price + (NDI ~ CPI)))
+
+    # A fitted model's vcov reports the estimator that produced it.
+    for fitted in (model, model_iv)
+        V = vcov(fitted)
+        @test V isa CovarianceMatrix
+        @test estimator(V) isa Regress.HR1
+        # HC estimators select nothing, so there is no bandwidth to report.
+        @test bandwidth(V) === nothing
+        @test kernelweights(V) === nothing
+    end
+
+    for hc in (HC0(), HC3())
+        V = vcov(model + vcov(hc))
+        @test V isa CovarianceMatrix
+        @test estimator(V) == hc
+        @test bandwidth(V) === nothing
+    end
+
+    # A HAC estimate carries the bandwidth and kernel weights it selected.
+    for kernel in (Bartlett{Andrews}(), Bartlett{NeweyWest}())
+        V = vcov(model + vcov(kernel))
+        @test V isa CovarianceMatrix
+        @test bandwidth(V) isa Float64
+        @test bandwidth(V) > 0
+        # The intercept column is given zero weight in bandwidth selection.
+        kw = kernelweights(V)
+        @test kw == [0.0, 1.0, 1.0]
+        @test bandwidth(V) ≈ bandwidth(Regress.aVar(kernel, model))
+    end
+
+    # A fixed bandwidth is reported as given.
+    V4 = vcov(model + vcov(Bartlett(4)))
+    @test bandwidth(V4) == 4.0
+
+    # The wrapper does not disturb the estimate itself.
+    @test Matrix(vcov(model + vcov(HC3()))) ≈ vcov(HC3(), model)
 end
