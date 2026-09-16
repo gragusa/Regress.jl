@@ -1,7 +1,7 @@
 module Regress
 
 using CovarianceMatrices: CovarianceMatrices, AbstractAsymptoticVarianceEstimator,
-                          aVar, momentmatrix, stderror, vcov,
+                          aVar, bread, momentmatrix, stderror, vcov,
                           HC0, HC1, HC2, HC3, HC4, HC5,
                           CR0, CR1, CR2, CR3,
                           Bartlett, Parzen, QuadraticSpectral, TukeyHanning, Truncated,

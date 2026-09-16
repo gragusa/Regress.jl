@@ -322,3 +322,44 @@ end
     @test fs.F_nonrobust == fs_hc3.F_nonrobust
     @test fs.F_robust != fs_hc3.F_robust
 end
+
+@testitem "CovarianceMatrices model interface" tags = [:vcov, :smoke] begin
+    using Regress, CSV, DataFrames, LinearAlgebra, StatsAPI
+    using Regress: HC0, HC1, HC2, HC3
+    using CovarianceMatrices: CovarianceMatrices as CM, CovarianceMatrix
+
+    df = DataFrame(CSV.File(joinpath(dirname(pathof(Regress)), "../dataset/Cigar.csv")))
+
+    ols_model = Regress.ols(df, @formula(Sales ~ Price + NDI))
+    iv_model = Regress.iv(
+        Regress.TSLS(), df, @formula(Sales ~ NDI + (Price ~ Pimin + CPI)))
+
+    # Regress's own vcov methods are narrower than the RegressionModel fallback, so
+    # reaching the CovarianceMatrices implementation requires invoking it directly.
+    upstream_sig = Tuple{CM.AbstractAsymptoticVarianceEstimator, CM.RegressionModel}
+    upstream_vcov(k, m) = invoke(CM.vcov, upstream_sig, k, m)
+
+    for model in (ols_model, iv_model)
+        p = length(coef(model))
+
+        # Regress extends these CovarianceMatrices functions rather than defining
+        # same-named ones of its own, so the model dispatches on the interface.
+        @test hasmethod(CM.bread, Tuple{typeof(model)})
+        @test size(CM.bread(model)) == (p, p)
+        @test CM.leverage(model) == StatsAPI.leverage(model)
+        @test CM.numobs(model) == nobs(model)
+        @test length(CM.mask(model)) == p
+
+        # HC0/HC1 need only bread; HC2/HC3 additionally dispatch on CM.leverage.
+        for hc in (HC0(), HC1(), HC2(), HC3())
+            V = upstream_vcov(hc, model)
+            @test V isa CovarianceMatrix
+            @test size(V) == (p, p)
+            @test all(isfinite, Matrix(V))
+        end
+    end
+
+    # Reachability is what this testitem pins. The CovarianceMatrices sandwich
+    # applies its own finite-sample corrections, so its results are not asserted
+    # to equal those of the Regress vcov methods.
+end

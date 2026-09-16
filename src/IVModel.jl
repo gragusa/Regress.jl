@@ -465,12 +465,25 @@ end
 const _CM = CovarianceMatrices
 
 """
-    bread(m::IVEstimator)
+    CovarianceMatrices.bread(m::IVEstimator)
 
 Compute (X'X)^(-1), the "bread" of the sandwich variance estimator for IV.
 Uses the predicted endogenous variables (Xhat) in the design matrix.
 """
-bread(m::IVEstimator) = m.postestimation.invXX
+_CM.bread(m::IVEstimator) = m.postestimation.invXX
+
+# CovarianceMatrices declares its own `leverage`, distinct from `StatsAPI.leverage`;
+# its HC2-HC5 and CR2/CR3 residual adjustments dispatch on that one.
+_CM.leverage(m::IVEstimator) = StatsAPI.leverage(m)
+
+# CovarianceMatrices.jl uses numobs, which is distinct from StatsAPI.nobs
+_CM.numobs(m::IVEstimator) = m.nobs
+
+function _CM.mask(m::IVEstimator)
+    isnothing(m.postestimation) &&
+        error("Model does not have post-estimation data stored. Post-estimation vcov not available.")
+    return m.postestimation.basis_coef
+end
 
 """
     leverage(m::IVEstimator)
@@ -1843,11 +1856,13 @@ end
 ##############################################################################
 
 """
-    bread(m::IVMatrixEstimator)
+    CovarianceMatrices.bread(m::IVMatrixEstimator)
 
 Returns (X̂'X̂)⁻¹ for sandwich variance estimation.
 """
-bread(m::IVMatrixEstimator) = m.postestimation.invXhatXhat
+_CM.bread(m::IVMatrixEstimator) = m.postestimation.invXhatXhat
+
+_CM.leverage(m::IVMatrixEstimator) = StatsAPI.leverage(m)
 
 """
     momentmatrix(m::IVMatrixEstimator)
@@ -1876,6 +1891,8 @@ end
 
 # CovarianceMatrices.jl uses numobs, which is distinct from StatsAPI.nobs
 _CM.numobs(m::IVMatrixEstimator) = m.nobs
+
+_CM.mask(m::IVMatrixEstimator) = m.basis_coef
 
 # Residual adjustments for HC estimators
 function residualadjustment(k::_CM.HC0, m::IVMatrixEstimator)

@@ -322,7 +322,8 @@ CM._residuals(m::OLSMatrixEstimator) = residuals(m)
 CM.mask(m::OLSEstimator) = m.basis_coef
 CM.mask(m::OLSMatrixEstimator) = m.basis_coef
 
-# Note: bread() and leverage() are defined below in their respective sections
+# Note: CM.bread(), CM.leverage() and StatsAPI.leverage() are defined below in
+# their respective sections
 
 """
     CovarianceMatrices.momentmatrix(m::OLSEstimator)
@@ -670,11 +671,15 @@ function _cluster_not_found_error(cluster_name::Symbol, m::OLSEstimator)
 end
 
 """
-    bread(m::OLSEstimator)
+    CovarianceMatrices.bread(m::OLSEstimator)
 
 Compute (X'X)^(-1), the "bread" of the sandwich variance estimator.
 """
-bread(m::OLSEstimator) = invchol(m.pp)
+CM.bread(m::OLSEstimator) = invchol(m.pp)
+
+# CovarianceMatrices declares its own `leverage`, distinct from `StatsAPI.leverage`;
+# its HC2-HC5 and CR2/CR3 residual adjustments dispatch on that one.
+CM.leverage(m::OLSEstimator) = StatsAPI.leverage(m)
 
 """
     leverage(m::OLSEstimator)
@@ -1111,11 +1116,13 @@ function CovarianceMatrices.momentmatrix(m::OLSMatrixEstimator)
 end
 
 """
-    bread(m::OLSMatrixEstimator)
+    CovarianceMatrices.bread(m::OLSMatrixEstimator)
 
 Compute (X'X)^(-1), the "bread" of the sandwich variance estimator.
 """
-bread(m::OLSMatrixEstimator) = invchol(m.pp)
+CM.bread(m::OLSMatrixEstimator) = invchol(m.pp)
+
+CM.leverage(m::OLSMatrixEstimator) = StatsAPI.leverage(m)
 
 """
     leverage(m::OLSMatrixEstimator)
