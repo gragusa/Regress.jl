@@ -78,6 +78,15 @@
 
 ### Bug Fixes
 
+- **The intercept moment entered automatic HAC bandwidth selection on IV
+  models.** With `Bartlett{NeweyWest}` or `Bartlett{Andrews}`, the OLS path
+  takes its kernel weights from the model matrix, giving the constant column
+  weight 0, while the IV path passed none and so counted every column of the
+  moment matrix. An IV model instrumented by its own regressors selected a
+  bandwidth differing from the equivalent OLS model by a factor of two. Both
+  now exclude the intercept, as Stata does. Fixed-bandwidth HAC, and every
+  other variance estimator, were unaffected.
+
 - **Over-identified TSLS from matrix inputs used the wrong leverage.**
   `leverage(::IVMatrixEstimator)` computed `diag(X̂(X̂'X̂)⁻¹X̂')`, which equals
   the AER/sandwich IV leverage `diag(X·(X̂'X̂)⁻¹·X'·Z·(Z'Z)⁻¹·Z')` only when the
