@@ -171,6 +171,16 @@ function ols(X::AbstractMatrix{<:Real}, y::AbstractVector{<:Real};
         weights::Union{Nothing, AbstractVector} = nothing,
         has_intercept::Bool = true)
 
+    # Fit is 1-based: X and y are materialized into `Matrix`/`Vector` and indexed
+    # positionally. Reject offset axes up front with a clear message rather than
+    # failing deep inside the materialization.
+    Base.require_one_based_indexing(X, y)
+
+    # Fit is 1-based: X and y are materialized into `Matrix`/`Vector` and indexed
+    # positionally. Reject offset axes up front with a clear message rather than
+    # failing deep inside the materialization.
+    Base.require_one_based_indexing(X, y)
+
     # Validate inputs
     n, k = size(X)
     length(y) == n ||
@@ -432,6 +442,11 @@ function iv(::TSLS, Z::AbstractMatrix{<:Real}, X::AbstractMatrix{<:Real},
         y::AbstractVector{<:Real};
         has_intercept::Bool = true,
         n_endogenous::Int = 1)
+
+    # Fit is 1-based: Z, X, y are materialized into `Matrix`/`Vector` and indexed
+    # positionally. Reject offset axes up front with a clear message rather than
+    # failing deep inside the materialization.
+    Base.require_one_based_indexing(Z, X, y)
 
     # Validate inputs
     n = length(y)
