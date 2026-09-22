@@ -13,6 +13,8 @@
     #   model implements to be usable with its variance estimators
     # - alignment, print_matrix_row (Base): custom coeftable show
     # - QRCompactWY (LinearAlgebra): concrete type of the stored QR factorization
+    # - update_weights! (FixedEffects): reweights the fixed-effect solver in place
+    #   across probit IRLS iterations
     test_explicit_imports(Regress;
         ignore = (:PValue, :NoQuote,
             :Schema, :FullRank, :collect_matrix_terms, :missing_omit,
@@ -21,5 +23,5 @@
             :Clustering, :_leverage_transform, :_residuals, :avar_tuple, :bread,
             :leverage, :mask, :numobs, :residual_adjustment,
             :alignment, :print_matrix_row,
-            :QRCompactWY))
+            :QRCompactWY, :update_weights!))
 end
