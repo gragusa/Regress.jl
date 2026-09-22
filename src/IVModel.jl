@@ -1415,8 +1415,9 @@ end
 ##
 ##############################################################################
 
-function _estimator_name(m::IVEstimator)
-    e = m.estimator
+_estimator_name(m::IVEstimator) = _estimator_name(m.estimator)
+
+function _estimator_name(e::AbstractIVEstimator)
     if e isa TSLS
         return "TSLS"
     elseif e isa LIML
@@ -1755,16 +1756,18 @@ struct PostEstimationDataIVMatrix{T <: AbstractFloat}
 end
 
 """
-    IVMatrixEstimator{T, V, C} <: AbstractRegressModel
+    IVMatrixEstimator{T, E, V, C} <: AbstractRegressModel
 
 Matrix-based IV estimator for use without formula interface.
 Designed for programmatic use (e.g., LocalProjections.jl).
 
 # Type Parameters
 - `T`: Element type (Float64 or Float32)
+- `E`: IV estimator type (TSLS, LIML, Fuller, KClass)
 - `V`: Variance estimator type
 
 # Fields
+- `estimator::E`: IV estimator used to fit the model
 - `coef::Vector{T}`: Coefficient estimates
 - `postestimation::PostEstimationDataIVMatrix{T}`: Data for vcov computation
 - `basis_coef::BitVector`: Which coefficients are not collinear
@@ -1789,8 +1792,10 @@ coef(model)
 vcov(HC1(), model)
 ```
 """
-struct IVMatrixEstimator{T <: AbstractFloat, V, C <: AbstractMatrix{T}} <:
+struct IVMatrixEstimator{T <: AbstractFloat, E <: AbstractIVEstimator, V,
+    C <: AbstractMatrix{T}} <:
        AbstractRegressModel
+    estimator::E
     coef::Vector{T}
     postestimation::PostEstimationDataIVMatrix{T}
     basis_coef::BitVector
@@ -1809,6 +1814,8 @@ struct IVMatrixEstimator{T <: AbstractFloat, V, C <: AbstractMatrix{T}} <:
     t_stats::Vector{T}
     p_values::Vector{T}
 end
+
+_estimator_name(m::IVMatrixEstimator) = _estimator_name(m.estimator)
 
 has_iv(::IVMatrixEstimator) = true
 has_fe(::IVMatrixEstimator) = false
@@ -1883,7 +1890,12 @@ end
 """
     leverage(m::IVMatrixEstimator)
 
-Returns diagonal of hat matrix H = X̂(X̂'X̂)⁻¹X̂' for HC2/HC3/HC4/HC5.
+Diagonal of the IV hat matrix, for HC2/HC3/HC4/HC5.
+
+For k-class estimators the `X_hat`/`invXhatXhat` slots hold the k-class
+adjustment matrix and its bread, so `diag(Adj·invA·Adj')` is the leverage. TSLS
+is specialized below to the AER formula, which for over-identified models does
+not coincide with `diag(X̂(X̂'X̂)⁻¹X̂')`.
 """
 function StatsAPI.leverage(m::IVMatrixEstimator)
     X_hat = m.postestimation.X_hat
@@ -1891,6 +1903,20 @@ function StatsAPI.leverage(m::IVMatrixEstimator)
     # h_ii = X̂_i' * (X̂'X̂)⁻¹ * X̂_i
     # Efficient computation: sum((X_hat * invXX) .* X_hat, dims=2)
     return vec(sum((X_hat * invXX) .* X_hat, dims = 2))
+end
+
+# TSLS leverage matches R's AER::ivreg / sandwich::vcovHC:
+#     h = diag(X · (X̂'X̂)⁻¹ · X' · Z · (Z'Z)⁻¹ · Z')
+# This is the same formula the formula-path `leverage(::IVEstimator)` uses. For
+# over-identified TSLS it differs from diag(X̂(X̂'X̂)⁻¹X̂'), so HC2/HC3 need it to
+# match the formula path.
+function StatsAPI.leverage(m::IVMatrixEstimator{T, TSLS}) where {T <: AbstractFloat}
+    X = m.postestimation.X
+    Z = m.postestimation.Z
+    invXhatXhat = m.postestimation.invXhatXhat
+    invZZ = inv(cholesky(Symmetric(Z' * Z)))
+    Pz = Z * (invZZ * Z')
+    return vec(sum((X * invXhatXhat) .* (Pz * X), dims = 2))
 end
 
 # CovarianceMatrices.jl uses numobs, which is distinct from StatsAPI.nobs
@@ -2017,7 +2043,7 @@ end
 
 Create a new IVMatrixEstimator with updated variance-covariance estimator.
 """
-function Base.:+(m::IVMatrixEstimator{T, V1}, v::VcovSpec{V2}) where {T, V1, V2}
+function Base.:+(m::IVMatrixEstimator{T, E, V1}, v::VcovSpec{V2}) where {T, E, V1, V2}
     new_vcov = vcov(v.source, m)
     new_se = sqrt.(diag(new_vcov))
 
@@ -2026,7 +2052,8 @@ function Base.:+(m::IVMatrixEstimator{T, V1}, v::VcovSpec{V2}) where {T, V1, V2}
     new_t = cc ./ new_se
     new_p = 2 .* tdistccdf.(dof_residual(m), abs.(new_t))
 
-    return IVMatrixEstimator{T, V2, typeof(new_vcov)}(
+    return IVMatrixEstimator{T, E, V2, typeof(new_vcov)}(
+        m.estimator,
         m.coef,
         m.postestimation,
         m.basis_coef,
@@ -2166,7 +2193,7 @@ function Base.show(io::IO, m::IVMatrixEstimator)
 end
 
 function Base.show(io::IO, ::MIME"text/plain", m::IVMatrixEstimator{T}) where {T}
-    println(io, "IV Matrix Estimator (TSLS)")
+    println(io, "IV Matrix Estimator ($(_estimator_name(m)))")
     println(io, "─" ^ 40)
     println(io, "Observations:      $(nobs(m))")
     println(io, "Parameters:        $(dof(m))")

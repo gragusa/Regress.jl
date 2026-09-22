@@ -176,11 +176,6 @@ function ols(X::AbstractMatrix{<:Real}, y::AbstractVector{<:Real};
     # failing deep inside the materialization.
     Base.require_one_based_indexing(X, y)
 
-    # Fit is 1-based: X and y are materialized into `Matrix`/`Vector` and indexed
-    # positionally. Reject offset axes up front with a clear message rather than
-    # failing deep inside the materialization.
-    Base.require_one_based_indexing(X, y)
-
     # Validate inputs
     n, k = size(X)
     length(y) == n ||
@@ -438,7 +433,7 @@ model_robust = model + vcov(HC1())
 
 See also: [`iv(::TSLS, df, formula)`](@ref), [`IVMatrixEstimator`](@ref)
 """
-function iv(::TSLS, Z::AbstractMatrix{<:Real}, X::AbstractMatrix{<:Real},
+function iv(estimator::TSLS, Z::AbstractMatrix{<:Real}, X::AbstractMatrix{<:Real},
         y::AbstractVector{<:Real};
         has_intercept::Bool = true,
         n_endogenous::Int = 1)
@@ -551,7 +546,9 @@ function iv(::TSLS, Z::AbstractMatrix{<:Real}, X::AbstractMatrix{<:Real},
     t_stats = beta ./ se
     p_values = 2 .* tdistccdf.(dof_res, abs.(t_stats))
 
-    return IVMatrixEstimator{T, typeof(default_vcov), typeof(vcov_matrix)}(
+    return IVMatrixEstimator{T, typeof(estimator), typeof(default_vcov),
+        typeof(vcov_matrix)}(
+        estimator,
         beta,
         postestimation,
         basis_coef,
