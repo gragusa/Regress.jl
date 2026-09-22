@@ -1,7 +1,8 @@
 module Regress
 
 using CovarianceMatrices: CovarianceMatrices, AbstractAsymptoticVarianceEstimator,
-                          aVar, bread, momentmatrix, stderror, vcov,
+                          CovarianceMatrix, aVar, bread, momentmatrix, stderror,
+                          vcov,
                           HC0, HC1, HC2, HC3, HC4, HC5,
                           CR0, CR1, CR2, CR3,
                           Bartlett, Parzen, QuadraticSpectral, TukeyHanning, Truncated,
@@ -12,9 +13,9 @@ using DataFrames: DataFrames, AsTable, DataFrame, Not, combine, completecases,
 using FixedEffects: FixedEffects, AbstractFixedEffectSolver, FixedEffect,
                     solve_coefficients!, solve_residuals!
 using LinearAlgebra: LinearAlgebra, BLAS, Cholesky, ColumnNorm, Hermitian, I,
-                     Symmetric, UpperTriangular, cholesky, cholesky!, diag,
-                     diagm, dot, eigvals, issuccess, ldiv!, mul!, qr, rank,
-                     rmul!, svd, tr
+                     Symmetric, UpperTriangular, cholesky, diag,
+                     diagm, dot, eigvals, issuccess, mul!, pinv, qr,
+                     rank, rmul!, svd, tr
 using PrecompileTools: PrecompileTools, @compile_workload
 using Printf: Printf, @printf, @sprintf
 using Reexport: Reexport, @reexport
@@ -30,7 +31,8 @@ using StatsFuns: StatsFuns, chisqccdf, fdistccdf, tdistccdf, tdistinvcdf
 @reexport using StatsModels
 using StatsModels: StatsModels, @formula, AbstractTerm, ConstantTerm,
                    FormulaTerm, FunctionTerm, InteractionTerm, InterceptTerm,
-                   MatrixTerm, StatisticalModel, Term, apply_schema, coefnames,
+                   MatrixTerm, RegressionModel, StatisticalModel, Term,
+                   apply_schema, coefnames,
                    formula, hasintercept, modelmatrix, omitsintercept,
                    response, schema, term
 using Tables: Tables

@@ -7,7 +7,7 @@ fitted values, and weights for a linear regression model.
 When `save=:minimal` is used, `y` and `mu` are empty vectors to save memory.
 Use `has_response_data(rr)` to check if response data is available.
 """
-mutable struct OLSResponse{T <: AbstractFloat}
+struct OLSResponse{T <: AbstractFloat}
     y::Vector{T}                    # Original response vector (empty if save=:minimal)
     mu::Vector{T}                   # Fitted values ŷ = X*β (empty if save=:minimal)
     wts::Vector{T}                  # Weights (empty = unweighted)
