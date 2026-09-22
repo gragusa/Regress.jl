@@ -7,7 +7,20 @@
 """
     AbstractTest
 
-Abstract supertype for test result types (first-stage F-tests, weak IV tests, etc.).
+Abstract supertype for test result types (first-stage F-tests, weak IV tests,
+endogeneity and overidentification tests).
+
+# Interface
+- `StatsAPI.pvalue(t)` returns the test's p-value where one is meaningful.
+  Single-statistic tests return a scalar; per-endogenous first-stage tests
+  return a vector aligned with the endogenous variables. The composite
+  first-stage results (`FirstStageResult`, `FirstStageIV`) return the robust
+  p-values; their non-robust counterparts remain accessible as fields.
+  `WeakIVTestResult` implements no `pvalue` — it reports against critical
+  values rather than a p-value.
+- `StatsAPI.dof(t)` returns a scalar degrees of freedom where one is
+  unambiguous (`SarganResult`). F-based tests carry `df1`/`df2` fields instead
+  and implement no scalar `dof`.
 """
 abstract type AbstractTest end
 
@@ -90,6 +103,8 @@ function Base.show(io::IO, f::FirstStageFTest{<:AbstractVector})
     end
 end
 
+StatsAPI.pvalue(f::FirstStageFTest) = f.p
+
 ##############################################################################
 ##
 ## Type IVEstimator (for IV estimation)
@@ -151,7 +166,7 @@ fs.F_nonrobust       # Homoskedastic first-stage F-statistics
 fs.F_robust          # Robust first-stage F-statistics
 ```
 """
-struct FirstStageResult{T <: AbstractFloat}
+struct FirstStageResult{T <: AbstractFloat} <: AbstractTest
     endogenous_names::Vector{String}
     F_nonrobust::Vector{T}
     p_nonrobust::Vector{T}
@@ -163,6 +178,8 @@ struct FirstStageResult{T <: AbstractFloat}
     n_instruments::Int
     vcov_type::String
 end
+
+StatsAPI.pvalue(fs::FirstStageResult) = fs.p_robust
 
 """
     FirstStageIV{T, M}
@@ -195,7 +212,7 @@ fs.F_nonrobust           # non-robust F
 fs.F_robust              # robust F
 ```
 """
-struct FirstStageIV{T <: AbstractFloat, M <: OLSMatrixEstimator}
+struct FirstStageIV{T <: AbstractFloat, M <: OLSMatrixEstimator} <: AbstractTest
     models::Vector{M}
     endogenous_names::Vector{String}
     instrument_names::Vector{String}
@@ -223,6 +240,8 @@ function Base.show(io::IO, fs::FirstStageIV{T}) where {T}
     @printf(io, "DoF: (%d, %d)\n", fs.df1, fs.df2)
     println(io, "Excluded instruments: ", join(fs.instrument_names, ", "))
 end
+
+StatsAPI.pvalue(fs::FirstStageIV) = fs.p_robust
 
 """
     has_first_stage_data(fsd::FirstStageData) -> Bool
