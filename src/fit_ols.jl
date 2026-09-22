@@ -113,10 +113,11 @@ function fit_ols(@nospecialize(df),
                                              data_prep.has_fe_intercept)
 
     # Validate finite values
-    all(isfinite, wts) || throw("Weights are not finite")
+    all(isfinite, wts) || throw(ArgumentError("Weights are not finite"))
     all(isfinite, rr.y) ||
-        throw("Some observations for the dependent variable are infinite")
-    all(isfinite, X) || throw("Some observations for the exogenous variables are infinite")
+        throw(ArgumentError("Some observations for the dependent variable are infinite"))
+    all(isfinite, X) ||
+        throw(ArgumentError("Some observations for the exogenous variables are infinite"))
 
     ##############################################################################
     ## Partial Out Fixed Effects
