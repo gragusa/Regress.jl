@@ -9,6 +9,9 @@
 - **Requires CovarianceMatrices 0.32.** Earlier versions no longer load: 0.32
   removed `setkernelweights!`, on which Regress defined methods.
 
+- **Requires Julia 1.12.** CovarianceMatrices 0.32 sets this floor, which rules
+  out the 1.10 long-term-support release.
+
 - **`vcov(model)` returns a `CovarianceMatrix`** instead of
   `Symmetric{T,Matrix{T}}`. It is still an `AbstractMatrix`, so indexing,
   `inv`, `\`, and factorizations are unchanged, but the result now carries the
