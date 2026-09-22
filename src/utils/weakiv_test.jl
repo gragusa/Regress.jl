@@ -82,7 +82,7 @@ end
 ##############################################################################
 
 """
-    weakivtest(m::IVEstimator; level=0.05, eps=0.001, benchmark=:nagar) -> WeakIVTestResult
+    weakivtest(m::IVEstimator; level=0.05, tol=0.001, benchmark=:nagar) -> WeakIVTestResult
 
 Compute the Montiel-Olea-Pflueger robust weak instrument test as a
 post-estimation command on an IV model.
@@ -93,7 +93,7 @@ post-estimation data stored (the default).
 # Arguments
 - `m::IVEstimator`: A fitted IV model (TSLS, LIML, etc.)
 - `level::Real`: Confidence level alpha (default: 0.05)
-- `eps::Real`: Convergence tolerance for bias optimization (default: 0.001)
+- `tol::Real`: Convergence tolerance for bias optimization (default: 0.001)
 - `benchmark::Symbol`: Bias benchmark — `:nagar` (default, MOP) or `:ols` (Windmeijer OLS)
 
 # Returns
@@ -107,7 +107,7 @@ r.F_eff           # Effective F-statistic
 r.cv_TSLS         # TSLS critical values at 5%, 10%, 20%, 30%
 ```
 """
-function weakivtest(m::IVEstimator{T}; level::Real = 0.05, eps::Real = 0.001,
+function weakivtest(m::IVEstimator{T}; level::Real = 0.05, tol::Real = 0.001,
         benchmark::Symbol = :nagar) where {T}
     # Validate
     pe = m.postestimation
@@ -139,12 +139,12 @@ function weakivtest(m::IVEstimator{T}; level::Real = 0.05, eps::Real = 0.001,
     return _weakivtest_core(
         y_full, X_orig, Xendo_orig, Z_res,
         k_exo, K, S, L, m.vcov_estimator,
-        T(level), T(eps), benchmark
+        T(level), T(tol), benchmark
     )
 end
 
 """
-    weakivtest(m::IVMatrixEstimator; level=0.05, eps=0.001, benchmark=:nagar) -> WeakIVTestResult
+    weakivtest(m::IVMatrixEstimator; level=0.05, tol=0.001, benchmark=:nagar) -> WeakIVTestResult
 
 Compute the Montiel-Olea-Pflueger robust weak instrument test for a matrix-based
 IV model (as used by LocalProjections.jl).
@@ -154,13 +154,13 @@ Requires a single endogenous regressor.
 # Arguments
 - `m::IVMatrixEstimator`: A fitted IV model from matrix-based estimation
 - `level::Real`: Confidence level alpha (default: 0.05)
-- `eps::Real`: Convergence tolerance for bias optimization (default: 0.001)
+- `tol::Real`: Convergence tolerance for bias optimization (default: 0.001)
 - `benchmark::Symbol`: Bias benchmark — `:nagar` (default, MOP) or `:ols` (Windmeijer OLS)
 
 # Returns
 A `WeakIVTestResult` containing effective F, robust F, critical values, etc.
 """
-function weakivtest(m::IVMatrixEstimator{T}; level::Real = 0.05, eps::Real = 0.001,
+function weakivtest(m::IVMatrixEstimator{T}; level::Real = 0.05, tol::Real = 0.001,
         benchmark::Symbol = :nagar) where {T}
     pe = m.postestimation
     n_endo = pe.n_endogenous
@@ -196,7 +196,7 @@ function weakivtest(m::IVMatrixEstimator{T}; level::Real = 0.05, eps::Real = 0.0
     return _weakivtest_core(
         y_full, X_orig, Xendo_orig, Z_res,
         k_exo, K, S, L, m.vcov_estimator,
-        T(level), T(eps), benchmark
+        T(level), T(tol), benchmark
     )
 end
 
