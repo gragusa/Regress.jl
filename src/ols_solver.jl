@@ -8,7 +8,9 @@ This file contains functions for:
 """
 
 using LinearAlgebra
-using LinearAlgebra: BlasReal
+
+# Element types with BLAS-backed real arithmetic (LinearAlgebra.BlasReal is not public API)
+const BlasReal = Union{Float32, Float64}
 
 #=============================================================================
 # Collinearity Detection

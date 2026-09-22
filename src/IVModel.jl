@@ -7,7 +7,20 @@
 """
     AbstractTest
 
-Abstract supertype for test result types (first-stage F-tests, weak IV tests, etc.).
+Abstract supertype for test result types (first-stage F-tests, weak IV tests,
+endogeneity and overidentification tests).
+
+# Interface
+- `StatsAPI.pvalue(t)` returns the test's p-value where one is meaningful.
+  Single-statistic tests return a scalar; per-endogenous first-stage tests
+  return a vector aligned with the endogenous variables. The composite
+  first-stage results (`FirstStageResult`, `FirstStageIV`) return the robust
+  p-values; their non-robust counterparts remain accessible as fields.
+  `WeakIVTestResult` implements no `pvalue` — it reports against critical
+  values rather than a p-value.
+- `StatsAPI.dof(t)` returns a scalar degrees of freedom where one is
+  unambiguous (`SarganResult`). F-based tests carry `df1`/`df2` fields instead
+  and implement no scalar `dof`.
 """
 abstract type AbstractTest end
 
@@ -90,6 +103,8 @@ function Base.show(io::IO, f::FirstStageFTest{<:AbstractVector})
     end
 end
 
+StatsAPI.pvalue(f::FirstStageFTest) = f.p
+
 ##############################################################################
 ##
 ## Type IVEstimator (for IV estimation)
@@ -151,7 +166,7 @@ fs.F_nonrobust       # Homoskedastic first-stage F-statistics
 fs.F_robust          # Robust first-stage F-statistics
 ```
 """
-struct FirstStageResult{T <: AbstractFloat}
+struct FirstStageResult{T <: AbstractFloat} <: AbstractTest
     endogenous_names::Vector{String}
     F_nonrobust::Vector{T}
     p_nonrobust::Vector{T}
@@ -163,6 +178,8 @@ struct FirstStageResult{T <: AbstractFloat}
     n_instruments::Int
     vcov_type::String
 end
+
+StatsAPI.pvalue(fs::FirstStageResult) = fs.p_robust
 
 """
     FirstStageIV{T, M}
@@ -195,7 +212,7 @@ fs.F_nonrobust           # non-robust F
 fs.F_robust              # robust F
 ```
 """
-struct FirstStageIV{T <: AbstractFloat, M <: OLSMatrixEstimator}
+struct FirstStageIV{T <: AbstractFloat, M <: OLSMatrixEstimator} <: AbstractTest
     models::Vector{M}
     endogenous_names::Vector{String}
     instrument_names::Vector{String}
@@ -223,6 +240,8 @@ function Base.show(io::IO, fs::FirstStageIV{T}) where {T}
     @printf(io, "DoF: (%d, %d)\n", fs.df1, fs.df2)
     println(io, "Excluded instruments: ", join(fs.instrument_names, ", "))
 end
+
+StatsAPI.pvalue(fs::FirstStageIV) = fs.p_robust
 
 """
     has_first_stage_data(fsd::FirstStageData) -> Bool
@@ -321,7 +340,8 @@ iv(TSLS(), df, @formula(y ~ x + (endo ~ instrument)))
 ```
 """
 struct IVEstimator{
-    T, E <: AbstractIVEstimator, V, P <: Union{PostEstimationDataIV{T}, Nothing}} <:
+    T, E <: AbstractIVEstimator, V, P <: Union{PostEstimationDataIV{T}, Nothing},
+    C <: AbstractMatrix{T}} <:
        AbstractRegressModel
     estimator::E  # Which IV estimator was used
 
@@ -356,8 +376,8 @@ struct IVEstimator{
     r2_within::T      # within r2 (with fixed effect)
 
     # Variance-covariance estimator and precomputed statistics
-    vcov_estimator::V                        # Deep copy of the estimator
-    vcov_matrix::Symmetric{T, Matrix{T}}    # Precomputed vcov matrix
+    vcov_estimator::V                        # Estimator used to compute vcov_matrix
+    vcov_matrix::C                           # Precomputed vcov matrix
     se::Vector{T}                            # Standard errors
     t_stats::Vector{T}                       # t-statistics
     p_values::Vector{T}                      # p-values
@@ -465,12 +485,25 @@ end
 const _CM = CovarianceMatrices
 
 """
-    bread(m::IVEstimator)
+    CovarianceMatrices.bread(m::IVEstimator)
 
 Compute (X'X)^(-1), the "bread" of the sandwich variance estimator for IV.
 Uses the predicted endogenous variables (Xhat) in the design matrix.
 """
-bread(m::IVEstimator) = m.postestimation.invXX
+_CM.bread(m::IVEstimator) = m.postestimation.invXX
+
+# CovarianceMatrices declares its own `leverage`, distinct from `StatsAPI.leverage`;
+# its HC2-HC5 and CR2/CR3 residual adjustments dispatch on that one.
+_CM.leverage(m::IVEstimator) = StatsAPI.leverage(m)
+
+# CovarianceMatrices.jl uses numobs, which is distinct from StatsAPI.nobs
+_CM.numobs(m::IVEstimator) = m.nobs
+
+function _CM.mask(m::IVEstimator)
+    isnothing(m.postestimation) &&
+        error("Model does not have post-estimation data stored. Post-estimation vcov not available.")
+    return m.postestimation.basis_coef
+end
 
 """
     leverage(m::IVEstimator)
@@ -549,37 +582,14 @@ function StatsAPI.leverage(m::IVEstimator)
     return h
 end
 
-# Residual adjustments for HC/HR estimators
-# Note: HC0 = HR0 and HC1 = HR1 in CovarianceMatrices.jl (type aliases)
-@noinline residualadjustment(k::_CM.HR0, m::IVEstimator) = 1.0  # Also handles HC0
-@noinline residualadjustment(k::_CM.HR1, m::IVEstimator) = sqrt(nobs(m) / dof_residual(m))  # Also handles HC1
-@noinline residualadjustment(k::_CM.HR2, m::IVEstimator) = 1.0 ./ sqrt.(1 .- leverage(m))  # Also handles HC2
-@noinline residualadjustment(k::_CM.HR3, m::IVEstimator) = 1.0 ./ (1 .- leverage(m))  # Also handles HC3
+# Residual adjustments for HC/HR estimators come from
+# `CovarianceMatrices.residual_adjustment`, which reaches the model through the
+# `leverage` and `numobs` protocol methods defined above.
+@noinline residualadjustment(k::_CM.HR, m::IVEstimator) = _CM.residual_adjustment(k, m)
 
-@noinline function residualadjustment(k::_CM.HC4, m::IVEstimator)
-    n = nobs(m)
-    h = leverage(m)
-    p = round(Int, sum(h))
-    adj = similar(h)
-    @inbounds for j in eachindex(h)
-        delta = min(4.0, n * h[j] / p)
-        adj[j] = 1 / (1 - h[j])^(delta / 2)
-    end
-    adj
-end
-
-@noinline function residualadjustment(k::_CM.HC5, m::IVEstimator)
-    n = nobs(m)
-    h = leverage(m)
-    p = round(Int, sum(h))
-    mx = max(n * 0.7 * maximum(h) / p, 4.0)
-    adj = similar(h)
-    @inbounds for j in eachindex(h)
-        alpha = min(n * h[j] / p, mx)
-        adj[j] = 1 / (1 - h[j])^(alpha / 4)
-    end
-    adj
-end
+# HR1 is the exception: upstream divides by `n - length(coef(m))`, which cannot see
+# fixed effects absorbed out of the design, while `dof_residual` counts them.
+@noinline residualadjustment(k::_CM.HR1, m::IVEstimator) = sqrt(nobs(m) / dof_residual(m))
 
 # Cluster-robust residual adjustments
 @noinline residualadjustment(k::_CM.CR0, m::IVEstimator) = 1.0
@@ -588,45 +598,28 @@ end
 # Correlated estimators (HAC, EWC, DriscollKraay, VARHAC, etc.) - no residual adjustment needed
 @noinline residualadjustment(k::_CM.Correlated, m::IVEstimator) = 1.0
 
-# CR2 and CR3 for IV - leverage-adjusted cluster-robust
-function residualadjustment(k::_CM.CR2, m::IVEstimator)
-    @assert length(k.g) == 1 "CR2 for IV currently only supports single-way clustering"
+# CR2/CR3 for IV - leverage-adjusted cluster-robust.
+#
+# The leverage blocks are built from the second-stage regressor matrix (`Adj` for the
+# K-class estimators, the fitted `X` otherwise), which is the matrix the IV sandwich
+# treats as the design; it is not `modelmatrix(m)`, so this cannot route through
+# `CovarianceMatrices.residual_adjustment` the way the OLS methods do. The root itself
+# is shared with upstream via `_leverage_transform`: CR2 is the symmetric square root,
+# CR3 the plain inverse.
+function residualadjustment(k::Union{_CM.CR2, _CM.CR3}, m::IVEstimator)
+    length(k.g) == 1 || throw(ArgumentError(
+        "multiway clustering with $(nameof(typeof(k))) is not supported for IV models"))
     g = k.g[1]
-    X = m.postestimation.X_fitted
+    pe = m.postestimation
+    X = has_kclass_adj(pe) ? pe.Adj : pe.X_fitted
     resid = residuals_for_vcov(m)
     u = copy(resid)
     XX = bread(m)
-    for groups in 1:g.ngroups
-        ind = findall(==(groups), g)
+    for gc in 1:g.ngroups
+        ind = findall(==(gc), g.groups)
         Xg = view(X, ind, :)
-        ug = view(u, ind)
         Hgg = Xg * XX * Xg'
-        # Apply (I - H_gg)^(-1/2) to residuals
-        F = cholesky!(Symmetric(I - Hgg); check = false)
-        if issuccess(F)
-            ldiv!(ug, F.L, ug)
-        end
-    end
-    return u ./ resid
-end
-
-function residualadjustment(k::_CM.CR3, m::IVEstimator)
-    @assert length(k.g) == 1 "CR3 for IV currently only supports single-way clustering"
-    g = k.g[1]
-    X = m.postestimation.X_fitted
-    resid = residuals_for_vcov(m)
-    u = copy(resid)
-    XX = bread(m)
-    for groups in 1:g.ngroups
-        ind = findall(==(groups), g)
-        Xg = view(X, ind, :)
-        ug = view(u, ind)
-        Hgg = Xg * XX * Xg'
-        # Apply (I - H_gg)^(-1) to residuals
-        F = cholesky!(Symmetric(I - Hgg); check = false)
-        if issuccess(F)
-            ldiv!(ug, F, ug)
-        end
+        u[ind] = _CM._leverage_transform(k, I - Hgg) * view(u, ind)
     end
     return u ./ resid
 end
@@ -658,8 +651,14 @@ function _CM.aVar(
         M = M .* u
     end
 
+    # Bandwidth-selection weights come from the regressor matrix, not the moment
+    # matrix: they must give the intercept weight 0, and the intercept column of
+    # the moment matrix is not constant. `nothing` for non-HAC estimators.
+    kw = _CM.kernelweights(k, pe.X_original)
+
     # Compute aVar using CovarianceMatrices
-    Σ = _CM.aVar(k, M; demean = demean, prewhite = prewhite, scale = scale)
+    Σ = _CM.aVar(
+        k, M; demean = demean, prewhite = prewhite, scale = scale, weights = kw)
     return Σ
 end
 
@@ -686,8 +685,14 @@ function _CM.aVar(
         M = M .* u
     end
 
+    # Bandwidth-selection weights come from the regressor matrix, not the moment
+    # matrix: they must give the intercept weight 0, and the intercept column of
+    # the moment matrix is not constant. `nothing` for non-HAC estimators.
+    kw = _CM.kernelweights(k, pe.X_original)
+
     # Compute aVar using CovarianceMatrices
-    Σ = _CM.aVar(k, M; demean = demean, prewhite = prewhite, scale = scale)
+    Σ = _CM.aVar(
+        k, M; demean = demean, prewhite = prewhite, scale = scale, weights = kw)
     return Σ
 end
 
@@ -748,7 +753,7 @@ function StatsBase.vcov(ve::CovarianceMatrices.AbstractAsymptoticVarianceEstimat
     # Uncorrelated() assumes i.i.d. errors
     if ve isa CovarianceMatrices.Uncorrelated
         σ² = sum(abs2, resid) / dof_residual(m)
-        return Symmetric(σ² * B)
+        return _wrap_vcov(Symmetric(σ² * B), ve, nothing)
     end
 
     # Sandwich variance: V = scale * B * A * B where A = aVar(k, m)
@@ -780,7 +785,29 @@ function StatsBase.vcov(ve::CovarianceMatrices.AbstractAsymptoticVarianceEstimat
     end
 
     Σ = scale .* B * A * B
-    return Symmetric(Σ)
+    return _wrap_vcov(Symmetric(Σ), ve, A)
+end
+
+"""
+    vcov(k::DriscollKraay, m::IVEstimator; type::Symbol = :HC0, kwargs...)
+
+Driscoll-Kraay variance for a fitted IV model, delegating to the
+CovarianceMatrices implementation.
+
+`type` selects the small-sample correction (`:HC0`, `:HC1`, `:sss`); the
+estimator carries its own time and unit indices, so the model supplies nothing
+beyond the standard interface.
+
+Driscoll-Kraay scales by the number of time periods, not by the number of
+observations, so this must not route through the sandwich above: the two
+divisors differ by a factor of roughly `T / n`.
+"""
+function StatsBase.vcov(k::_CM.DriscollKraay, m::IVEstimator; type::Symbol = :HC0, kwargs...)
+    isnothing(m.postestimation) &&
+        error("Model does not have post-estimation data stored. Post-estimation vcov not available.")
+    Σ = invoke(
+        StatsBase.vcov, Tuple{_CM.DriscollKraay, RegressionModel}, k, m; type, kwargs...)
+    return _wrap_vcov(Σ, k, nothing)
 end
 
 """
@@ -1157,11 +1184,8 @@ function Base.:+(m::IVEstimator{T, E, V1, P}, v::VcovSpec{V2}) where {T, E, V1, 
     # Recompute robust first-stage F with this vcov type
     F_first_stage_robust, p_first_stage_robust = recompute_first_stage_fstat(m, v.source)
 
-    # Deep copy the vcov estimator to avoid aliasing
-    vcov_copy = deepcopy_vcov(v.source)
-
     # Return new IVEstimator with same data but different vcov type
-    return IVEstimator{T, E, V2, P}(
+    return IVEstimator{T, E, V2, P, typeof(vcov_mat)}(
         m.estimator, m.coef,
         m.esample, m.residuals_esample, m.has_residuals, m.fe,
         m.postestimation, m.fekeys,
@@ -1170,7 +1194,7 @@ function Base.:+(m::IVEstimator{T, E, V1, P}, v::VcovSpec{V2}) where {T, E, V1, 
         m.nobs, m.dof, m.dof_fes, m.dof_residual,
         m.rss, m.tss,
         m.iterations, m.converged, m.r2_within,
-        vcov_copy, Symmetric(vcov_mat), se, t_stats, p_values,
+        v.source, vcov_mat, se, t_stats, p_values,
         F_stat, p_val,
         m.F_first_stage_nonrobust, m.p_first_stage_nonrobust,
         F_first_stage_robust, p_first_stage_robust,
@@ -1403,8 +1427,9 @@ end
 ##
 ##############################################################################
 
-function _estimator_name(m::IVEstimator)
-    e = m.estimator
+_estimator_name(m::IVEstimator) = _estimator_name(m.estimator)
+
+function _estimator_name(e::AbstractIVEstimator)
     if e isa TSLS
         return "TSLS"
     elseif e isa LIML
@@ -1530,7 +1555,7 @@ function Base.show(io::IO, m::IVEstimator)
     println_horizontal_line(io, totwidth)
 
     # Note: variance-covariance type
-    vcov_name = vcov_type_name(m.vcov_estimator)
+    vcov_name = vcov_type_name(m.vcov_estimator, vcov(m))
     println(io, "Note: Std. errors computed using $vcov_name variance estimator")
     nothing
 end
@@ -1574,7 +1599,7 @@ function Base.show(io::IO, ::MIME"text/html", m::IVEstimator)
     html_tbody_end(io)
 
     # Footer with vcov type note
-    vcov_name = vcov_type_name(m.vcov_estimator)
+    vcov_name = vcov_type_name(m.vcov_estimator, vcov(m))
     html_tfoot_start(io; class = "regress-footer")
     html_row(io, ["Note: Std. errors computed using $vcov_name variance estimator",
         "", "", "", "", "", ""])
@@ -1631,7 +1656,7 @@ function StatsAPI.residuals(m::IVEstimator, data)
     Tables.istable(data) ||
         throw(ArgumentError("expected second argument to be a Table, got $(typeof(data))"))
     has_fe(m) &&
-        throw("To access residuals for a model with high-dimensional fixed effects,  run `m = iv(..., save = :residuals)` and then access residuals with `residuals(m)`.")
+        throw(ArgumentError("To access residuals for a model with high-dimensional fixed effects,  run `m = iv(..., save = :residuals)` and then access residuals with `residuals(m)`."))
     cdata = Tables.columntable(data)
     cols, nonmissings = StatsModels.missing_omit(cdata, m.formula_schema.rhs)
     Xnew = modelmatrix(m.formula_schema, cols)
@@ -1657,9 +1682,9 @@ end
 function StatsAPI.residuals(m::IVEstimator{T}) where {T}
     if !has_residuals_data(m)
         has_fe(m) &&
-            throw("To access residuals in a fixed effect regression, run `iv` with the option save = :residuals, and then access residuals with `residuals()`")
+            throw(ArgumentError("To access residuals in a fixed effect regression, run `iv` with the option save = :residuals, and then access residuals with `residuals()`"))
         !has_fe(m) &&
-            throw("To access residuals, use residuals(m, data) where `m` is an estimated IVEstimator and `data` is a Table")
+            throw(ArgumentError("To access residuals, use residuals(m, data) where `m` is an estimated IVEstimator and `data` is a Table"))
     end
     # Reconstruct full-length residuals with missings for non-esample rows
     n = length(m.esample)
@@ -1674,7 +1699,8 @@ end
 Return a DataFrame with fixed effects estimates.
 """
 function fe(m::IVEstimator; keepkeys = false)
-    !has_fe(m) && throw("fe() is not defined for models without fixed effects")
+    !has_fe(m) &&
+        throw(ArgumentError("fe() is not defined for models without fixed effects"))
     if keepkeys
         m.fe
     else
@@ -1742,16 +1768,18 @@ struct PostEstimationDataIVMatrix{T <: AbstractFloat}
 end
 
 """
-    IVMatrixEstimator{T, V} <: AbstractRegressModel
+    IVMatrixEstimator{T, E, V, C} <: AbstractRegressModel
 
 Matrix-based IV estimator for use without formula interface.
 Designed for programmatic use (e.g., LocalProjections.jl).
 
 # Type Parameters
 - `T`: Element type (Float64 or Float32)
+- `E`: IV estimator type (TSLS, LIML, Fuller, KClass)
 - `V`: Variance estimator type
 
 # Fields
+- `estimator::E`: IV estimator used to fit the model
 - `coef::Vector{T}`: Coefficient estimates
 - `postestimation::PostEstimationDataIVMatrix{T}`: Data for vcov computation
 - `basis_coef::BitVector`: Which coefficients are not collinear
@@ -1763,7 +1791,7 @@ Designed for programmatic use (e.g., LocalProjections.jl).
 - `r2::T`: R-squared
 - `has_intercept::Bool`: Whether model includes intercept
 - `vcov_estimator::V`: Variance estimator used
-- `vcov_matrix::Symmetric{T, Matrix{T}}`: Precomputed variance-covariance matrix
+- `vcov_matrix::C`: Precomputed variance-covariance matrix
 - `se::Vector{T}`: Standard errors
 - `t_stats::Vector{T}`: t-statistics
 - `p_values::Vector{T}`: p-values
@@ -1776,7 +1804,10 @@ coef(model)
 vcov(HC1(), model)
 ```
 """
-struct IVMatrixEstimator{T <: AbstractFloat, V} <: AbstractRegressModel
+struct IVMatrixEstimator{T <: AbstractFloat, E <: AbstractIVEstimator, V,
+    C <: AbstractMatrix{T}} <:
+       AbstractRegressModel
+    estimator::E
     coef::Vector{T}
     postestimation::PostEstimationDataIVMatrix{T}
     basis_coef::BitVector
@@ -1790,11 +1821,13 @@ struct IVMatrixEstimator{T <: AbstractFloat, V} <: AbstractRegressModel
 
     # Variance-covariance
     vcov_estimator::V
-    vcov_matrix::Symmetric{T, Matrix{T}}
+    vcov_matrix::C
     se::Vector{T}
     t_stats::Vector{T}
     p_values::Vector{T}
 end
+
+_estimator_name(m::IVMatrixEstimator) = _estimator_name(m.estimator)
 
 has_iv(::IVMatrixEstimator) = true
 has_fe(::IVMatrixEstimator) = false
@@ -1846,11 +1879,13 @@ end
 ##############################################################################
 
 """
-    bread(m::IVMatrixEstimator)
+    CovarianceMatrices.bread(m::IVMatrixEstimator)
 
 Returns (X̂'X̂)⁻¹ for sandwich variance estimation.
 """
-bread(m::IVMatrixEstimator) = m.postestimation.invXhatXhat
+_CM.bread(m::IVMatrixEstimator) = m.postestimation.invXhatXhat
+
+_CM.leverage(m::IVMatrixEstimator) = StatsAPI.leverage(m)
 
 """
     momentmatrix(m::IVMatrixEstimator)
@@ -1867,7 +1902,12 @@ end
 """
     leverage(m::IVMatrixEstimator)
 
-Returns diagonal of hat matrix H = X̂(X̂'X̂)⁻¹X̂' for HC2/HC3/HC4/HC5.
+Diagonal of the IV hat matrix, for HC2/HC3/HC4/HC5.
+
+For k-class estimators the `X_hat`/`invXhatXhat` slots hold the k-class
+adjustment matrix and its bread, so `diag(Adj·invA·Adj')` is the leverage. TSLS
+is specialized below to the AER formula, which for over-identified models does
+not coincide with `diag(X̂(X̂'X̂)⁻¹X̂')`.
 """
 function StatsAPI.leverage(m::IVMatrixEstimator)
     X_hat = m.postestimation.X_hat
@@ -1877,44 +1917,36 @@ function StatsAPI.leverage(m::IVMatrixEstimator)
     return vec(sum((X_hat * invXX) .* X_hat, dims = 2))
 end
 
+# TSLS leverage matches R's AER::ivreg / sandwich::vcovHC:
+#     h = diag(X · (X̂'X̂)⁻¹ · X' · Z · (Z'Z)⁻¹ · Z')
+# This is the same formula the formula-path `leverage(::IVEstimator)` uses. For
+# over-identified TSLS it differs from diag(X̂(X̂'X̂)⁻¹X̂'), so HC2/HC3 need it to
+# match the formula path.
+function StatsAPI.leverage(m::IVMatrixEstimator{T, TSLS}) where {T <: AbstractFloat}
+    X = m.postestimation.X
+    Z = m.postestimation.Z
+    invXhatXhat = m.postestimation.invXhatXhat
+    invZZ = inv(cholesky(Symmetric(Z' * Z)))
+    Pz = Z * (invZZ * Z')
+    return vec(sum((X * invXhatXhat) .* (Pz * X), dims = 2))
+end
+
 # CovarianceMatrices.jl uses numobs, which is distinct from StatsAPI.nobs
 _CM.numobs(m::IVMatrixEstimator) = m.nobs
 
-# Residual adjustments for HC estimators
-function residualadjustment(k::_CM.HC0, m::IVMatrixEstimator)
-    return ones(eltype(m.postestimation.residuals), nobs(m))
+_CM.mask(m::IVMatrixEstimator) = m.basis_coef
+
+# Residual adjustments for HC estimators come from
+# `CovarianceMatrices.residual_adjustment`, reaching the model through the `leverage`
+# and `numobs` protocol methods defined above.
+@noinline function residualadjustment(k::_CM.HR, m::IVMatrixEstimator{T}) where {T}
+    return _CM.residual_adjustment(k, m)
 end
 
-function residualadjustment(k::_CM.HC1, m::IVMatrixEstimator{T}) where {T}
-    n, k_params = nobs(m), dof(m)
-    return fill(sqrt(T(n) / T(n - k_params)), n)
-end
-
-function residualadjustment(k::_CM.HC2, m::IVMatrixEstimator{T}) where {T}
-    h = leverage(m)
-    return T(1) ./ sqrt.(max.(T(1) .- h, eps(T)))
-end
-
-function residualadjustment(k::_CM.HC3, m::IVMatrixEstimator{T}) where {T}
-    h = leverage(m)
-    return T(1) ./ max.(T(1) .- h, eps(T))
-end
-
-@noinline function residualadjustment(k::_CM.HC4, m::IVMatrixEstimator{T}) where {T}
-    n = nobs(m)
-    p = dof(m)
-    h = leverage(m)
-    δ = @. min(4.0, h * n / p)
-    return @. T(1) / (T(1) - h)^δ
-end
-
-@noinline function residualadjustment(k::_CM.HC5, m::IVMatrixEstimator{T}) where {T}
-    n = nobs(m)
-    p = dof(m)
-    h = leverage(m)
-    hmax = max(n * 0.7 * maximum(h) / p, 4.0)
-    δ = @. min(h * n / p, hmax)
-    return @. sqrt(T(1) / (T(1) - h)^δ)
+# HR1 is the exception: upstream divides by `n - length(coef(m))`, which cannot see
+# fixed effects absorbed out of the design, while `dof_residual` counts them.
+@noinline function residualadjustment(k::_CM.HR1, m::IVMatrixEstimator{T}) where {T}
+    return sqrt(T(nobs(m)) / T(dof_residual(m)))
 end
 
 # Correlated estimators (HAC, EWC, DriscollKraay, VARHAC, etc.) - no adjustment needed
@@ -1940,8 +1972,14 @@ function _CM.aVar(
     resid = m.postestimation.residuals
     M = X_hat .* resid
 
+    # Bandwidth-selection weights come from the regressor matrix, not the moment
+    # matrix: they must give the intercept weight 0, and the intercept column of
+    # the moment matrix is not constant. `nothing` for non-HAC estimators.
+    kw = _CM.kernelweights(k, m.postestimation.X)
+
     # Compute aVar using CovarianceMatrices
-    Σ = _CM.aVar(k, M; demean = demean, prewhite = prewhite, scale = scale)
+    Σ = _CM.aVar(
+        k, M; demean = demean, prewhite = prewhite, scale = scale, weights = kw)
     return Σ
 end
 
@@ -1965,8 +2003,14 @@ function _CM.aVar(
         M = M .* u
     end
 
+    # Bandwidth-selection weights come from the regressor matrix, not the moment
+    # matrix: they must give the intercept weight 0, and the intercept column of
+    # the moment matrix is not constant. `nothing` for non-HAC estimators.
+    kw = _CM.kernelweights(k, m.postestimation.X)
+
     # Compute aVar using CovarianceMatrices
-    Σ = _CM.aVar(k, M; demean = demean, prewhite = prewhite, scale = scale)
+    Σ = _CM.aVar(
+        k, M; demean = demean, prewhite = prewhite, scale = scale, weights = kw)
     return Σ
 end
 
@@ -1984,7 +2028,7 @@ function StatsBase.vcov(ve::CovarianceMatrices.AbstractAsymptoticVarianceEstimat
     # Homoskedastic case
     if ve isa CovarianceMatrices.Uncorrelated
         σ² = sum(abs2, resid) / dof_residual(m)
-        return Symmetric(σ² * B)
+        return _wrap_vcov(Symmetric(σ² * B), ve, nothing)
     end
 
     # Sandwich: V = scale * B * A * B
@@ -1992,7 +2036,20 @@ function StatsBase.vcov(ve::CovarianceMatrices.AbstractAsymptoticVarianceEstimat
     scale = convert(T, n)
 
     Σ = scale .* B * A * B
-    return Symmetric(Σ)
+    return _wrap_vcov(Symmetric(Σ), ve, A)
+end
+
+"""
+    vcov(k::DriscollKraay, m::IVMatrixEstimator; type::Symbol = :HC0, kwargs...)
+
+Driscoll-Kraay variance for a matrix-based IV model, delegating to the
+CovarianceMatrices implementation. See the `IVEstimator` method for the `type`
+options and for why the sandwich above is not reused.
+"""
+function StatsBase.vcov(k::_CM.DriscollKraay, m::IVMatrixEstimator{T}; type::Symbol = :HC0, kwargs...) where {T}
+    Σ = invoke(
+        StatsBase.vcov, Tuple{_CM.DriscollKraay, RegressionModel}, k, m; type, kwargs...)
+    return _wrap_vcov(Σ, k, nothing)
 end
 
 function StatsBase.stderror(ve::CovarianceMatrices.AbstractAsymptoticVarianceEstimator,
@@ -2010,7 +2067,7 @@ end
 
 Create a new IVMatrixEstimator with updated variance-covariance estimator.
 """
-function Base.:+(m::IVMatrixEstimator{T, V1}, v::VcovSpec{V2}) where {T, V1, V2}
+function Base.:+(m::IVMatrixEstimator{T, E, V1}, v::VcovSpec{V2}) where {T, E, V1, V2}
     new_vcov = vcov(v.source, m)
     new_se = sqrt.(diag(new_vcov))
 
@@ -2019,7 +2076,8 @@ function Base.:+(m::IVMatrixEstimator{T, V1}, v::VcovSpec{V2}) where {T, V1, V2}
     new_t = cc ./ new_se
     new_p = 2 .* tdistccdf.(dof_residual(m), abs.(new_t))
 
-    return IVMatrixEstimator{T, V2}(
+    return IVMatrixEstimator{T, E, V2, typeof(new_vcov)}(
+        m.estimator,
         m.coef,
         m.postestimation,
         m.basis_coef,
@@ -2030,7 +2088,7 @@ function Base.:+(m::IVMatrixEstimator{T, V1}, v::VcovSpec{V2}) where {T, V1, V2}
         m.tss,
         m.r2,
         m.has_intercept,
-        deepcopy_vcov(v.source),
+        v.source,
         new_vcov,
         new_se,
         new_t,
@@ -2159,7 +2217,7 @@ function Base.show(io::IO, m::IVMatrixEstimator)
 end
 
 function Base.show(io::IO, ::MIME"text/plain", m::IVMatrixEstimator{T}) where {T}
-    println(io, "IV Matrix Estimator (TSLS)")
+    println(io, "IV Matrix Estimator ($(_estimator_name(m)))")
     println(io, "─" ^ 40)
     println(io, "Observations:      $(nobs(m))")
     println(io, "Parameters:        $(dof(m))")

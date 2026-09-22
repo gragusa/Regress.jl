@@ -46,7 +46,7 @@ function partial_out(
     end
     formula, formula_endo, formula_iv = parse_iv(f)
     has_iv = formula_iv != FormulaTerm(ConstantTerm(0), ConstantTerm(0))
-    has_iv && throw("partial_out does not support instrumental variables")
+    has_iv && throw(ArgumentError("partial_out does not support instrumental variables"))
     formula, formula_fes = parse_fe(formula)
     has_weights = weights !== nothing
 
@@ -66,11 +66,11 @@ function partial_out(
     has_fes = !isempty(fes)
 
     nobs = sum(esample)
-    (nobs > 0) || throw("sample is empty")
+    (nobs > 0) || throw(ArgumentError("sample is empty"))
     # Compute weights
     if has_weights
         weights = Weights(convert(Vector{Float64}, view(df, esample, weights)))
-        all(isfinite, weights) || throw("Weights are not finite")
+        all(isfinite, weights) || throw(ArgumentError("Weights are not finite"))
     else
         weights = uweights(sum(esample))
     end

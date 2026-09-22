@@ -32,7 +32,12 @@ end
     m = @formula Sales ~ Price + fe(State)
     x = Regress.ols(df, m)
     @test coef(x) ≈ [-0.20984] atol = 1e-4
-    @test x.iterations == 1
+    # A single fixed effect is absorbed by direct projection rather than by LSMR.
+    # The reported count is the LSMR sweep count, which FixedEffects.jl leaves at its
+    # initial value on that path; the value differs across supported 3.x versions, so
+    # the invariant worth asserting is that the solve does not iterate.
+    @test x.iterations <= 1
+    @test x.converged
 
     m = @formula Sales ~ Price + fe(State) + fe(Year)
     x = Regress.ols(df, m)
@@ -279,7 +284,8 @@ end
     df.Price_zero = copy(df.Price)
     df.Price_zero[1] = 0.0
     m = @formula Sales ~ log(Price_zero)
-    @test_throws "Some observations for the regressor are infinite" Regress.ols(df, m)
+    @test_throws ArgumentError Regress.ols(df, m)
+    @test_throws "Some observations for the exogenous variables are infinite" Regress.ols(df, m)
 end
 
 @testitem "OLS collinearity" tags = [:ols] begin
@@ -322,13 +328,15 @@ end
     @test vcov(x) ≈ vcov(xNDI)
 
     # catch when IV underidentified
-    @test_throws "Model not identified. There must be at least as many ivs as endogeneneous variables" Regress.iv(
+    @test_throws ArgumentError Regress.iv(
         Regress.TSLS(), df, @formula(Sales ~ Price + (NDI + Pop ~ NDI)))
-    @test_throws "Model not identified. There must be at least as many ivs as endogeneneous variables" Regress.iv(
+    @test_throws "Model not identified. There must be at least as many instrumental variables as endogeneneous variables" Regress.iv(
+        Regress.TSLS(), df, @formula(Sales ~ Price + (NDI + Pop ~ NDI)))
+    @test_throws "Model not identified. There must be at least as many instruments as endogenous variables" Regress.iv(
         Regress.TSLS(), df, @formula(Sales ~ Price + (Pop ~ Price)))
 
     # catch when IV underidentified
-    @test_throws "Model not identified. There must be at least as many ivs as endogeneneous variables" Regress.iv(
+    @test_throws "Model not identified. There must be at least as many instrumental variables as endogeneneous variables" Regress.iv(
         Regress.TSLS(), df, @formula(Sales ~ Price + (NDI + Pop ~ NDI)))
 
     # Make sure all coefficients are estimated
@@ -336,6 +344,27 @@ end
     df_r = DataFrame(y = p, x = p .^ 4)
     result = Regress.ols(df_r, @formula(y ~ x))
     @test sum(abs.(coef(result)) .> 0) == 2
+end
+
+@testitem "Typed exceptions for invalid input" tags = [:ols, :iv] begin
+    using Regress, CSV, DataFrames
+    using Regress: fe, partial_out
+
+    df = DataFrame(CSV.File(joinpath(dirname(pathof(Regress)), "../dataset/Cigar.csv")))
+
+    # fe() on a model without fixed effects
+    mols = Regress.ols(df, @formula(Sales ~ Price))
+    @test_throws ArgumentError fe(mols)
+    @test_throws "fe() is not defined for models without fixed effects" fe(mols)
+
+    miv = Regress.iv(Regress.TSLS(), df, @formula(Sales ~ (Price ~ Pimin)))
+    @test_throws ArgumentError fe(miv)
+    @test_throws "fe() is not defined for models without fixed effects" fe(miv)
+
+    # partial_out rejects instrumental-variable formulas
+    @test_throws ArgumentError partial_out(df, @formula(Sales ~ (Price ~ Pimin)))
+    @test_throws "partial_out does not support instrumental variables" partial_out(
+        df, @formula(Sales ~ (Price ~ Pimin)))
 end
 
 @testitem "OLS standard errors - HC" tags = [:ols, :vcov, :hc, :smoke] begin
@@ -394,7 +423,7 @@ end
     x = Regress.ols(df, m, save_cluster = :State)
     @test stderror(CR0(:State), x)[2] ≈ 0.03749 atol = 1e-4  # No G/(G-1) adjustment
     @test stderror(CR1(:State), x)[2] ≈ 0.0379228 atol = 1e-4  # With G/(G-1)
-    @test stderror(CR2(:State), x)[2] ≈ 0.03835 atol = 1e-4  # Leverage-adjusted
+    @test stderror(CR2(:State), x)[2] ≈ 0.03840 atol = 1e-4  # Bell-McCaffrey leverage
     @test stderror(CR3(:State), x)[2] ≈ 0.03889 atol = 1e-4  # Squared leverage
 
     # CR estimators with FE (FE not nested in cluster)
@@ -407,7 +436,7 @@ end
     x = Regress.ols(df, m, save_cluster = :State)
     @test stderror(CR0(:State), x)[1] ≈ 0.03535 atol = 1e-4  # No G/(G-1)
     @test stderror(CR1(:State), x)[1] ≈ 0.0357498 atol = 1e-4  # With G/(G-1)
-    @test stderror(CR2(:State), x)[1] ≈ 0.03622 atol = 1e-4  # Leverage-adjusted
+    @test stderror(CR2(:State), x)[1] ≈ 0.03617 atol = 1e-4  # Bell-McCaffrey leverage
     @test stderror(CR3(:State), x)[1] ≈ 0.03659 atol = 1e-4  # Squared leverage
 end
 
@@ -837,4 +866,26 @@ end
 
     x = Regress.ols(df1, @formula(a ~ b + fe(c)))
     @test coef(x) ≈ [0.5] atol = 1e-4
+end
+
+@testitem "Public API visibility" tags = [:api] begin
+    using Regress
+
+    # Documented types and the matrix-API integration surface are reachable as
+    # Regress.Name (public) but not dumped into scope by `using Regress`.
+    for s in (:OLSEstimator, :IVEstimator, :OLSMatrixEstimator, :IVMatrixEstimator,
+        :AbstractIVEstimator, :esample, :partial_out, :LagTerm)
+        @test Base.ispublic(Regress, s)
+        @test !Base.isexported(Regress, s)
+    end
+
+    # Entry-point verbs stay public-not-exported; estimator constructors and the
+    # `lags` term stay exported.
+    for s in (:ols, :iv, :fe)
+        @test Base.ispublic(Regress, s)
+        @test !Base.isexported(Regress, s)
+    end
+    for s in (:TSLS, :LIML, :Fuller, :KClass, :lags)
+        @test Base.isexported(Regress, s)
+    end
 end

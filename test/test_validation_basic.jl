@@ -42,8 +42,9 @@
     v_tsls_hc3 = vcov(HC3(), m_tsls)
     v_tsls_hc4 = vcov(HC4(), m_tsls)
 
-    # v_tsls_hac1 = vcov(Bartlett{NeweyWest}(), m_tsls)
-    # v_tsls_hac2 = vcov(Bartlett{Andrews}(), m_tsls)
+    # No ivreg reference values for the HAC estimators, so they are covered in
+    # test_vcov_operator.jl against the package's own weighted-bandwidth path
+    # rather than here.
 
     @test V_TSLS_HC1≈v_tsls_hc1 rtol=1e-6
     @test V_TSLS_HC2≈v_tsls_hc2 rtol=1e-6

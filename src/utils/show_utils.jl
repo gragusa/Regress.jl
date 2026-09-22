@@ -243,7 +243,7 @@ vcov_type_name(::CovarianceMatrices.HR3) = "HC3"
 
 # HAC estimators with bandwidth
 # Fixed bandwidth: Bartlett(5) -> "Bartlett(5)"
-# Auto bandwidth: Bartlett(NeweyWest) -> "Bartlett(auto), bw: 4.27"
+# Auto bandwidth: Bartlett(NeweyWest) -> "Bartlett(auto)"
 
 # Helper to get clean kernel name (BartlettKernel -> Bartlett)
 function _hac_kernel_name(v::CovarianceMatrices.HAC)
@@ -253,7 +253,7 @@ end
 
 function vcov_type_name(v::CovarianceMatrices.HAC{<:CovarianceMatrices.Fixed})
     typename = _hac_kernel_name(v)
-    bw_val = v.bw[1]
+    bw_val = CovarianceMatrices.bandwidth(v)
     # Show as integer if it's a whole number
     if bw_val == floor(bw_val)
         return @sprintf("%s(%d)", typename, Int(bw_val))
@@ -264,11 +264,35 @@ end
 
 function vcov_type_name(v::CovarianceMatrices.HAC)
     typename = _hac_kernel_name(v)
-    bw_val = v.bw[1]
+    # Data-driven kernels store 0.0: the bandwidth is a property of the estimate,
+    # not the estimator, so it is not available from the specification alone.
+    bw_val = v.bw
     if bw_val == 0.0
-        # Bandwidth not yet computed
         return @sprintf("%s(auto)", typename)
     else
-        return @sprintf("%s(auto), bw: %.2f", typename, bw_val)
+        return @sprintf("%s(auto: %.2f)", typename, bw_val)
     end
 end
+
+"""
+    vcov_type_name(estimator, V) -> String
+
+Name the variance estimator, reporting the bandwidth `V` selected when the
+estimator does not fix one itself.
+
+`V` is the computed variance matrix, as returned by [`vcov`](@ref). A
+data-driven HAC kernel chooses its bandwidth from the data, so the number
+exists only on the estimate; `CovarianceMatrices.bandwidth` returns `nothing`
+for estimators that select nothing, and the name is then unchanged.
+"""
+vcov_type_name(v, V) = vcov_type_name(v)
+
+function vcov_type_name(v::CovarianceMatrices.HAC, V)
+    bw_val = CovarianceMatrices.bandwidth(V)
+    bw_val === nothing && return vcov_type_name(v)
+    return @sprintf("%s(auto: %.2f)", _hac_kernel_name(v), bw_val)
+end
+
+# A fixed bandwidth is already in the estimator; reading it back off the
+# estimate would report the same number.
+vcov_type_name(v::CovarianceMatrices.HAC{<:CovarianceMatrices.Fixed}, V) = vcov_type_name(v)

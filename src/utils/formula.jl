@@ -57,9 +57,9 @@ function _parse_iv_impl(lhs::AbstractTerm, rhs_terms::Vector{AbstractTerm})
     exos = setdiff(rhs_iv_terms, both)
 
     # Validation
-    isempty(endos) && throw("There are no endogeneous variables")
+    isempty(endos) && throw(ArgumentError("There are no endogeneous variables"))
     length(exos) < length(endos) &&
-        throw("Model not identified. There must be at least as many instrumental variables as endogeneneous variables")
+        throw(ArgumentError("Model not identified. There must be at least as many instrumental variables as endogeneneous variables"))
 
     # Build formula_endo
     endo_rhs = AbstractTerm[ConstantTerm(0)]
