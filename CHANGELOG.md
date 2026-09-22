@@ -25,6 +25,12 @@
 - **`weakivtest` takes `tol` instead of `eps`.** The old name shadowed
   `Base.eps` in the method body. `weakivtest(m; eps = ...)` now errors.
 
+- **`IVMatrixEstimator` carries the estimator it was fitted with.** The type is
+  now `IVMatrixEstimator{T, E, V, C}`, with a leading `estimator::E` field, so
+  that leverage and display can dispatch on it. Code that writes the type with
+  all its parameters, or constructs one positionally, needs updating;
+  `M <: IVMatrixEstimator` bounds and field access by name are unaffected.
+
 - **`LagTerm` is public rather than exported.** It names the type behind
   `lags(...)` and is not meant to be constructed directly, so `using Regress`
   no longer brings it into scope. Use `Regress.LagTerm` where you need the
@@ -71,6 +77,14 @@
   from `vcov(model)`.
 
 ### Bug Fixes
+
+- **Over-identified TSLS from matrix inputs used the wrong leverage.**
+  `leverage(::IVMatrixEstimator)` computed `diag(X̂(X̂'X̂)⁻¹X̂')`, which equals
+  the AER/sandwich IV leverage `diag(X·(X̂'X̂)⁻¹·X'·Z·(Z'Z)⁻¹·Z')` only when the
+  model is just-identified. HC2/HC3 standard errors from `iv(TSLS(), Z, X, y)`
+  therefore differed from those of the same model fitted through the formula
+  interface. Both paths now agree; HC0/HC1 and just-identified models were
+  never affected.
 
 - **CR2 uses the symmetric square root of `I - H_gg`.** The Bell-McCaffrey
   adjustment is defined by the symmetric root; the Cholesky factor used
