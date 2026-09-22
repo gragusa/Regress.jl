@@ -651,8 +651,14 @@ function _CM.aVar(
         M = M .* u
     end
 
+    # Bandwidth-selection weights come from the regressor matrix, not the moment
+    # matrix: they must give the intercept weight 0, and the intercept column of
+    # the moment matrix is not constant. `nothing` for non-HAC estimators.
+    kw = _CM.kernelweights(k, pe.X_original)
+
     # Compute aVar using CovarianceMatrices
-    Σ = _CM.aVar(k, M; demean = demean, prewhite = prewhite, scale = scale)
+    Σ = _CM.aVar(
+        k, M; demean = demean, prewhite = prewhite, scale = scale, weights = kw)
     return Σ
 end
 
@@ -679,8 +685,14 @@ function _CM.aVar(
         M = M .* u
     end
 
+    # Bandwidth-selection weights come from the regressor matrix, not the moment
+    # matrix: they must give the intercept weight 0, and the intercept column of
+    # the moment matrix is not constant. `nothing` for non-HAC estimators.
+    kw = _CM.kernelweights(k, pe.X_original)
+
     # Compute aVar using CovarianceMatrices
-    Σ = _CM.aVar(k, M; demean = demean, prewhite = prewhite, scale = scale)
+    Σ = _CM.aVar(
+        k, M; demean = demean, prewhite = prewhite, scale = scale, weights = kw)
     return Σ
 end
 
@@ -1960,8 +1972,14 @@ function _CM.aVar(
     resid = m.postestimation.residuals
     M = X_hat .* resid
 
+    # Bandwidth-selection weights come from the regressor matrix, not the moment
+    # matrix: they must give the intercept weight 0, and the intercept column of
+    # the moment matrix is not constant. `nothing` for non-HAC estimators.
+    kw = _CM.kernelweights(k, m.postestimation.X)
+
     # Compute aVar using CovarianceMatrices
-    Σ = _CM.aVar(k, M; demean = demean, prewhite = prewhite, scale = scale)
+    Σ = _CM.aVar(
+        k, M; demean = demean, prewhite = prewhite, scale = scale, weights = kw)
     return Σ
 end
 
@@ -1985,8 +2003,14 @@ function _CM.aVar(
         M = M .* u
     end
 
+    # Bandwidth-selection weights come from the regressor matrix, not the moment
+    # matrix: they must give the intercept weight 0, and the intercept column of
+    # the moment matrix is not constant. `nothing` for non-HAC estimators.
+    kw = _CM.kernelweights(k, m.postestimation.X)
+
     # Compute aVar using CovarianceMatrices
-    Σ = _CM.aVar(k, M; demean = demean, prewhite = prewhite, scale = scale)
+    Σ = _CM.aVar(
+        k, M; demean = demean, prewhite = prewhite, scale = scale, weights = kw)
     return Σ
 end
 
