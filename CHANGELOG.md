@@ -2,6 +2,18 @@
 
 ## Unreleased
 
+### New Features
+
+- **`probit(df, formula)`**: binary-response probit by iteratively reweighted
+  least squares, absorbing high-dimensional fixed effects declared with
+  `fe(...)` terms. Returns a `BinaryEstimator` supporting `coef`, `deviance`,
+  `nulldeviance`, `loglikelihood`, `fitted`, `residuals`, `dof`, and `r2` as
+  McFadden's pseudo-R². Coefficients agree with GLM's `ProbitLink` to IRLS
+  convergence tolerance.
+
+  The estimator reports point estimates only: it computes no standard errors,
+  so `stderror`, `vcov` and `coeftable` are not available for it.
+
 ## 0.2.0
 
 ### Breaking Changes
