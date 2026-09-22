@@ -22,6 +22,25 @@
   `Matrix`- or `Symmetric`-typed field needs updating; code that only reads
   values does not.
 
+- **`weakivtest` takes `tol` instead of `eps`.** The old name shadowed
+  `Base.eps` in the method body. `weakivtest(m; eps = ...)` now errors.
+
+- **`LagTerm` is public rather than exported.** It names the type behind
+  `lags(...)` and is not meant to be constructed directly, so `using Regress`
+  no longer brings it into scope. Use `Regress.LagTerm` where you need the
+  name; `lags` itself is unchanged.
+
+- **Invalid input raises `ArgumentError`.** Validation failures previously
+  threw bare strings, which `throw` wraps in `ErrorException`. Messages are
+  unchanged, but `catch`/`@test_throws` clauses matching on the exception type
+  need updating.
+
+- **The matrix API rejects offset arrays.** `ols(X, y)` and
+  `iv(::TSLS, Z, X, y)` index positionally after converting their arguments,
+  so they now declare `Base.require_one_based_indexing`. `view`s and ordinary
+  arrays are unaffected; an `OffsetArray` argument errors at the entry point
+  instead of producing a misaligned fit.
+
 ### New Features
 
 - **`lags()` formula term**: `@formula(y ~ lags(x, 12))` expands into a matrix of 12 lag columns. Supports nested transforms (`lags(log(abs(x)), 3)`), interactions (`lags(x, 3) & z`), and composition with other terms. Moved from LocalProjections.jl so both packages share the same implementation.
@@ -30,7 +49,9 @@
 
 - **Kleibergen-Paap rk Wald F-statistic exposed**: The joint KP test statistic is now stored on the model and accessible via `first_stage_F_KP(m)`. Previously computed but discarded.
 
-- **`AbstractTest` type hierarchy**: `AbstractTest` is the new abstract supertype for `FirstStageFTest{T, K}` and `WeakIVTestResult{T}`.
+- **`AbstractTest` type hierarchy**: `AbstractTest` is the new abstract supertype for `FirstStageFTest{T, K}`, `WeakIVTestResult{T}`, `FirstStageResult`, `FirstStageIV`, `WuHausmanResult` and `SarganResult`. Those with a single well-defined p-value implement `StatsAPI.pvalue`; `SarganResult` also implements `dof`. `WeakIVTestResult` implements neither, since it reports against critical values.
+
+- **Public model surface**: `OLSEstimator`, `IVEstimator`, `OLSMatrixEstimator`, `IVMatrixEstimator`, `AbstractIVEstimator`, `esample` and `partial_out` are marked `public`, so `Regress.OLSEstimator` and friends resolve without being exported.
 
 - **`Homoskedastic` type**: Sentinel type used as the variance estimator parameter for IID F-tests.
 
