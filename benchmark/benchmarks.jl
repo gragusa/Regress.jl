@@ -6,6 +6,7 @@ Benchmark suite measuring:
 2. OLS with fixed effects
 3. IV estimation (TSLS, LIML, Fuller)
 4. Post-estimation robust variance computation
+5. Binary-response estimation with constant-outcome fixed-effect groups
 """
 
 using BenchmarkTools
@@ -126,6 +127,30 @@ let rng = StableRNG(DEFAULT_SEED + 11)
 
     SUITE["fe"]["one_fe_n50000"] = @benchmarkable ols(
         $df_fe_large, @formula(y ~ x1 + x2 + x3 + x4 + x5 + fe(group1)))
+end
+
+# ----------------------------------------------------------------------------
+# Binary Response Benchmarks
+# ----------------------------------------------------------------------------
+
+SUITE["binary"] = BenchmarkGroup()
+
+let rng = StableRNG(DEFAULT_SEED + 15)
+    n = 10_000
+    df = DataFrame(x1 = randn(rng, n), x2 = randn(rng, n),
+        group1 = repeat(1:100, inner = 100), group2 = repeat(1:20, outer = 500))
+    probability = 0.5 .+ 0.2 .* tanh.(df.x1) .- 0.1 .* tanh.(df.x2)
+    df.y = Int.(rand(rng, n) .< probability)
+    df.y[1001:1500] .= 0
+    df.y[1501:2000] .= 1
+    formula = @formula(y ~ x1 + x2 + fe(group1) + fe(group2))
+    SUITE["binary"]["probit_separated_n10000"] = @benchmarkable Regress.probit($df, $formula)
+    # Logit benchmarks require glmfe.
+    if isdefined(Regress, :glmfe)
+        link = Regress.LogitLink()
+        SUITE["binary"]["logit_separated_n10000"] = @benchmarkable Regress.glmfe(
+            $formula, $df; link = $link)
+    end
 end
 
 # ----------------------------------------------------------------------------

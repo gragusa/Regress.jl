@@ -38,6 +38,10 @@
     ]
 
     @test coef(model) ≈ expected_coef atol = 1e-4
+    @test nobs(model) == 16312
+    @test count(!, model.esample) == 11014
+    @test all(==(:none), model.drop_reasons[model.esample])
+    @test all(!=(:none), model.drop_reasons[.!model.esample])
 end
 
 @testitem "Probit coefficients - RWM model variants" tags = [:probit, :fe] begin
@@ -142,15 +146,42 @@ end
     )
 
     alpha = zeros(length(y))
+    eta_old = copy(rr.eta)
 
     rr.deviance_new = refresh_response!(rr, pp.X, pp.beta_new, alpha)
 
     @test rr.deviance_new > rr.deviance
 
-    stephalving!(m, alpha)
+    stephalving!(m, eta_old)
 
     @test rr.deviance_new <= rr.deviance
     @test pp.beta_new ≈ [0.625]
+end
+
+@testitem "Binary step-halving shrinks fixed effects and reports failure" tags = [
+    :glmfe, :probit] begin
+    using Regress
+    using Regress: BinaryEstimator, BinaryPredictorQR, BinaryResponse, update_response!
+
+    formula = @formula(y ~ x)
+    for link in (ProbitLink(), LogitLink())
+        pp = BinaryPredictorQR{Float64}(zeros(4, 1), [0.0], [0.0])
+        rr = BinaryResponse([0, 1, 1, 1], pp, :y, link)
+        m = BinaryEstimator(rr, pp, formula, formula, formula, 4, 1,
+            rr.deviance, rr.deviance, true, 1, ["x"], trues(1))
+        accepted_deviance = rr.deviance
+        alpha = fill(100.0, 4)
+        update_response!(m, alpha)
+        @test 0 < first(rr.eta) < 100
+        @test rr.deviance_new <= accepted_deviance
+        @test rr.deviance == accepted_deviance
+        @test pp.beta == [0.0]
+        @test alpha == fill(100.0, 4)
+
+        rr.deviance = Regress.refresh_response!(rr, pp.X, pp.beta, zeros(4))
+        @test_throws "Step-halving failed" update_response!(m, alpha; max_halvings = 1)
+        @test rr.deviance == accepted_deviance
+    end
 end
 
 @testitem "Probit without fixed effects matches GLM" tags = [:probit] begin
@@ -171,7 +202,7 @@ end
 
     m = probit(
         df, @formula(y ~ x1 + x2); beta0 = nothing, max_iter = 1000, tolerance = 1e-8)
-    g = glm(@formula(y ~ x1 + x2), df, Binomial(), ProbitLink())
+    g = glm(@formula(y ~ x1 + x2), df, Binomial(), GLM.ProbitLink())
 
     # The no-fixed-effect model carries an explicit intercept.
     @test coefnames(m) == ["(Intercept)", "x1", "x2"]

@@ -15,7 +15,7 @@ using FixedEffects: FixedEffects, AbstractFixedEffectSolver, FixedEffect,
 using LinearAlgebra: LinearAlgebra, BLAS, Cholesky, ColumnNorm, Hermitian, I,
                      LAPACKException, PosDefException, SingularException,
                      Symmetric, UpperTriangular, cholesky, cholesky!, diag,
-                     diagm, dot, eigen, eigvals, issuccess, mul!, qr,
+                     diagm, dot, eigen, eigvals, issuccess, ldiv!, mul!, qr,
                      rank, rmul!, svd, tr
 using PrecompileTools: PrecompileTools, @compile_workload
 using Printf: Printf, @printf, @sprintf
@@ -29,8 +29,8 @@ using StatsAPI: StatsAPI, adjr2, coef, coefnames, coeftable, confint, deviance,
                 vcov, weights
 using StatsBase: StatsBase, AbstractWeights, CoefTable, UnitWeights, Weights,
                  mean, uweights
-using StatsFuns: StatsFuns, chisqccdf, fdistccdf, normcdf, normlogccdf,
-                 normlogcdf, normlogpdf, tdistccdf, tdistinvcdf
+using StatsFuns: StatsFuns, chisqccdf, fdistccdf, normcdf, normlogpdf,
+                 tdistccdf, tdistinvcdf
 @reexport using StatsModels
 using StatsModels: StatsModels, @formula, AbstractTerm, ConstantTerm,
                    FormulaTerm, FunctionTerm, InteractionTerm, InterceptTerm,
@@ -85,7 +85,7 @@ include("partial_out.jl")
 
 # Probit
 include("BinaryModel.jl")  # Binary-response model structs and StatsAPI surface
-include("fit_probit.jl")   # IRLS probit fit
+include("fit_probit.jl")   # Shared Bernoulli Fisher-scoring fit
 
 # Main estimation functions
 public ols, iv, fe, probit, partial_out
@@ -118,6 +118,7 @@ export weakivtest, WeakIVTestResult
 export wu_hausman, sargan
 export WuHausmanResult, SarganResult
 
+export glmfe, ProbitLink, LogitLink
 export fit_probit, BinaryEstimator
 
 # Re-export StatsAPI functions for user convenience
@@ -138,7 +139,7 @@ export islinear, responsename, leverage
 
 The entries of `v`, which has one entry per row of the data `model` was fitted on, in the
 rows of the estimation sample. `model` is an `OLSEstimator`, `IVEstimator`,
-`OLSMatrixEstimator` or `IVMatrixEstimator`.
+`OLSMatrixEstimator`, `IVMatrixEstimator`, or `BinaryEstimator`.
 """
 function esample(
         m::Union{OLSEstimator, IVEstimator, OLSMatrixEstimator, IVMatrixEstimator},
