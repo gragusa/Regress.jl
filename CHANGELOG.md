@@ -210,7 +210,9 @@
   now works for OLS and IV models and for the matrix estimators. Previously
   every such call was a `MethodError`. The computation delegates to
   CovarianceMatrices, which scales by the number of time periods rather than
-  the number of observations.
+  the number of observations. `bandwidth(vcov(model))` reports the bandwidth
+  of the time kernel: the fixed value when one is given, and the selected one
+  when the kernel uses an automatic selector such as `Bartlett{NeweyWest}()`.
 
 - **`show` reports the selected HAC bandwidth**: a model fitted with an
   automatic bandwidth selector prints `Bartlett(auto: 55.71)` rather than
