@@ -647,7 +647,7 @@ function _regress_vcov(k::_CM.DriscollKraay, m::IVEstimator; kwargs...)
         throw(ArgumentError("Model does not have post-estimation data stored. Post-estimation vcov not available."))
     Σ = invoke(
         StatsBase.vcov, Tuple{_CM.DriscollKraay, RegressionModel}, k, m; kwargs...)
-    return _wrap_vcov(Σ, k, nothing)
+    return _wrap_vcov(parent(Σ), k, Σ)
 end
 
 function _fe_structure(m::IVEstimator)
@@ -1631,7 +1631,7 @@ end
 function _regress_vcov(k::_CM.DriscollKraay, m::IVMatrixEstimator; kwargs...)
     Σ = invoke(
         StatsBase.vcov, Tuple{_CM.DriscollKraay, RegressionModel}, k, m; kwargs...)
-    return _wrap_vcov(Σ, k, nothing)
+    return _wrap_vcov(parent(Σ), k, Σ)
 end
 
 ##############################################################################

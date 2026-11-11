@@ -902,7 +902,7 @@ end
 for M in (OLSEstimator, OLSMatrixEstimator)
     @eval function _regress_vcov(k::CM.DriscollKraay, m::$M; kwargs...)
         Σ = invoke(CM.vcov, Tuple{CM.DriscollKraay, RegressionModel}, k, m; kwargs...)
-        return _wrap_vcov(Σ, k, nothing)
+        return _wrap_vcov(parent(Σ), k, Σ)
     end
 end
 
