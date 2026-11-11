@@ -309,10 +309,32 @@ end
     @test !isapprox(wt(m, CR1(:State, :Year)).F_eff, r1.F_eff; rtol = 1e-6)
     @test wt(m, HC0()).F_eff != wt(m, HC1()).F_eff
 
-    for k in (HC3(), CR2(:State))
+    for k in (CR2(:State), CR3(:State), EWC(4))
         @test_throws "The weak-instrument test is not defined for" wt(m, k)
-        @test_throws "It supports Uncorrelated, HC0, HC1, CR0, CR1" wt(m, k)
+        @test_throws "It supports Uncorrelated, HC0–HC5, CR0, CR1" wt(m, k)
     end
+
+    # HC2–HC5 rescale the moments by the leverage of the first-stage design, so the robust
+    # F is the first-stage Wald F under the same estimator, with one excluded instrument
+    # or two, and with one instrument the effective F equals it.
+    m1 = Regress.iv(Regress.TSLS(), df, @formula(Sales ~ NDI + (Price ~ Pimin)))
+    for k in (HC2(), HC3(), HC4(), HC4m(), HC5())
+        @test wt(m, k).F_robust ≈ only(first_stage_F_robust(m + vcov(k)).stat) rtol = 1e-10
+        local r = wt(m1, k)
+        @test r.F_robust ≈ only(first_stage_F_robust(m1 + vcov(k)).stat) rtol = 1e-10
+        @test r.F_eff ≈ r.F_robust rtol = 1e-10
+        @test r.F_eff != wt(m1, HC0()).F_eff
+        @test isfinite(r.sebtsls) && isfinite(r.sebliml) && isfinite(r.sebgmmf)
+    end
+    # The matrix fit gives the formula fit's numbers.
+    n1 = nrow(df)
+    mm1 = Regress.iv(Regress.TSLS(), hcat(ones(n1), df.NDI, df.Pimin),
+        hcat(ones(n1), df.NDI, df.Price), Float64.(df.Sales); has_intercept = true,
+        n_endogenous = 1)
+    @test weakivtest(mm1 + vcov(HC3())).F_eff ≈ wt(m1, HC3()).F_eff rtol = 1e-10
+    @test weakivtest(mm1 + vcov(HC3())).sebtsls ≈ wt(m1, HC3()).sebtsls rtol = 1e-10
+    # They need the leverage, which absorbed fixed effects would change.
+    @test_throws "needs the leverage of the first-stage regression" wt(mf, HC3())
 
     # A matrix-fitted model gives the formula fit's statistics under a cluster estimator.
     n = nrow(df)

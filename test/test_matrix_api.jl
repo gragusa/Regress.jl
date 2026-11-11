@@ -275,9 +275,10 @@ end
     y = 1 .+ 2 .* x .- 0.5 .* w .+ u .+ randn(rng, G)[id]
     df = DataFrame(; y, x, w, z1, z2, id, t)
 
-    # Fuller(1) on this design has kappa just below 1, and KClass(0.8) is below 1; both warn
+    # Fuller(1) on this design has kappa just below 1, and KClass(0.8) is below 1; neither
+    # warns
     for est in (LIML(), Fuller(1.0), KClass(0.8))
-        fit(f) = est isa LIML ? (@test_logs f()) : (@test_logs (:warn, r"kappa < 1") f())
+        fit(f) = @test_logs f()
         mf = fit(() -> Regress.iv(est, df, @formula(y ~ w + (x ~ z1 + z2));
             save_cluster = [:id]))
         mm = fit(() -> Regress.iv(est, [ones(n) w z1 z2], [ones(n) w x], y;
