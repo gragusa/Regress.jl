@@ -270,6 +270,13 @@
 
 ### Bug Fixes
 
+- **Post-estimation covariances of IV models with collinear columns.** With a
+  collinear exogenous column dropped, `vcov(k, m)` and `m + vcov(k)` returned
+  the covariance of the estimable coefficients only, so `m + vcov(k)` threw a
+  `DimensionMismatch`, and so did `first_stage(m + vcov(k))`. The covariance of
+  `IVEstimator` and `IVMatrixEstimator` now has every coefficient, NaN in the
+  rows and columns of the dropped ones, as for OLS models and the covariance
+  stored by the fit.
 - **`weakivtest` accepts HC2–HC5.** The effective F needs only a consistent
   estimate of the variance of the first-stage moments, and `weakivtest` threw for
   the leverage-based estimators. It now rescales each moment by the leverage of the

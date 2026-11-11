@@ -638,7 +638,22 @@ function _regress_vcov(ve, m::IVEstimator{T}; dofadjust = true, demean = false,
     A = _regress_aVar(ve, m; demean, prewhite)
     scale = T(n * _finite_sample_factor(ve, m, dofadjust))
     Σ = scale .* B * A * B
-    return _wrap_vcov(Symmetric(Σ), ve, A)
+    return _wrap_vcov(Symmetric(_expand_collinear(Σ, _CM.mask(m))), ve, A)
+end
+
+# With collinear columns, the bread and the moments of an IV model cover only the
+# estimable columns: the sandwich `Σ` is computed on those, and the full matrix has
+# NaN in the rows and columns of the dropped ones, as for OLS models.
+function _expand_collinear(Σ::AbstractMatrix{T}, basis::AbstractVector{Bool}) where {T}
+    all(basis) && return Σ
+    k = count(basis)
+    size(Σ) == (k, k) || throw(DimensionMismatch(
+        "the covariance of the estimable coefficients is $(size(Σ, 1))×$(size(Σ, 2)), " *
+        "expected $k×$k for $k of $(length(basis)) coefficients"))
+    full = fill(T(NaN), length(basis), length(basis))
+    idx = findall(basis)
+    full[idx, idx] = Σ
+    return full
 end
 
 # Driscoll-Kraay: see the `_regress_vcov` methods for OLS models.
@@ -1624,7 +1639,7 @@ function _regress_vcov(ve, m::IVMatrixEstimator{T}; dofadjust = true, demean = f
     scale = T(n * _finite_sample_factor(ve, m, dofadjust))
 
     Σ = scale .* B * A * B
-    return _wrap_vcov(Symmetric(Σ), ve, A)
+    return _wrap_vcov(Symmetric(_expand_collinear(Σ, m.basis_coef)), ve, A)
 end
 
 # Driscoll-Kraay: see the `_regress_vcov` methods for OLS models.
