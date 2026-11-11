@@ -447,7 +447,7 @@ end
 
 @testitem "Driscoll-Kraay vcov on Regress models" tags = [:vcov, :hac, :panel] begin
     using Regress, CSV, DataFrames, LinearAlgebra, StatsBase
-    using CovarianceMatrices: CovarianceMatrices, DriscollKraay, CovarianceMatrix
+    using CovarianceMatrices: CovarianceMatrices, DriscollKraay, CovarianceMatrix, bandwidth
 
     df = DataFrame(CSV.File(joinpath(dirname(pathof(Regress)), "../dataset/Cigar.csv")))
     n = nrow(df)
@@ -487,6 +487,14 @@ end
 
         # The correction is set on the estimator, not passed to `vcov`.
         @test_throws "takes no `type` keyword" vcov(kk, m; type = :HC1)
+
+        # The bandwidth of the time kernel is reported: as given when fixed, and the
+        # one upstream selects when automatic.
+        @test bandwidth(vcov(kk, m)) == 4.0
+        knw = DriscollKraay(
+            Bartlett{NeweyWest}(); tis = df.Year[rows], iis = df.State[rows])
+        @test bandwidth(vcov(knw, m)) == bandwidth(reference(knw, m))
+        @test bandwidth(vcov(m + vcov(knw))) == bandwidth(reference(knw, m))
     end
 
     # Driscoll-Kraay scales by the number of time periods; Regress's own HAC
