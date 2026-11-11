@@ -270,6 +270,19 @@
 
 ### Bug Fixes
 
+- **`weakivtest` accepts HC2–HC5.** The effective F needs only a consistent
+  estimate of the variance of the first-stage moments, and `weakivtest` threw for
+  the leverage-based estimators. It now rescales each moment by the leverage of the
+  first-stage design (the exogenous regressors and the excluded instruments), as
+  `vcov` rescales OLS residuals, so with one excluded instrument the robust and
+  effective F equal the first-stage Wald F under the same estimator. Models with
+  absorbed fixed effects, whose leverage includes the fixed effects, throw an
+  `ArgumentError` for these estimators.
+- **No warning for a k-class `kappa` below 1.** `Fuller(a)` and `KClass(kappa)`
+  warned "model may be poorly identified" whenever `kappa < 1`. The LIML
+  eigenvalue is at least 1 and equals 1 in an exactly identified model, so
+  Fuller's `kappa` is below 1 by construction there, and a user-chosen
+  `KClass(kappa)` below 1 is a choice, not a diagnosis. The warning is removed.
 - **HC2–HC5, CR2 and CR3 on TSLS models with fixed effects as instruments**
   (`(x ~ fe(g)&fe(t))`) used a leverage that left the instrument fixed effects
   out of the projection. The leverage is now `diag(X (X̂'X̂)⁻¹ X̂')`, which equals

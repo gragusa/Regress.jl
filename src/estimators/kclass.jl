@@ -11,8 +11,11 @@
 
 The k-class parameter of the estimator `est`: the LIML eigenvalue for `LIML()`, the LIML
 eigenvalue minus `a / (n - L - p)` for `Fuller(a)` (`n` rows, `L` excluded instruments
-in `Z`, `p` exogenous regressors in `Xexo`), and `kappa` for `KClass(kappa)`. Warns when
-the result is below 1.
+in `Z`, `p` exogenous regressors in `Xexo`), and `kappa` for `KClass(kappa)`.
+
+The LIML eigenvalue is at least 1, and equals 1 when the model is exactly identified, so
+Fuller's `kappa` is below 1 whenever the LIML eigenvalue is within `a / (n - L - p)` of
+1. A `kappa` below 1 is part of these estimators, not a sign of weak identification.
 """
 function _kclass_kappa(est::AbstractIVEstimator, y::AbstractVector{T},
         Xendo::AbstractVecOrMat{T}, Z::AbstractMatrix{T},
@@ -31,9 +34,6 @@ function _kclass_kappa(est::AbstractIVEstimator, y::AbstractVector{T},
         throw(ArgumentError("Unknown K-class estimator: $(typeof(est))"))
     end
 
-    if kappa < one(T)
-        @warn "K-class kappa < 1 ($kappa), model may be poorly identified"
-    end
     return kappa
 end
 

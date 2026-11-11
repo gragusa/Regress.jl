@@ -92,9 +92,14 @@ post-estimation data stored (the default).
 
 The test uses the model's variance estimator, `m.vcov_estimator`, with the
 finite-sample factor `vcov` applies to the first-stage regression; for `HC1` and `CR1`
-this is Stata `weakivtest`'s W. It supports `Uncorrelated`, `HC0`, `HC1`, `CR0`, `CR1`
+this is Stata `weakivtest`'s W. It supports `Uncorrelated`, `HC0`–`HC5`, `CR0`, `CR1`
 (any number of cluster dimensions) and the HAC kernels, and throws an `ArgumentError`
-for any other estimator.
+for any other estimator. `HC2`–`HC5` rescale each moment by the leverage `h` of the
+first-stage design (the exogenous regressors and the excluded instruments), as `vcov`
+rescales the residuals of an OLS fit: by `1/√(1 - h)`, `1/(1 - h)`, or the adaptive
+exponents of HC4, HC4m and HC5. With one excluded instrument the robust F is then the
+first-stage Wald F under the same estimator. They need that leverage, so they are not
+supported on a model with absorbed fixed effects.
 
 # Arguments
 - `m::IVEstimator`: A fitted IV model (TSLS, LIML, etc.)
@@ -197,12 +202,51 @@ function weakivtest(m::IVMatrixEstimator{T}; level::Real = 0.05, tol::Real = 0.0
     )
 end
 
+# The heteroskedasticity-robust estimators that rescale residuals by their leverage.
+const _LeverageHR = Union{CovarianceMatrices.HR2, CovarianceMatrices.HR3,
+    CovarianceMatrices.HR4, CovarianceMatrices.HR4m, CovarianceMatrices.HR5}
+
 # The variance estimator of `m`, with column-named clusters resolved, checked to be one
 # that the test supports.
 function _weakiv_estimator(m)
-    _check_kp_estimator(m.vcov_estimator, "The weak-instrument test")
-    return _uncached(_resolve_clusters(m.vcov_estimator, m))
+    k = m.vcov_estimator
+    if k isa _LeverageHR
+        dof_fes(m) == 0 || throw(ArgumentError(
+            "The weak-instrument test with $(nameof(typeof(k))) needs the leverage of the " *
+            "first-stage regression, which is not computed for a model with absorbed fixed " *
+            "effects. Use HC0 or HC1, or enter the fixed effects as dummy regressors."))
+        return k
+    end
+    _kp_supported(k) || throw(ArgumentError(
+        "The weak-instrument test is not defined for $(nameof(typeof(k))). It supports " *
+        "Uncorrelated, HC0–HC5, CR0, CR1 (any number of cluster dimensions) and the HAC " *
+        "kernels (Bartlett, Parzen, QuadraticSpectral, TukeyHanning, Truncated). Use, for " *
+        "example, `m + vcov(HC1())`."))
+    return _uncached(_resolve_clusters(k, m))
 end
+
+# The leverage `h` of a first-stage design with `ncoef` columns, for
+# `CovarianceMatrices.residual_adjustment`.
+struct _LeverageDesign{T} <: StatsAPI.RegressionModel
+    h::Vector{T}
+    ncoef::Int
+end
+CovarianceMatrices.leverage(d::_LeverageDesign) = d.h
+CovarianceMatrices.numobs(d::_LeverageDesign) = length(d.h)
+StatsAPI.coef(d::_LeverageDesign) = zeros(d.ncoef)
+
+# The row weights of the moments and the estimator of their variance: for HC2–HC5, the
+# residual adjustment of the estimator at the leverage of the design `[Q_exo Zs]`
+# (orthonormal columns `Q_exo`, and `Zs` with `Zs'Zs = S·I` and orthogonal to `Q_exo`),
+# with HC0 on the rescaled moments; for any other estimator, no weights.
+function _moment_weights(k::_LeverageHR, Q_exo, Zs, S)
+    h = vec(sum(abs2, Zs; dims = 2)) ./ S
+    Q_exo === nothing || (h .+= vec(sum(abs2, Q_exo; dims = 2)))
+    ncoef = size(Zs, 2) + (Q_exo === nothing ? 0 : size(Q_exo, 2))
+    a = CovarianceMatrices.residual_adjustment(k, _LeverageDesign(h, ncoef))
+    return a, CovarianceMatrices.HR0()
+end
+_moment_weights(k, Q_exo, Zs, S) = (true, k)
 
 # The first-stage regression of a matrix-fitted IV model `m`: `ncoef` counts the
 # exogenous regressors and the excluded instruments, and the fixed effects absorbed in
@@ -249,6 +293,7 @@ function _weakivtest_core(
         vcov_est, level::T, eps::T, benchmark::Symbol
 ) where {T}
     # Step 1: Partial out exogenous regressors from y and Xendo
+    Q_exo = nothing
     if k_exo > 0
         QR_exo = qr(Xexo)
         Q_exo = Matrix(QR_exo.Q)
@@ -266,6 +311,8 @@ function _weakivtest_core(
     # F_eff is NOT basis-invariant, so we must match Stata's scaling.
     QR_Z = qr(Z_res)
     Zs = Matrix(QR_Z.Q)[:, 1:K] .* sqrt(T(S))  # n × K, orthogonal, Zs'Zs = S*I
+    # Row weights of every moment matrix below, and the estimator of their variance.
+    weights, meat_est = _moment_weights(vcov_est, Q_exo, Zs, S)
 
     # Step 3: Reduced-form regressions (noconstant, Zs orthogonal with Zs'Zs = S*I)
     pihat = (Zs' * Xendo_demeaned) ./ T(S)   # K × 1
@@ -289,8 +336,9 @@ function _weakivtest_core(
         # Ω ⊗ Zs'Zs/S, and Zs'Zs/S = I.
         kron(Omega, Matrix{T}(I, K, K))
     else
-        M_stacked = hcat(res_y .* Zs, res_endo .* Zs)  # n × 2K
-        T(_kp_factor(vcov_est, fs)) .* _weakiv_meat(M_stacked, vcov_est) ./ S
+        M_stacked = hcat(res_y .* Zs, res_endo .* Zs) .* weights  # n × 2K
+        factor = vcov_est isa _LeverageHR ? one(T) : T(_kp_factor(vcov_est, fs))
+        factor .* _weakiv_meat(M_stacked, meat_est) ./ S
     end  # 2K × 2K
 
     omega_22 = Omega[2, 2]
@@ -325,7 +373,7 @@ function _weakivtest_core(
     # Step 9: Compute standard errors
     # TSLS SE
     res_tsls = y_res .- Xendo_demeaned .* btsls_val
-    S_1tsls = _weakiv_compute_avar_residuals(res_tsls, Zs, vcov_est, S)
+    S_1tsls = _weakiv_compute_avar_residuals(res_tsls .* weights, Zs, meat_est, S)
     sebtsls_val = sqrt(
         (1 / pipi) * dot(pihat, S_1tsls * pihat) * (1 / pipi) / S
     )
@@ -334,7 +382,7 @@ function _weakivtest_core(
     res_liml = y_res .- Xendo_demeaned .* bliml_val
     is_robust = !_is_homoskedastic(vcov_est)
     if is_robust
-        S_1liml = _weakiv_compute_avar_residuals(res_liml, Zs, vcov_est, S)
+        S_1liml = _weakiv_compute_avar_residuals(res_liml .* weights, Zs, meat_est, S)
         sebliml_val = sqrt(
             (1 / limlden) * dot(pihat, S_1liml * pihat) * (1 / limlden) / S
         )
@@ -345,7 +393,7 @@ function _weakivtest_core(
 
     # GMMf SE
     res_gmmf = y_res .- Xendo_demeaned .* bgmmf_val
-    S_1gmmf = _weakiv_compute_avar_residuals(res_gmmf, Zs, vcov_est, S)
+    S_1gmmf = _weakiv_compute_avar_residuals(res_gmmf .* weights, Zs, meat_est, S)
     piW2invpi = dot(pihat, piW2inv)
     sebgmmf_val = sqrt(
         (1 / piW2invpi) * dot(piW2inv, S_1gmmf * piW2inv) * (1 / piW2invpi) / S
