@@ -108,3 +108,38 @@ end
         @test leverage(mm) ≈ leverage(Regress.ols(X[:, 1:3], df.y)) rtol = 1e-10
     end
 end
+
+@testitem "IV covariances with collinear exogenous columns" tags = [:iv, :vcov] begin
+    using DataFrames, Regress, StableRNGs
+    using CovarianceMatrices: HC1, HC3, Bartlett, NeweyWest, EWC
+    using StatsBase: coef, stderror, vcov
+
+    rng = StableRNG(11)
+    n = 200
+    z, w = randn(rng, n), randn(rng, n)
+    x = 0.5 .* z .+ 0.3 .* w .+ randn(rng, n)
+    y = 0.3 .* x .+ w .+ randn(rng, n)
+    df = DataFrame(; y, x, z, w, w2 = 2 .* w)
+    Zm, Xm = [ones(n) w 2 .* w z], [ones(n) w 2 .* w x]
+
+    # A post-estimation covariance has NaN for the dropped column and equals the
+    # covariance of the model without it elsewhere, in the formula and matrix APIs.
+    for est in (Regress.TSLS(), Regress.Fuller(1.0)),
+        k in (HC1(), HC3(), Bartlett{NeweyWest}(), EWC(8))
+
+        dup = Regress.iv(est, df, @formula(y ~ w + w2 + (x ~ z)); save = :all) + vcov(k)
+        clean = Regress.iv(est, df, @formula(y ~ w + (x ~ z)); save = :all) + vcov(k)
+        mat = Regress.iv(est, Zm, Xm, y; n_endogenous = 1) + vcov(k)
+        keep = [1, 2, 4]
+        for m in (dup, mat)
+            V = vcov(m)
+            @test size(V) == (4, 4)
+            @test all(isnan, V[3, :]) && all(isnan, V[:, 3])
+            @test V[keep, keep] ≈ vcov(clean) rtol = 1e-8
+            @test stderror(m)[keep] ≈ stderror(clean) rtol = 1e-8
+        end
+        @test Regress.first_stage(mat).F_robust ≈ Regress.first_stage(clean).F_robust rtol = 1e-8
+        k isa EWC && continue
+        @test Regress.weakivtest(mat).F_eff ≈ Regress.weakivtest(clean).F_eff rtol = 1e-8
+    end
+end
