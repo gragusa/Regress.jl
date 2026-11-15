@@ -6,7 +6,7 @@ on:
       - master
 
 permissions:
-  pull-requests: write
+  contents: read
 
 jobs:
   benchmark:
@@ -22,6 +22,8 @@ jobs:
         with:
           julia-version: '1'
           tune: 'false'
+          # Fork pull requests have read-only tokens (see #25).
+          job-summary: 'true'
           # The pull request's own script, run on both revisions, with the packages it
           # loads besides Regress and BenchmarkTools (which AirspeedVelocity adds).
           # benchmark/run_asv.jl uses the same list.
