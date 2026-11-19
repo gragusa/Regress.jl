@@ -587,76 +587,10 @@ function top(m::OLSEstimator)
     return out
 end
 
-import StatsBase: NoQuote, PValue
 function Base.show(io::IO, m::OLSEstimator)
-    ct = coeftable(m)
-    cols = ct.cols
-    rownms = ct.rownms
-    colnms = ct.colnms
-    nc = length(cols)
-    nr = length(cols[1])
-    if length(rownms) == 0
-        rownms = [lpad("[$i]", floor(Integer, log10(nr))+3) for i in 1:nr]
-    end
-    mat = [j == 1 ? NoQuote(rownms[i]) :
-           j-1 == ct.pvalcol ? NoQuote(sprint(show, PValue(cols[j - 1][i]))) :
-           j-1 in ct.teststatcol ? TestStat(cols[j - 1][i]) :
-           cols[j - 1][i] isa AbstractString ? NoQuote(cols[j - 1][i]) : cols[j - 1][i]
-           for i in 1:nr, j in 1:(nc + 1)]
-    io = IOContext(io, :compact=>true, :limit=>false)
-    A = Base.alignment(io, mat, 1:size(mat, 1), 1:size(mat, 2),
-        typemax(Int), typemax(Int), 3)
-    nmswidths = pushfirst!(length.(colnms), 0)
-    A = [nmswidths[i] > sum(A[i]) ? (A[i][1]+nmswidths[i]-sum(A[i]), A[i][2]) : A[i]
-         for i in 1:length(A)]
-    totwidth = compute_table_width(A, colnms)
-
-    # Title: OLS, right-aligned, yellow
-    ctitle = "OLS"
-    if supports_color(io)
-        print(io,
-            lpad(ANSI_YELLOW * ctitle * ANSI_RESET,
-                totwidth - 2 + length(ANSI_YELLOW) + length(ANSI_RESET)))
-    else
-        print(io, lpad(ctitle, totwidth - 2))
-    end
-    ctop = top(m)
-    for i in 1:size(ctop, 1)
-        ctop[i, 1] = ctop[i, 1] * ":"
-    end
-    println(io)
-    println_horizontal_line(io, totwidth)
-    halfwidth = div(totwidth, 2) - 1
-    interwidth = 2 + mod(totwidth, 2)
-    for i in 1:(div(size(ctop, 1) - 1, 2) + 1)
-        print(io, ctop[2 * i - 1, 1])
-        print(io, lpad(ctop[2 * i - 1, 2], halfwidth - length(ctop[2 * i - 1, 1])))
-        print(io, " " ^ interwidth)
-        if size(ctop, 1) >= 2*i
-            print(io, ctop[2 * i, 1])
-            print(io, lpad(ctop[2 * i, 2], halfwidth - length(ctop[2 * i, 1])))
-        end
-        println(io)
-    end
-
-    println_horizontal_line(io, totwidth)
-    print(io, repeat(' ', sum(A[1])))
-    for j in 1:length(colnms)
-        print(io, "  ", lpad(colnms[j], sum(A[j + 1])))
-    end
-    println(io)
-    println_horizontal_line(io, totwidth)
-    for i in 1:size(mat, 1)
-        Base.print_matrix_row(io, mat, A, i, 1:size(mat, 2), "  ")
-        i != size(mat, 1) && println(io)
-    end
-    println(io)
-    println_horizontal_line(io, totwidth)
-
-    # Note: variance-covariance type
     vcov_name = vcov_type_name(m.vcov_estimator, vcov(m))
-    println(io, "Note: Std. errors computed using $vcov_name variance estimator")
-    nothing
+    print_regression(io, "OLS", top(m), coeftable(m),
+        "Note: Std. errors computed using $vcov_name variance estimator")
 end
 
 function Base.show(io::IO, ::MIME"text/html", m::OLSEstimator)

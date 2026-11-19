@@ -124,3 +124,22 @@ end
     @test sprint(show, Fuller(4.0)) == "Fuller(4.0)"
     @test sprint(show, KClass(0.5)) == "KClass(0.5)"
 end
+
+@testitem "OLS and IV show fit the display width" tags = [:ols, :iv, :show] begin
+    using Regress, DataFrames, CSV, StatsBase
+
+    df = DataFrame(CSV.File(joinpath(dirname(pathof(Regress)), "../dataset/Cigar.csv")))
+    models = (Regress.ols(df, @formula(Sales ~ NDI + CPI + Pop)),
+        Regress.iv(TSLS(), df, @formula(Sales ~ CPI + (Price ~ Pimin))))
+    for m in models
+        wide = sprint(show, m; context = :displaysize => (24, 200))
+        @test occursin("Lower 95%", wide)
+        @test !occursin("omitted", wide)
+
+        narrow = sprint(show, m; context = :displaysize => (24, 60))
+        @test all(l -> length(l) <= 60, split(narrow, '\n'))
+        @test !occursin("Lower 95%", narrow)
+        @test occursin("Pr(>|t|)", narrow)
+        @test occursin("Confidence intervals omitted", narrow)
+    end
+end

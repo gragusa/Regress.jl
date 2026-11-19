@@ -6,6 +6,8 @@
 ##
 ##############################################################################
 
+using StatsBase: NoQuote, PValue
+
 # ANSI color codes for terminal output
 const ANSI_GREEN = "\e[32m"
 const ANSI_YELLOW = "\e[33m"
@@ -288,3 +290,117 @@ end
 # A fixed bandwidth is already in the estimator; reading it back off the
 # estimate would report the same number.
 vcov_type_name(v::CovarianceMatrices.HAC{<:CovarianceMatrices.Fixed}, V) = vcov_type_name(v)
+
+##############################################################################
+##
+## Regression table for text output (OLS and IV estimators)
+##
+##############################################################################
+
+"""
+    coeftable_layout(io::IO, ct::CoefTable) -> (mat, A, width)
+
+Cells of `ct` (row names first), their alignments as returned by
+`Base.alignment`, and the width in characters of the printed table.
+"""
+function coeftable_layout(io::IO, ct::CoefTable)
+    cols, colnms = ct.cols, ct.colnms
+    nc = length(cols)
+    nr = length(cols[1])
+    rownms = isempty(ct.rownms) ?
+             [lpad("[$i]", floor(Integer, log10(nr)) + 3) for i in 1:nr] : ct.rownms
+    mat = [j == 1 ? NoQuote(rownms[i]) :
+           j - 1 == ct.pvalcol ? NoQuote(sprint(show, PValue(cols[j - 1][i]))) :
+           j - 1 in ct.teststatcol ? TestStat(cols[j - 1][i]) :
+           cols[j - 1][i] isa AbstractString ? NoQuote(cols[j - 1][i]) : cols[j - 1][i]
+           for i in 1:nr, j in 1:(nc + 1)]
+    A = Base.alignment(io, mat, 1:size(mat, 1), 1:size(mat, 2),
+        typemax(Int), typemax(Int), 3)
+    nmswidths = pushfirst!(length.(colnms), 0)
+    A = [nmswidths[i] > sum(A[i]) ? (A[i][1] + nmswidths[i] - sum(A[i]), A[i][2]) : A[i]
+         for i in 1:length(A)]
+    return mat, A, compute_table_width(A, colnms)
+end
+
+"""
+    without_confint(ct::CoefTable) -> CoefTable
+
+`ct` without its confidence-interval columns ("Lower …", "Upper …").
+"""
+function without_confint(ct::CoefTable)
+    keep = findall(n -> !(startswith(n, "Lower") || startswith(n, "Upper")), ct.colnms)
+    remap(c) = c == 0 ? 0 : something(findfirst(==(c), keep), 0)
+    return CoefTable(reduce(hcat, ct.cols[keep]), ct.colnms[keep], ct.rownms,
+        remap(ct.pvalcol), remap(ct.teststatcol))
+end
+
+"""
+    print_regression(io::IO, title, ctop::Matrix, ct::CoefTable, note)
+
+Print a fitted regression as text: the title, the summary statistics `ctop`
+(label, value), the coefficient table `ct`, and `note`.
+
+The output fits `displaysize(io)[2]` when it can: if the coefficient table is
+wider, its confidence-interval columns are left out (and the note says so),
+and summary statistics that do not fit two to a line are printed one per line.
+"""
+function print_regression(io::IO, title::AbstractString, ctop::AbstractMatrix,
+        ct::CoefTable, note::AbstractString)
+    available = displaysize(io)[2]
+    io = IOContext(io, :compact => true, :limit => false)
+    mat, A, totwidth = coeftable_layout(io, ct)
+    omitted = false
+    if totwidth > available && any(n -> startswith(n, "Lower"), ct.colnms)
+        ct = without_confint(ct)
+        mat, A, totwidth = coeftable_layout(io, ct)
+        omitted = true
+    end
+    colnms = ct.colnms
+
+    if supports_color(io)
+        print(io,
+            lpad(ANSI_YELLOW * title * ANSI_RESET,
+                totwidth - 2 + length(ANSI_YELLOW) + length(ANSI_RESET)))
+    else
+        print(io, lpad(title, totwidth - 2))
+    end
+    println(io)
+    println_horizontal_line(io, totwidth)
+
+    labels = [string(ctop[i, 1], ":") for i in 1:size(ctop, 1)]
+    values = [string(ctop[i, 2]) for i in 1:size(ctop, 1)]
+    halfwidth = div(totwidth, 2) - 1
+    interwidth = 2 + mod(totwidth, 2)
+    if all(i -> length(labels[i]) + 1 + length(values[i]) <= halfwidth, eachindex(labels))
+        for i in 1:(div(length(labels) - 1, 2) + 1)
+            print(io, labels[2i - 1], lpad(values[2i - 1], halfwidth -
+                                                           length(labels[2i - 1])))
+            if length(labels) >= 2i
+                print(io, " "^interwidth)
+                print(io, labels[2i], lpad(values[2i], halfwidth - length(labels[2i])))
+            end
+            println(io)
+        end
+    else
+        for i in eachindex(labels)
+            println(io, labels[i], lpad(values[i], totwidth - length(labels[i])))
+        end
+    end
+
+    println_horizontal_line(io, totwidth)
+    print(io, repeat(' ', sum(A[1])))
+    for j in 1:length(colnms)
+        print(io, "  ", lpad(colnms[j], sum(A[j + 1])))
+    end
+    println(io)
+    println_horizontal_line(io, totwidth)
+    for i in 1:size(mat, 1)
+        Base.print_matrix_row(io, mat, A, i, 1:size(mat, 2), "  ")
+        i != size(mat, 1) && println(io)
+    end
+    println(io)
+    println_horizontal_line(io, totwidth)
+    println(io, note)
+    omitted && println(io, "Confidence intervals omitted to fit the display width.")
+    nothing
+end
