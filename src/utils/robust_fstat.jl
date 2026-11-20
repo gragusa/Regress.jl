@@ -5,7 +5,7 @@
 ##############################################################################
 
 """
-    compute_robust_fstat(coef, vcov_matrix, has_intercept, dof_residual)
+    compute_robust_fstat(coef, vcov_matrix, has_intercept, dof)
 
 Compute a robust (Wald) F-statistic for testing all non-intercept coefficients = 0.
 
@@ -19,7 +19,9 @@ number of restrictions (coefficients being tested).
 - `coef::Vector{T}`: Coefficient vector
 - `vcov_matrix::AbstractMatrix{T}`: Variance-covariance matrix
 - `has_intercept::Bool`: Whether the model has an intercept (first coef)
-- `dof_residual::Int`: Residual degrees of freedom for p-value computation
+- `dof::Int`: Denominator degrees of freedom of the F distribution of the p-value:
+  `G - 1` for a cluster-robust `vcov_matrix`, the residual degrees of freedom otherwise
+  (see [`inference_dof`](@ref))
 
 # Returns
 - `(F, p)`: Tuple of F-statistic and p-value
@@ -32,7 +34,7 @@ function compute_robust_fstat(
         coef::Vector{T},
         vcov_matrix::AbstractMatrix{T},
         has_intercept::Bool,
-        dof_residual::Int
+        dof::Int
 ) where {T <: AbstractFloat}
     k = length(coef)
 
@@ -65,8 +67,8 @@ function compute_robust_fstat(
     chi2 = beta_test' * (V_chol \ beta_test)
     F = chi2 / q
 
-    # p-value from F distribution with (q, dof_residual) degrees of freedom
-    p = fdistccdf(q, dof_residual, F)
+    # p-value from F distribution with (q, dof) degrees of freedom
+    p = fdistccdf(q, dof, F)
 
     return F, p
 end
@@ -76,11 +78,11 @@ end
 
 Compute robust F-statistic for a fitted regression model.
 
-Extracts coefficients, intercept status, and degrees of freedom from the model.
+Extracts coefficients and intercept status from the model; the degrees of freedom are
+those of tests computed with `vcov_matrix` (see [`inference_dof`](@ref)).
 """
 function compute_robust_fstat(m::StatsAPI.RegressionModel, vcov_matrix::AbstractMatrix{T}) where {T}
     cc = coef(m)
     has_int = hasintercept(formula(m))
-    dof_res = dof_residual(m)
-    return compute_robust_fstat(cc, vcov_matrix, has_int, dof_res)
+    return compute_robust_fstat(cc, vcov_matrix, has_int, _test_dof(m, vcov_matrix))
 end

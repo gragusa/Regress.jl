@@ -1,5 +1,22 @@
 # Changelog
 
+## 0.4.0
+
+### Breaking Changes
+
+- **Tests with cluster-robust standard errors use `G - 1` degrees of freedom.** With
+  `CR0`–`CR3` or `Cluster`, the coefficient p-values and confidence intervals use the t
+  distribution with `G - 1` degrees of freedom, and the F test of all slopes and the
+  robust per-endogenous first-stage F tests use `G - 1` denominator degrees of freedom,
+  where `G` is the number of clusters (with several cluster dimensions, the smallest).
+  They used `dof_residual(model)`. This is R fixest's default (`ssc(t.df = "min")`) and
+  Stata's. Standard errors, `dof_residual` and estimates without clustering are
+  unchanged. The printed summary states the degrees of freedom when they are `G - 1`.
+
+### New Features
+
+- `Regress.inference_dof(model)` returns the degrees of freedom of the t and F tests of a model.
+
 ## 0.3.0
 
 ### Breaking Changes

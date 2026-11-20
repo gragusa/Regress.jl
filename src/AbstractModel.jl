@@ -120,8 +120,39 @@ function StatsAPI.adjr2(model::AbstractRegressModel, variant::Symbol = :deviance
     end
 end
 
+##############################################################################
+##
+## Degrees of freedom of t and F tests
+##
+##############################################################################
+
+"""
+    inference_dof(m) -> Int
+
+Degrees of freedom of the t and F distributions behind the p-values, the confidence
+intervals and the F test of `m`. With cluster-robust standard errors (`CR0`–`CR3`,
+`Cluster`) it is `G - 1`, where `G` is the number of clusters, or the smallest number of
+clusters over several cluster dimensions; this is R fixest's default,
+`ssc(t.df = "min")`. Otherwise it is `dof_residual(m)`.
+"""
+inference_dof(m::AbstractRegressModel) = _test_dof(m, vcov(m))
+
+# Degrees of freedom of the tests of `m` computed with the covariance matrix `V`. The
+# linear and IV models apply `_cluster_test_dof` (utils/covariance.jl); other models,
+# binary-response models among them, keep `dof_residual(m)`.
+_test_dof(m, V) = dof_residual(m)
+
+# `G - 1` for a cluster-robust covariance matrix or estimator `V`, and `dof` otherwise.
+_cluster_test_dof(V, dof) = dof
+function _cluster_test_dof(V::CovarianceMatrix, dof)
+    return _cluster_test_dof(CovarianceMatrices.estimator(V), dof)
+end
+function _cluster_test_dof(k::CovarianceMatrices.CR, dof)
+    minimum(CovarianceMatrices.nclusters(k)) - 1
+end
+
 function StatsAPI.confint(m::AbstractRegressModel; level::Real = 0.95)
-    scale = tdistinvcdf(dof_residual(m), 1 - (1 - level) / 2)
+    scale = tdistinvcdf(inference_dof(m), 1 - (1 - level) / 2)
     se_val = stderror(m)
     coef_val = coef(m)
     hcat(coef_val .- scale .* se_val, coef_val .+ scale .* se_val)
@@ -129,8 +160,9 @@ end
 
 function StatsAPI.confint(ve::CovarianceMatrices.AbstractAsymptoticVarianceEstimator,
         m::AbstractRegressModel; level::Real = 0.95)
-    scale = tdistinvcdf(dof_residual(m), 1 - (1 - level) / 2)
-    se = CovarianceMatrices.stderror(ve, m)
+    V = vcov(ve, m)
+    scale = tdistinvcdf(_test_dof(m, V), 1 - (1 - level) / 2)
+    se = sqrt.(diag(V))
     coef_val = coef(m)
     hcat(coef_val .- scale .* se, coef_val .+ scale .* se)
 end
@@ -149,7 +181,7 @@ function StatsAPI.coeftable(m::AbstractRegressModel; level = 0.95)
     coefnms = String[string(c) for c in coefnames(m)]
 
     # Compute confidence intervals using precomputed se
-    scale = tdistinvcdf(dof_residual(m), 1 - (1 - level) / 2)
+    scale = tdistinvcdf(inference_dof(m), 1 - (1 - level) / 2)
     conf_int = hcat(cc .- scale .* se, cc .+ scale .* se)
 
     # Put (intercept) last if present
@@ -210,17 +242,19 @@ end
 """
     _calculate_vcov_stats(m, vcov_mat)
 
-Helper to calculate stats (se, t_stats, p_values, F) given a new vcov matrix.
+Helper to calculate stats (se, t_stats, p_values, F) given a new vcov matrix. The tests
+use `_test_dof(m, vcov_mat)` degrees of freedom (see [`inference_dof`](@ref)).
 """
 function _calculate_vcov_stats(m::AbstractRegressModel, vcov_mat::AbstractMatrix)
     se = sqrt.(diag(vcov_mat))
     cc = coef(m)
     t_stat = cc ./ se
-    p_val = 2 .* tdistccdf.(dof_residual(m), abs.(t_stat))
+    df = _test_dof(m, vcov_mat)
+    p_val = 2 .* tdistccdf.(df, abs.(t_stat))
 
     # Compute robust F-statistic (Wald test)
     has_int = model_hasintercept(m)
-    F_stat, F_p_val = compute_robust_fstat(cc, vcov_mat, has_int, dof_residual(m))
+    F_stat, F_p_val = compute_robust_fstat(cc, vcov_mat, has_int, df)
 
     return se, t_stat, p_val, F_stat, F_p_val
 end

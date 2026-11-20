@@ -713,3 +713,102 @@ end
         save_cluster = :fe1)
     @test stderror(CR1(:fe1), m_cl1) ≈ SE_CLUSTER_FE1 rtol = RTOL_SE_CLUSTER
 end
+
+@testitem "fixest: inference with cluster-robust standard errors" tags = [
+    :ols, :iv, :validation] begin
+    # With CR1, p-values, confidence intervals and the Wald F test use G - 1 degrees of
+    # freedom (fixest's default ssc(t.df = "min")); with HC1 they use dof_residual.
+    # Reference values from R fixest 0.14.1 (test/validation/fixest_validation.R).
+    using Regress
+    using DataFrames, CSV, CategoricalArrays
+    using StatsBase: coef, stderror, confint, coeftable, dof_residual
+    using Regress: HC1, HC3, CR1, TSLS, fe, inference_dof
+
+    RTOL = 1e-8
+    # p-values below 1e-100 count as zero: fixest reports some of them as exactly 0.
+    close(a, b) = all(isapprox.(a, b; rtol = RTOL, atol = 1e-100))
+
+    df = DataFrame(CSV.File(joinpath(@__DIR__, "validation", "fixest_validation_data.csv")))
+    df.fe1 = categorical(df.fe1)
+    df.fe2 = categorical(df.fe2)
+
+    pvalues(m) = coeftable(m).cols[4]
+
+    # Coefficients x1, x2, endo. Per vcov: t degrees of freedom, p-values, lower and
+    # upper 95% bounds, Wald F of all slopes and its p-value.
+
+    # OLS + fe1
+    REF_OLS_FE1 = Dict(
+        "HC1" => (dof = 977,
+            p = [3.48528183353316e-14, 2.87925175407065e-09, 0.0],
+            lo = [0.311301157014455, 0.198607005162171, 2.22568969729027],
+            hi = [0.524480679608845, 0.391957563520998, 2.37782911047005],
+            F = 1386.72715633561, Fp = 0.0),
+        "cluster_fe1" => (dof = 19,
+            p = [1.07013486731967e-06, 3.99713928556967e-05, 6.61783329236259e-25],
+            lo = [0.293560867531862, 0.178891121809268, 2.237092318095],
+            hi = [0.542220969091438, 0.4116734468739, 2.36642648966532],
+            F = 1868.48165953278, Fp = 1.20121043805327e-23),
+        "cluster_fe1_fe2" => (dof = 9,
+            p = [4.47479080386939e-05, 8.41611175148278e-05, 3.16603361663839e-12],
+            lo = [0.2887218095424, 0.196243989839442, 2.19516587354446],
+            hi = [0.547060027080901, 0.394320578843726, 2.40835293421586],
+            F = 1609.09258390101, Fp = 1.33733248319332e-12)
+    )
+    m_ols_fe1 = Regress.ols(df, @formula(y ~ x1 + x2 + endo + fe(fe1)),
+        save_cluster = [:fe1, :fe2])
+
+    # IV Z_continuous + fe1
+    REF_IV_ZCONT_FE1 = Dict(
+        "HC1" => (dof = 977,
+            p = [6.50777966216878e-17, 2.60461291170612e-09, 3.2561790677419e-112],
+            lo = [0.397920492590315, 0.202059754230213, 1.87696647857667],
+            hi = [0.636465175852473, 0.397951830526416, 2.18627419223868],
+            F = 428.54914112953, Fp = 1.28219948514126e-177),
+        "cluster_fe1" => (dof = 19,
+            p = [2.33385267849314e-06, 4.0768592653215e-05, 5.68442410385204e-16],
+            lo = [0.35434940687578, 0.181552830356515, 1.86093159841103],
+            hi = [0.680036261567008, 0.418458754400113, 2.20230907240432],
+            F = 691.080179253012, Fp = 1.44025312181294e-19),
+        "cluster_fe1_fe2" => (dof = 9,
+            p = [2.60780618882209e-05, 5.1316813783979e-05, 2.44223458635595e-10],
+            lo = [0.367907320166136, 0.205632407537045, 1.87871445256877],
+            hi = [0.666478348276652, 0.394379177219584, 2.18452621824658],
+            F = 6907.70123169775, Fp = 1.91380865926116e-15)
+    )
+    m_iv_Zcont_fe1 = Regress.iv(
+        TSLS(), df, @formula(y ~ x1 + x2 + (endo ~ Z_continuous) + fe(fe1)),
+        save_cluster = [:fe1, :fe2])
+
+    estimators = Dict("HC1" => HC1(), "cluster_fe1" => CR1(:fe1),
+        "cluster_fe1_fe2" => CR1(:fe1, :fe2))
+    for (m, ref) in ((m_ols_fe1, REF_OLS_FE1), (m_iv_Zcont_fe1, REF_IV_ZCONT_FE1))
+        names = replace.(coefnames(m), "fit_" => "")
+        idx = [findfirst(==(c), names) for c in ("x1", "x2", "endo")]
+        for (vt, k) in estimators
+            r = ref[vt]
+            mk = m + vcov(k)
+            ci = confint(mk)
+            @test inference_dof(mk) == r.dof
+            @test close(pvalues(mk)[idx], r.p)
+            @test ci[idx, 1] ≈ r.lo rtol = RTOL
+            @test ci[idx, 2] ≈ r.hi rtol = RTOL
+            @test mk.F ≈ r.F rtol = RTOL
+            @test close(mk.p, r.Fp)
+            # The interval computed directly from the estimator agrees.
+            @test confint(k, m)[idx, :] ≈ ci[idx, :] rtol = RTOL
+        end
+    end
+
+    # G - 1 is the smallest number of clusters minus one; non-cluster estimators keep
+    # dof_residual, and dof_residual itself does not change.
+    m = m_ols_fe1
+    @test inference_dof(m + vcov(CR1(:fe1))) == 19
+    @test inference_dof(m + vcov(CR1(:fe1, :fe2))) == 9
+    @test inference_dof(m + vcov(HC3())) == dof_residual(m)
+    @test dof_residual(m + vcov(CR1(:fe1))) == dof_residual(m)
+
+    # The printed summary states the degrees of freedom when they are G - 1.
+    @test occursin("t and F tests with G - 1 = 19 dof", sprint(show, m + vcov(CR1(:fe1))))
+    @test !occursin("G - 1", sprint(show, m + vcov(HC1())))
+end

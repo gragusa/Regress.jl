@@ -28,16 +28,22 @@ extract_results <- function(model, model_name, vcov_type, vcov_label) {
     # Get coefficients
     coefs <- coef(model)
 
-    # Get standard errors with specified vcov
-    if (vcov_type == "hetero") {
-        se_vals <- sqrt(diag(vcov(model, vcov = "hetero")))
+    # The specified vcov
+    v <- if (vcov_type == "hetero") {
+        "hetero"
     } else if (vcov_type == "cluster_fe1") {
-        se_vals <- sqrt(diag(vcov(model, vcov = ~fe1)))
+        ~fe1
     } else if (vcov_type == "cluster_twoway") {
-        se_vals <- sqrt(diag(vcov(model, vcov = ~fe1 + fe2)))
+        ~fe1 + fe2
     } else {
-        se_vals <- sqrt(diag(vcov(model)))
+        NULL
     }
+    se_vals <- sqrt(diag(vcov(model, vcov = v)))
+
+    # Inference with fixest's default small-sample settings: t and F tests with
+    # min(G) - 1 degrees of freedom for clustered standard errors (ssc(t.df = "min")).
+    ci <- confint(model, vcov = v)
+    w <- wald(model, vcov = v, print = FALSE)
 
     # Get first-stage F for IV models
     fs_F <- NA
@@ -57,6 +63,14 @@ extract_results <- function(model, model_name, vcov_type, vcov_label) {
         coef_name = coef_names,
         coef_value = as.numeric(coefs),
         se = as.numeric(se_vals),
+        pvalue = as.numeric(pvalue(model, vcov = v)),
+        ci_low = ci[, 1],
+        ci_high = ci[, 2],
+        t_df = degrees_freedom(model, "t", vcov = v),
+        wald_stat = w$stat,
+        wald_p = w$p,
+        wald_df1 = w$df1,
+        wald_df2 = w$df2,
         nobs = nobs(model),
         r2 = r2(model, "r2"),
         first_stage_F = fs_F

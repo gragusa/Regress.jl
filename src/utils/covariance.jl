@@ -956,8 +956,9 @@ end
 
 function StatsAPI.confint(ve::CovarianceMatrices.AbstractAsymptoticVarianceEstimator,
         m::OLSMatrixEstimator; level::Real = 0.95)
-    scale = tdistinvcdf(StatsAPI.dof_residual(m), 1 - (1 - level) / 2)
-    se = CovarianceMatrices.stderror(ve, m)
+    V = vcov(ve, m)
+    scale = tdistinvcdf(_test_dof(m, V), 1 - (1 - level) / 2)
+    se = sqrt.(diag(V))
     hcat(coef(m) - scale * se, coef(m) + scale * se)
 end
 
@@ -968,6 +969,19 @@ end
 ##############################################################################
 
 const RegressModel = Union{OLSEstimator, OLSMatrixEstimator, IVEstimator, IVMatrixEstimator}
+
+# Tests computed with a cluster-robust covariance use `G - 1` degrees of freedom (see
+# `inference_dof`).
+_test_dof(m::RegressModel, V) = _cluster_test_dof(V, dof_residual(m))
+
+# The note under a printed model: the variance estimator, and the degrees of freedom of
+# the t and F tests when they are `G - 1` rather than `dof_residual(m)`.
+function _vcov_note(m::RegressModel)
+    note = "Note: Std. errors computed using $(vcov_type_name(m.vcov_estimator, vcov(m))) " *
+           "variance estimator"
+    df = inference_dof(m)
+    return df == dof_residual(m) ? note : note * "; t and F tests with G - 1 = $df dof"
+end
 
 const _VCOV_KEYWORDS = (:dofadjust, :demean, :prewhite)
 const _AVAR_KEYWORDS = (:demean, :prewhite, :scale)
@@ -1071,6 +1085,10 @@ fixest does: the coefficients, plus, for each absorbed fixed effect, its number 
 levels, or 1 if it is nested in a cluster dimension, minus one for each fixed effect
 after the first. With several cluster dimensions, R `vcovCL` applies `G_d/(G_d-1)` to
 each dimension instead of the uniform `G/(G-1)`.
+
+The p-values, confidence intervals and F test computed with a cluster-robust estimator use
+the t and F distributions with `G - 1` denominator degrees of freedom, as fixest does by
+default (`ssc(t.df = "min")`); see [`inference_dof`](@ref).
 
 # Keywords
 - `dofadjust`: apply the degrees-of-freedom factor that is not part of the estimator's

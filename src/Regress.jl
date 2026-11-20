@@ -95,6 +95,7 @@ public ols, iv, fe, probit, partial_out
 public OLSEstimator, IVEstimator, OLSMatrixEstimator, IVMatrixEstimator
 public AbstractIVEstimator
 public esample
+public inference_dof
 
 # IV Estimators
 export TSLS, LIML, Fuller, KClass

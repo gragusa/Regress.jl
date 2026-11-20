@@ -588,9 +588,7 @@ function top(m::OLSEstimator)
 end
 
 function Base.show(io::IO, m::OLSEstimator)
-    vcov_name = vcov_type_name(m.vcov_estimator, vcov(m))
-    print_regression(io, "OLS", top(m), coeftable(m),
-        "Note: Std. errors computed using $vcov_name variance estimator")
+    print_regression(io, "OLS", top(m), coeftable(m), _vcov_note(m))
 end
 
 function Base.show(io::IO, ::MIME"text/html", m::OLSEstimator)
@@ -631,9 +629,8 @@ function Base.show(io::IO, ::MIME"text/html", m::OLSEstimator)
     html_tbody_end(io)
 
     # Footer with vcov type note
-    vcov_name = vcov_type_name(m.vcov_estimator, vcov(m))
     html_tfoot_start(io; class = "regress-footer")
-    html_row(io, ["Note: Std. errors computed using $vcov_name variance estimator",
+    html_row(io, [_vcov_note(m),
         "", "", "", "", "", ""])
     html_tfoot_end(io)
 

@@ -333,7 +333,7 @@ function _compute_first_stage_fstats_via_ols(
         F_j = chi2 / l
 
         F_stats[j] = F_j
-        p_values[j] = fdistccdf(l, dof_residual_fs, F_j)
+        p_values[j] = fdistccdf(l, _cluster_test_dof(vcov_type, dof_residual_fs), F_j)
     end
 
     return F_stats, p_values
