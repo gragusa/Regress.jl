@@ -95,6 +95,21 @@ The default small-sample correction follows R fixest's formula:
 - Scale: `G/(G-1) * (n-1)/(n-K)`
 - Fixed effects nested in clusters are not counted in K
 
+### Degrees of Freedom of Tests
+
+With cluster-robust standard errors, the p-values and confidence intervals of the
+coefficients use the t distribution with `G - 1` degrees of freedom, and the F test of
+all slopes uses the F distribution with `G - 1` denominator degrees of freedom, where `G`
+is the number of clusters (with several cluster dimensions, the smallest). This is R
+fixest's default, `ssc(t.df = "min")`, and Stata's. Other estimators use
+`dof_residual(model)`. `Regress.inference_dof(model)` returns the degrees of freedom in use:
+
+```julia
+model_cr1 = model + vcov(CR1(:firm))
+Regress.inference_dof(model_cr1)   # number of firms - 1
+dof_residual(model_cr1)    # n - K, unchanged
+```
+
 ## HAC Estimators
 
 Heteroskedasticity and Autocorrelation Consistent (HAC) estimators for time series:

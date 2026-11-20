@@ -30,6 +30,7 @@ LIML
 
 ```@docs
 VcovSpec
+inference_dof
 ```
 
 ## StatsAPI Interface
@@ -56,6 +57,7 @@ All fitted models (`OLSEstimator`, `IVEstimator`) implement the StatsAPI interfa
 | `nobs(model)` | Number of observations |
 | `dof(model)` | Degrees of freedom (model) |
 | `dof_residual(model)` | Degrees of freedom (residual) |
+| `Regress.inference_dof(model)` | Degrees of freedom of the t and F tests: `G - 1` with cluster-robust standard errors, `dof_residual(model)` otherwise |
 | `r2(model)` | R-squared |
 | `adjr2(model)` | Adjusted R-squared |
 | `deviance(model)` | Residual sum of squares |

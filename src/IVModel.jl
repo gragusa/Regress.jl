@@ -1140,9 +1140,7 @@ Base.show(io::IO, x::TestStat) = isnan(x.val) ? print(io, ".") : @printf(io, "%.
 Base.alignment(io::IO, x::TestStat) = (0, length(sprint(show, x, context = io)))
 
 function Base.show(io::IO, m::IVEstimator)
-    vcov_name = vcov_type_name(m.vcov_estimator, vcov(m))
-    print_regression(io, _estimator_name(m), top(m), coeftable(m),
-        "Note: Std. errors computed using $vcov_name variance estimator")
+    print_regression(io, _estimator_name(m), top(m), coeftable(m), _vcov_note(m))
 end
 
 function Base.show(io::IO, ::MIME"text/html", m::IVEstimator)
@@ -1184,9 +1182,8 @@ function Base.show(io::IO, ::MIME"text/html", m::IVEstimator)
     html_tbody_end(io)
 
     # Footer with vcov type note
-    vcov_name = vcov_type_name(m.vcov_estimator, vcov(m))
     html_tfoot_start(io; class = "regress-footer")
-    html_row(io, ["Note: Std. errors computed using $vcov_name variance estimator",
+    html_row(io, [_vcov_note(m),
         "", "", "", "", "", ""])
     html_tfoot_end(io)
 
@@ -1598,7 +1595,7 @@ function Base.:+(m::IVMatrixEstimator{T, E, V1}, v::VcovSpec{V2}) where {T, E, V
     # Recompute t-stats and p-values
     cc = coef(m)
     new_t = cc ./ new_se
-    new_p = 2 .* tdistccdf.(dof_residual(m), abs.(new_t))
+    new_p = 2 .* tdistccdf.(_test_dof(m, new_vcov), abs.(new_t))
 
     return IVMatrixEstimator{T, E, V2, typeof(new_vcov)}(
         m.estimator,
